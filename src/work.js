@@ -74,10 +74,6 @@ export class Work {
           artifacts: JSON.parse(e.artifacts), at: e.created,
         })), nextBefore: more ? items[input.limit - 1].seq : null };
       }
-      if (input.view === 'board') {
-        fail(input.before || input.group || input.status, 'INVALID_QUERY', 'board returns independent first pages; page with group + summary', 400);
-        return { groups: Object.fromEntries(Object.keys(statusGroups).map(group => [group, this.read(principal, { ...input, view: 'summary', group })])) };
-      }
       if (input.view === 'operations') {
         const items = s.all('SELECT rowid,id FROM operations WHERE task_id=? AND rowid<? ORDER BY rowid DESC LIMIT ?',
           task.id, input.before ?? Number.MAX_SAFE_INTEGER, input.limit + 1);
@@ -93,6 +89,10 @@ export class Work {
         workUrl: `${this.publicUrl}/#${task.id}`,
       });
       return result;
+    }
+    if (input.view === 'board') {
+      fail(input.before || input.group || input.status, 'INVALID_QUERY', 'board returns independent first pages; page with group + summary', 400);
+      return { groups: Object.fromEntries(Object.keys(statusGroups).map(group => [group, this.read(principal, { ...input, view: 'summary', group })])) };
     }
     fail(input.view !== 'summary', 'INVALID_QUERY', 'Select taskId for detail/events/operations', 400);
     const where = []; const args = [];

@@ -204,3 +204,20 @@ test('HTTP rejects anonymous tasks, forged roles, hostile origin and unknown inp
   assert.equal((await inject('/api/read', {}, { cookie })).statusCode, 200);
   assert.equal((await inject('/api/tools/work_read', {}, { cookie })).statusCode, 401);
 });
+test('dashboard has independent lane pagination and recent activity order', async t => {
+  const f = fixture(t), first = await f.dispatch(), id = first.task.taskId;
+  await f.dispatch({ workstream: 'second', idempotencyKey: 'dispatch-002' });
+  const owner = f.owner(id);
+  await f.w.execute(owner, 'work_report', { taskId: id, goalVersion: 1, kind: 'accepted', summary: 'active', idempotencyKey: 'accept-001' });
+  const board = await f.w.execute(f.caller, 'work_read', { view: 'board', limit: 1 });
+  assert.equal(board.groups.working.items[0].taskId, id);
+  assert.ok(board.groups.working.nextBefore);
+  assert.deepEqual(board.groups.closed.items, []);
+  const older = await f.w.execute(f.caller, 'work_read', { group: 'working', before: board.groups.working.nextBefore, limit: 1 });
+  assert.equal(older.items.length, 1);
+  assert.notEqual(older.items[0].taskId, id);
+  await f.w.execute(owner, 'work_report', { taskId: id, goalVersion: 1, kind: 'needs_decision', summary: 'fixture decision', idempotencyKey: 'decision-001' });
+  const next = await f.w.execute(f.caller, 'work_read', { view: 'board' });
+  assert.equal(next.groups.decision.items[0].taskId, id);
+  assert.equal(next.groups.working.items.length, 1);
+});
