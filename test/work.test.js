@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, copyFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, copyFileSync, writeFileSync, readFileSync } from 'node:fs';
 import { backup } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Store, readCredential, WorkError } from '../src/store.js';
+import { Store, readCredential, WorkError, hash } from '../src/store.js';
+import { stageManifest, loadManifest, planImport, applyImport } from '../src/migration.js';
+import { cutoverLedger } from '../src/cutover.js';
 import { Work } from '../src/work.js';
 import { EffectUnknown } from '../src/cockpit.js';
 import { createApp } from '../src/server.js';
@@ -258,4 +260,183 @@ test('online backup restores versions, task ownership, credentials and idempoten
     assert.equal(restored.task(id).owner, a.task.ownerSessionId);
     assert.equal(restored.get('SELECT count(*) n FROM events').n, before);
   } finally { restored.close(); }
+});
+test('one-line backlog registration, edits and dispositions have zero native effects', async t => {
+  const f = fixture(t), input = { action: 'create', title: 'Maybe build this later', idempotencyKey: 'record-create-001' };
+  const a = await f.w.execute(f.caller, 'work_record', input);
+  const b = await f.w.execute(f.caller, 'work_record', input);
+  assert.equal(a.task.taskId, b.task.taskId); assert.equal(a.task.goalVersion, 0);
+  assert.equal(f.s.get('SELECT count(*) n FROM versions').n, 0);
+  const updated = await f.w.execute(f.caller, 'work_record', {
+    action: 'update', taskId: a.task.taskId, recordRevision: 1, title: 'Actually do Y later',
+    disposition: 'deferred', reason: 'User chose later', idempotencyKey: 'record-update-001',
+  });
+  assert.equal(updated.task.goalVersion, 0); assert.equal(updated.task.recordRevision, 2);
+  assert.equal((await f.w.execute(f.caller, 'work_read', { view: 'board' })).groups.deferred.items[0].taskId, a.task.taskId);
+  await assert.rejects(f.w.execute(f.caller, 'work_record', {
+    action: 'update', taskId: a.task.taskId, recordRevision: 1, title: 'Stale overwrite', idempotencyKey: 'record-stale-001',
+  }), { code: 'STALE_RECORD' });
+  await f.w.execute(f.caller, 'work_record', {
+    action: 'update', taskId: a.task.taskId, recordRevision: 2, disposition: 'abandoned', reason: 'Not pursuing',
+    idempotencyKey: 'record-abandon-001',
+  });
+  assert.equal((await f.w.execute(f.caller, 'work_read', {})).items.length, 0);
+  assert.equal((await f.w.execute(f.caller, 'work_read', { includeClosed: true, query: 'Actually' })).items.length, 1);
+  assert.equal(f.c.calls.length, 0); assert.equal(f.s.get('SELECT count(*) n FROM operations').n, 0);
+});
+test('starting a backlog preserves task ID, serializes retries and protects active authorization from metadata', async t => {
+  const f = fixture(t);
+  const a = await f.w.execute(f.caller, 'work_record', { action: 'create', title: 'One goal', idempotencyKey: 'record-create-001' });
+  const input = { selection: 'new', taskId: a.task.taskId, recordRevision: 1, goal, cwd: f.dir, workstream: 'backlog-start', idempotencyKey: 'backlog-start-001' };
+  const [first, second] = await Promise.all([f.w.execute(f.caller, 'work_dispatch', input), f.w.execute(f.caller, 'work_dispatch', input)]);
+  assert.equal(first.task.taskId, a.task.taskId); assert.equal(second.task.taskId, a.task.taskId);
+  assert.equal(first.task.goalVersion, 1); assert.equal(f.c.calls.filter(c => c.name === 'session/new').length, 1);
+  const owner = f.owner(a.task.taskId);
+  await f.w.execute(owner, 'work_report', { taskId: a.task.taskId, goalVersion: 1, kind: 'accepted', summary: 'Accepted', idempotencyKey: 'backlog-accept-001' });
+  const metadata = await f.w.execute(f.caller, 'work_record', {
+    action: 'update', taskId: a.task.taskId, recordRevision: first.task.recordRevision, title: 'Better label',
+    notes: 'Only metadata, same goal', idempotencyKey: 'active-label-001',
+  });
+  assert.equal(metadata.task.goalVersion, 1); assert.equal(f.s.task(a.task.taskId).accepted_version, 1);
+  await assert.rejects(f.w.execute(f.caller, 'work_record', {
+    action: 'update', taskId: a.task.taskId, recordRevision: metadata.task.recordRevision,
+    disposition: 'abandoned', reason: 'Try closing an active owner', idempotencyKey: 'active-close-001',
+  }), { code: 'EXECUTION_PROTECTED' });
+});
+test('backlog dispatch unknown retains same task and owner and never becomes an editable unstarted record', async t => {
+  const f = fixture(t), a = await f.w.execute(f.caller, 'work_record', { action: 'create', title: 'Later', idempotencyKey: 'record-create-001' });
+  f.c.failure = { name: 'prompt', error: new EffectUnknown('after send') };
+  const first = await f.w.execute(f.caller, 'work_dispatch', {
+    selection: 'new', taskId: a.task.taskId, recordRevision: 1, goal, cwd: f.dir, idempotencyKey: 'backlog-start-001',
+  });
+  assert.equal(first.operation.status, 'unknown');
+  assert.equal(first.task.taskId, a.task.taskId); assert.ok(first.task.ownerSessionId);
+  await assert.rejects(f.w.execute(f.caller, 'work_record', {
+    action: 'update', taskId: a.task.taskId, recordRevision: first.task.recordRevision, disposition: 'deferred', reason: 'Not a stop command',
+    idempotencyKey: 'unknown-defer-001',
+  }), { code: 'EXECUTION_PROTECTED' });
+});
+function migrationFixture(f, entries, filename = 'legacy-source.txt') {
+  const source = join(f.dir, filename);
+  writeFileSync(source, JSON.stringify(entries));
+  const file = join(f.dir, 'manifest.json');
+  writeFileSync(file, JSON.stringify({
+    namespace: 'fixture-ledger', files: [{ path: source, sha256: hash(JSON.stringify(entries)) }],
+    entries: entries.map((entry, i) => ({
+      sourceKey: `row-${i}`, workstream: `legacy-${i}`, title: `Legacy ${i}`, ownerRef: 'same-old-owner',
+      callerRef: 'historical-caller', observedAt: '2026-09-10 source observation', observedState: 'working',
+      summary: 'Historical record, not fresh runtime state', notes: 'No deployment authorization',
+      raw: { original: `complete original record ${i}` }, artifacts: [], supersedes: [], ...entry,
+    })),
+  }));
+  const { manifestId } = stageManifest(f.dir, file);
+  return loadManifest(f.dir, manifestId);
+}
+function importFixture(f, manifest) {
+  const plan = planImport(f.s, manifest, f.caller.session_id);
+  return f.s.tx(() => applyImport(f.s, manifest, f.caller.session_id, plan.planHash));
+}
+test('legacy import preserves repeated historical owners, original sources and credential state without execution', async t => {
+  const f = fixture(t), beforeCredentials = f.s.get('SELECT count(*) n FROM credentials').n;
+  const manifest = migrationFixture(f, [{ observedState: 'deferred' }, { observedState: 'done' }]);
+  const first = importFixture(f, manifest), second = importFixture(f, manifest);
+  assert.equal(first.totalTasks, 2); assert.equal(second.imported, 0); assert.equal(second.unchanged, 2);
+  assert.equal(f.s.get('SELECT count(*) n FROM tasks WHERE owner IS NOT NULL').n, 0);
+  assert.equal(f.s.get('SELECT count(*) n FROM credentials').n, beforeCredentials);
+  assert.equal(f.s.get('SELECT count(*) n FROM versions').n, 0);
+  assert.equal(f.s.get('SELECT count(*) n FROM operations').n, 0);
+  assert.equal(f.c.calls.length, 0);
+  const detail = await f.w.execute(f.caller, 'work_read', { workstream: 'legacy-0', view: 'detail' });
+  assert.equal(detail.goal, null); assert.equal(detail.ownerSessionId, null);
+  assert.equal(detail.legacy.ownerRef, 'same-old-owner');
+  assert.equal(detail.callerSessionId, 'caller-fixture'); assert.equal(detail.legacy.callerRef, 'historical-caller');
+  assert.equal((await f.w.execute(f.caller, 'work_read', { taskId: detail.taskId, view: 'sources' })).items[0].raw.original, 'complete original record 0');
+  assert.equal((await f.w.execute(f.caller, 'work_read', { view: 'board' })).groups.deferred.items.length, 1);
+});
+test('import source differences and local late receipts cannot be silently overwritten', async t => {
+  const f = fixture(t), manifest = migrationFixture(f, [{}]), imported = importFixture(f, manifest);
+  const id = imported.tasks[0].taskId;
+  await f.w.execute(f.caller, 'work_observe', {
+    taskId: id, recordRevision: 1, observedState: 'deferred', observedAt: '2026-09-10 22:20',
+    summary: 'Code delivered, deployment explicitly paused', notes: 'Do not deploy', source: 'Caller received exact owner final receipt',
+    updateCurrent: true, reason: 'Receipt is for the currently authorized code-only scope; publishing is still paused',
+    idempotencyKey: 'legacy-receipt-001',
+  });
+  const changed = migrationFixture(f, [{ summary: 'Changed older source would overwrite receipt' }]);
+  const plan = planImport(f.s, changed, f.caller.session_id);
+  assert.equal(plan.conflicts.length, 1);
+  assert.throws(() => f.s.tx(() => applyImport(f.s, changed, f.caller.session_id, plan.planHash)), { code: 'IMPORT_CONFLICT' });
+  assert.equal(f.s.task(id).summary, 'Code delivered, deployment explicitly paused');
+  assert.throws(() => planImport(f.s, manifest, f.caller.session_id), { code: 'SOURCE_CHANGED' });
+  assert.equal(f.c.calls.length, 0);
+});
+test('legacy continuation explicitly adopts original owner; old receipts never overwrite adopted authorization', async t => {
+  const f = fixture(t), manifest = migrationFixture(f, [{}]), imported = importFixture(f, manifest);
+  const id = imported.tasks[0].taskId;
+  await assert.rejects(f.w.execute(f.caller, 'work_dispatch', {
+    selection: 'new', taskId: id, recordRevision: 1, goal, cwd: f.dir, idempotencyKey: 'legacy-replace-001',
+  }), { code: 'ORIGINAL_OWNER_REQUIRED' });
+  f.c.sessions.set('same-old-owner', { loaded: true, status: 'idle', currentModelId: 'gpt-6-astra' });
+  const result = await f.w.execute(f.caller, 'work_dispatch', {
+    selection: 'adopt', taskId: id, recordRevision: 1, goal, idempotencyKey: 'legacy-adopt-001',
+  });
+  assert.equal(result.operation.status, 'succeeded'); assert.equal(result.task.ownerSessionId, 'same-old-owner');
+  assert.equal(f.c.calls.filter(c => c.name === 'session/new').length, 0);
+  await f.w.execute(f.caller, 'work_observe', {
+    taskId: id, recordRevision: result.task.recordRevision, observedState: 'done', observedAt: 'old source date',
+    summary: 'Old research phase done', source: 'Late legacy receipt, not new execution outcome', idempotencyKey: 'legacy-late-receipt-001',
+  });
+  assert.equal(f.s.task(id).status, 'dispatched'); assert.equal(f.s.task(id).version, 1);
+  assert.notEqual(f.s.task(id).summary, 'Old research phase done');
+});
+test('v1 upgrade preserves native IDs, credentials, owner binding and unknown-operation checkpoints', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'wc-upgrade-'));
+  let s = new Store(dir);
+  t.after(() => { s.close(); rmSync(dir, { recursive: true }); });
+  s.run(`INSERT INTO tasks(id,workstream,caller,owner,version,status,summary,active_op,created,updated)
+    VALUES('old-task','old-stream','old-caller','old-owner',1,'active','existing','old-op',1,1)`);
+  s.run(`INSERT INTO operations(id,task_id,version,kind,request,status,step,inflight,steps,created,updated)
+    VALUES('old-op','old-task',1,'dispatch','{}','unknown','prompt',1,'{"create":{"sessionId":"old-owner"}}',1,1)`);
+  const token = s.issue('owner', 'old-owner', 'old-task'), original = s.authenticate(token);
+  s.db.exec(`DROP TABLE legacy_sources; DROP TABLE legacy_records; DROP TABLE import_snapshots;
+    ALTER TABLE tasks DROP COLUMN title; ALTER TABLE tasks DROP COLUMN notes;
+    ALTER TABLE tasks DROP COLUMN record_revision; ALTER TABLE tasks DROP COLUMN disposition;
+    ALTER TABLE tasks DROP COLUMN sources; PRAGMA user_version=1;`);
+  s.close(); s = new Store(dir);
+  assert.equal(s.get('PRAGMA user_version').user_version, 2);
+  assert.equal(s.task('old-task').owner, 'old-owner');
+  assert.equal(s.task('old-task').active_op, 'old-op');
+  assert.deepEqual(s.authenticate(token), original);
+  assert.equal(s.get('SELECT status FROM operations WHERE id=?', 'old-op').status, 'unknown');
+  assert.equal(s.task('old-task').title, 'old-stream');
+});
+test('default legacy receipt registration does not close newer implementation observations', async t => {
+  const f = fixture(t), imported = importFixture(f, migrationFixture(f, [{}]));
+  const id = imported.tasks[0].taskId;
+  await f.w.execute(f.caller, 'work_observe', {
+    taskId: id, recordRevision: 1, observedState: 'done', observedAt: 'older research receipt',
+    summary: 'Research was complete', source: 'Historical stage reply', idempotencyKey: 'legacy-history-only-001',
+  });
+  const task = await f.w.execute(f.caller, 'work_read', { taskId: id });
+  assert.equal(task.legacy.observedState, 'working');
+  assert.equal(task.recordRevision, 2);
+  assert.equal(f.c.calls.length, 0);
+});
+test('ledger cutover preserves original and publishes only a service pointer, with safe replay', t => {
+  const f = fixture(t), manifest = migrationFixture(f, [{}], 'tasks.md');
+  importFixture(f, manifest);
+  const source = manifest.files[0].path, original = readFileSync(source, 'utf8');
+  const result = cutoverLedger(f.s, manifest, source);
+  assert.equal(readFileSync(result.archive, 'utf8'), original);
+  assert.match(readFileSync(source, 'utf8'), /work-commander-cutover:/);
+  assert.equal(cutoverLedger(f.s, manifest, source).alreadyApplied, true);
+  assert.equal(f.c.calls.length, 0);
+});
+test('late source receipt aborts ledger cutover without overwriting the new file', t => {
+  const f = fixture(t), manifest = migrationFixture(f, [{}], 'tasks.md');
+  importFixture(f, manifest);
+  const source = manifest.files[0].path;
+  writeFileSync(source, 'New final receipt arrived while migration was being prepared');
+  assert.throws(() => cutoverLedger(f.s, manifest, source), { code: 'SOURCE_CHANGED' });
+  assert.equal(readFileSync(source, 'utf8'), 'New final receipt arrived while migration was being prepared');
 });

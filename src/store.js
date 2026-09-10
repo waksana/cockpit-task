@@ -29,7 +29,7 @@ export class Store {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     chmodSync(join(this.directory, 'work.db'), 0o600);
     const schema = this.db.prepare('PRAGMA user_version').get().user_version;
-    fail(schema > 1, 'SCHEMA_TOO_NEW', 'Database was written by a newer release', 500);
+    fail(schema > 2, 'SCHEMA_TOO_NEW', 'Database was written by a newer release', 500);
     this.db.exec(`
       BEGIN IMMEDIATE;
       CREATE TABLE IF NOT EXISTS tasks (
@@ -67,9 +67,33 @@ export class Store {
         session_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS events_task_seq ON events(task_id,seq);
-      PRAGMA user_version=1;
       COMMIT;
     `);
+    if (schema < 2) this.tx(() => {
+      this.db.exec(`
+        ALTER TABLE tasks ADD COLUMN title TEXT NOT NULL DEFAULT '';
+        ALTER TABLE tasks ADD COLUMN notes TEXT NOT NULL DEFAULT '';
+        ALTER TABLE tasks ADD COLUMN record_revision INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE tasks ADD COLUMN disposition TEXT NOT NULL DEFAULT 'open';
+        ALTER TABLE tasks ADD COLUMN sources TEXT NOT NULL DEFAULT '[]';
+        UPDATE tasks SET title=workstream;
+        CREATE TABLE legacy_records (
+          task_id TEXT PRIMARY KEY REFERENCES tasks(id), owner_ref TEXT, caller_ref TEXT,
+          observed_at TEXT NOT NULL, observed_state TEXT NOT NULL,
+          summary TEXT NOT NULL, notes TEXT NOT NULL, supersedes TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE import_snapshots (
+          id TEXT PRIMARY KEY, namespace TEXT NOT NULL, files TEXT NOT NULL, created INTEGER NOT NULL
+        );
+        CREATE TABLE legacy_sources (
+          namespace TEXT NOT NULL, source_key TEXT NOT NULL, task_id TEXT NOT NULL REFERENCES tasks(id),
+          content_hash TEXT NOT NULL, baseline_revision INTEGER NOT NULL, raw_record TEXT NOT NULL,
+          snapshot_id TEXT NOT NULL REFERENCES import_snapshots(id),
+          PRIMARY KEY(namespace,source_key)
+        );
+        PRAGMA user_version=2;
+      `);
+    });
   }
   get(sql, ...args) { return this.db.prepare(sql).get(...args); }
   all(sql, ...args) { return this.db.prepare(sql).all(...args); }

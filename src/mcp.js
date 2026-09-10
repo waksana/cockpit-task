@@ -11,12 +11,13 @@ const url = process.env.WORK_URL ?? 'http://127.0.0.1:8790';
 const parsed = new URL(url);
 if (parsed.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)) throw new Error('MCP requires a local work service');
 const credentialRoot = realpathSync(process.env.WORK_CREDENTIAL_DIR ?? join(homedir(), '.local/state/work-commander/credentials'));
-const server = new McpServer({ name: 'work-commander', version: '1.0.0' });
+const server = new McpServer({ name: 'work-commander', version: '1.1.0' });
 for (const [name, schema] of Object.entries(schemas)) {
   server.registerTool(name, {
     description: descriptions[name],
     inputSchema: schema.safeExtend({ credential: z.string().min(1).max(2048).describe('Protected credential FILE PATH issued for your caller/owner scope. Never token contents or a self-claimed session ID.') }),
-    annotations: { readOnlyHint: name === 'work_read', destructiveHint: false, idempotentHint: true, openWorldHint: name !== 'work_read' && name !== 'work_report' && name !== 'work_amend' },
+    annotations: { readOnlyHint: name === 'work_read', destructiveHint: false, idempotentHint: true,
+      openWorldHint: ['work_dispatch', 'work_deliver', 'work_recover'].includes(name) },
   }, async ({ credential, ...input }) => {
     try {
       const path = realpathSync(credential), rel = relative(credentialRoot, path);

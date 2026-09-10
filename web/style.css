@@ -7,7 +7,8 @@ button, input { font: inherit; border-radius: 8px; border: 1px solid #40536a; pa
 button { cursor: pointer; } button:hover { border-color: #62d5b4; } button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid #62d5b4; outline-offset: 3px; }
 button:disabled { opacity: .5; cursor: wait; } a { color: #76d9ff; overflow-wrap: anywhere; } code { overflow-wrap: anywhere; }
 #login { max-width: 520px; margin: 60px auto; padding: 28px; border: 1px solid #293442; border-radius: 16px; background: #141e29; } label, input { display: block; } input { width: 100%; margin: 8px 0 22px; }
-.intro { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; } #columns { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 20px; }
+.intro { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; } #columns { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 20px; }
+#searchForm { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; } #search { flex: 1; min-width: 160px; width: auto; margin: 0; }
 .column { min-width: 0; } .column>h2 { color: #bfd0e1; padding-bottom: 14px; border-bottom: 1px solid #293442; }
 .card { display: block; width: 100%; text-align: left; background: #151f2b; padding: 20px; margin: 14px 0; border: 1px solid #2b394a; border-top: 3px solid #53a9e4; }
 .card h3, .card p { overflow-wrap: anywhere; } .card p { font-size: 14px; color: #c2cfdb; white-space: pre-wrap; } .badge { color: #8ac7f2; font-size: 12px; }

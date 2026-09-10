@@ -23,7 +23,7 @@ test('real MCP stdio client discovers and invokes scoped tools against HTTP serv
   t.after(async () => { await client.close(); await app.close(); store.close(); rmSync(directory, { recursive: true }); });
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 6);
+  assert.equal(tools.tools.length, 9);
   const result = await client.callTool({ name: 'work_read', arguments: { credential } });
   assert.deepEqual(JSON.parse(result.content[0].text), { items: [], nextBefore: null });
   const escaped = await client.callTool({ name: 'work_read', arguments: { credential: '/etc/passwd' } });

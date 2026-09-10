@@ -34,7 +34,9 @@ export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNT
 if systemctl --user is-active --quiet work-commander; then
   systemctl --user stop work-commander
 fi
-node "$release/src/admin.js" backup "$data/backups/pre-$revision-$(date +%s).db"
+if [[ -f "$data/work.db" ]]; then
+  node "$release/src/admin.js" backup "$data/backups/pre-$revision-$(date +%s).db"
+fi
 ln -s "$release" "$root/current-next"
 mv -T "$root/current-next" "$root/current"
 install -m 644 "$release/deploy/work-commander.service" "$HOME/.config/systemd/user/work-commander.service"

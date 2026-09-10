@@ -1,8 +1,9 @@
 const $ = id => document.getElementById(id);
-const labels = { recorded: '待明确投递', dispatched: '已投递，待承接', active: '进行中', blocked: '受阻', needs_decision: '需要用户决定', result_reported: '成果已报告，未交付', delivered: '已交付', failed: '未完成', cancelled: '已取消' };
+const labels = { backlog: '未开工', legacy: '历史记录', recorded: '已授权，待投递', dispatched: '已投递，待承接', active: '进行中', blocked: '受阻', needs_decision: '需要用户决定', result_reported: '成果已报告，未交付', delivered: '已交付', failed: '未完成', cancelled: '已取消' };
+const observedLabels = { backlog: '未开工', working: '执行中（记录）', blocked: '受阻（记录）', decision: '待决定（记录）', deferred: '暂缓 / 待发布', done: '已结束（记录）', cancelled: '已取消（记录）', unknown: '历史状态待确认' };
 const groups = [
-  ['正在做', 'working'], ['受阻', 'blocked'],
-  ['需要决定', 'decision'], ['最近交付 / 结束', 'closed'],
+  ['待办 · 按登记顺序', 'backlog'], ['执行', 'working'], ['受阻', 'blocked'],
+  ['待决定 / 待确认', 'decision'], ['暂缓 / 待发布', 'deferred'], ['完成历史', 'closed'],
 ];
 let stream, pages = {}, refreshBusy = false, dirty = false, detailGeneration = 0;
 function node(tag, text, className) {
@@ -10,6 +11,11 @@ function node(tag, text, className) {
   if (className) el.className = className; return el;
 }
 function error(message) { $('error').textContent = message; $('error').hidden = !message; }
+function stateLabel(task) {
+  const state = task.status === 'legacy' ? observedLabels[task.legacy.observedState] : labels[task.status];
+  const disposition = { deferred: '暂缓', abandoned: '已放弃记录', archived: '已归档' }[task.disposition];
+  return disposition ? `${disposition} · ${state}` : state;
+}
 async function api(path, body) {
   const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const value = await response.json();
@@ -32,7 +38,8 @@ function render() {
     if (!items.length) column.append(node('p', '暂无工作', 'empty'));
     for (const task of items) {
       const card = node('button', undefined, `card ${task.status}`);
-      card.append(node('span', `${labels[task.status]} · v${task.goalVersion}`, 'badge'), node('h3', task.workstream), node('p', task.summary));
+      card.append(node('span', `${stateLabel(task)}${task.goalVersion ? ` · v${task.goalVersion}` : ' · 未建立执行授权'}`, 'badge'), node('h3', task.title || task.workstream), node('p', task.summary));
+      if (task.legacy && !task.ownerSessionId) card.append(node('small', `来源观察：${task.legacy.observedAt}；非实时会话状态`));
       if (task.pendingOperationId) card.append(node('span', '有待处理投递操作', 'attention'));
       card.append(node('small', new Date(task.updatedAt).toLocaleString()));
       card.onclick = () => { location.hash = task.taskId; };
@@ -43,7 +50,7 @@ function render() {
       more.onclick = async () => {
         more.disabled = true;
         try {
-          const next = await api('/api/read', { group, before: page.nextBefore, limit: 10 });
+          const next = await api('/api/read', { group, before: page.nextBefore, limit: 10, ...(page.query ? { query: page.query } : {}) });
           const known = new Set(page.items.map(t => t.taskId));
           page.items.push(...next.items.filter(t => !known.has(t.taskId))); page.nextBefore = next.nextBefore; render();
         } catch (e) { error(e.message); more.disabled = false; }
@@ -65,11 +72,35 @@ async function detail() {
   if (generation !== detailGeneration) return;
   const panel = $('detail'); panel.replaceChildren(); panel.hidden = false;
   const close = node('button', '关闭详情'); close.onclick = () => { location.hash = ''; }; panel.append(close);
-  panel.append(node('h2', task.workstream), node('p', `${labels[task.status]} · 目标 v${task.goalVersion} · 已承接 v${task.acceptedGoalVersion ?? '—'}`));
-  for (const [label, value] of [['目标', task.goal.objective], ['范围', task.goal.scope], ['验收', task.goal.acceptance], ['授权', task.goal.authorization]]) panel.append(node('h3', label), node('p', value, 'longtext'));
+  panel.append(node('h2', task.title || task.workstream), node('p', `${stateLabel(task)} · 记录 r${task.recordRevision} · 目标 v${task.goalVersion} · 已承接 v${task.acceptedGoalVersion ?? '—'}`));
+  panel.append(node('code', task.workstream), node('p', task.notes, 'longtext'));
+  if (task.goal) {
+    for (const [label, value] of [['目标', task.goal.objective], ['范围', task.goal.scope], ['验收', task.goal.acceptance], ['授权', task.goal.authorization]]) panel.append(node('h3', label), node('p', value, 'longtext'));
+  } else panel.append(node('p', '尚无本服务执行授权。登记、暂缓和历史导入均不会启动 owner。'));
+  if (task.legacyDetail) {
+    panel.append(node('h3', '历史观察 · 不冒充服务执行回执'),
+      node('p', `${task.legacy.observedAt} · ${observedLabels[task.legacy.observedState]}`),
+      node('p', task.legacyDetail.summary, 'longtext'), node('p', task.legacyDetail.notes, 'longtext'));
+    const sourceButton = node('button', '查看原始来源');
+    let before;
+    sourceButton.onclick = async () => {
+      sourceButton.disabled = true;
+      try {
+        const page = await api('/api/read', { taskId: id, view: 'sources', limit: 3, ...(before ? { before } : {}) });
+        for (const source of page.items) {
+          const section = node('details'), title = node('summary', `${source.namespace}:${source.sourceKey}`);
+          section.append(title, node('pre', typeof source.raw === 'string' ? source.raw : JSON.stringify(source.raw, null, 2), 'longtext'));
+          panel.insertBefore(section, sourceButton);
+        }
+        before = page.nextBefore; sourceButton.hidden = !before;
+      } catch (e) { error(e.message); } finally { sourceButton.disabled = false; }
+    };
+    panel.append(sourceButton);
+  }
   panel.append(node('h3', '结果入口'));
   for (const value of task.artifacts) panel.append(safeLink(value), node('br'));
   if (task.ownerUrl) panel.append(safeLink(task.ownerUrl, '打开 owner 会话'), node('br'));
+  else if (task.legacyOwnerUrl) panel.append(safeLink(task.legacyOwnerUrl, '历史 owner 引用（未建立执行绑定）'), node('br'));
   panel.append(safeLink(task.callerUrl, '打开讨论会话'));
   panel.append(node('h3', '投递与通知'));
   for (const op of operations.items) panel.append(node('p', `${op.kind} · ${op.status} · ${op.step ?? ''}${op.error ? ` — ${op.error}` : ''}`));
@@ -98,8 +129,10 @@ async function refresh() {
   try {
     do {
       dirty = false;
-      const page = await api('/api/read', { view: 'board', limit: 10 });
+      const query = $('search').value.trim();
+      const page = await api('/api/read', { view: 'board', limit: 10, ...(query ? { query } : {}) });
       pages = page.groups;
+      for (const lane of Object.values(pages)) lane.query = query;
       $('login').hidden = true; $('board').hidden = false; $('logout').hidden = false;
       error(''); render(); await detail();
     } while (dirty);
@@ -131,6 +164,7 @@ $('credentialFile').onchange = async () => {
 };
 $('logout').onclick = async () => { await api('/api/logout', {}); stream?.close(); location.reload(); };
 $('refresh').onclick = refresh;
+$('searchForm').onsubmit = e => { e.preventDefault(); refresh(); };
 window.addEventListener('hashchange', () => detail().catch(e => error(e.message)));
 await refresh();
 if ($('login').hidden) connect();

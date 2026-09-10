@@ -9,9 +9,9 @@
 - 工作页：`http://127.0.0.1:8790/`，需要只读凭证。
 - 服务：`systemctl --user status work-commander`；数据 `~/.local/state/work-commander/`。
 - MCP：`node <安装目录>/src/mcp.js`（stdio），默认连接本机 8790。
-- 文档：[接入和运行](docs/operations.md) · [工具与可靠性边界](docs/contract.md) · [本机实证与限制](docs/acceptance.md)。
+- 文档：[待办与统一记录](docs/backlog.md) · [接入和运行](docs/operations.md) · [工具与可靠性边界](docs/contract.md) · [首版实证](docs/acceptance.md)。
 - 验证：`npm test`；开发启动：`npm start`，同数据目录持有内核独占锁。
 
-新目标用 `work_dispatch`；同目标继续原 task/owner。目标或授权变化先 `work_amend`，再显式继续新版本。owner 通过 `work_report` 报重要事实，完整目标结束才 `work_deliver`。默认 `work_read` 只返回 10 个简表，不查询 Cockpit。
+一句话用 `work_record` 登记待办，零会话副作用；补齐授权后通过 `work_dispatch` 在**同 taskId**开工。同目标继续原 owner。元数据用 recordRevision，执行目标/授权用 goalVersion；只有后者变化才 `work_amend`。owner 报告/交付仍用 `work_report`、`work_deliver`。默认 `work_read` 返回 10 个未结束简表，完成历史按需查，不查询 Cockpit。
 
-**当前范围**：只管理显式创建的新工作。旧 `tasks.md` 不导入、不双写、不自动唤醒旧 owner。单用户本地部署不是同用户恶意 agent 的隔离沙箱。服务内部防冲突，但用户直接聊天仍可与操作并发；现有 Cockpit 宽读取和未知副作用如实暴露，不伪装成分布式原子事务。
+**统一记录**：用户批准的旧任务保留原始来源后迁入，历史 owner/caller 引用与真实执行绑定分离。迁入不派工、不唤醒 owner、不发旧回执；切换后的 Markdown 仅留入口，不再双写状态。旧回执由讨论方 `work_observe` 带来源登记，不能冒充 owner。单用户本地部署不隔离恶意同用户 agent；现有 Cockpit 宽读取和未知副作用仍如实暴露。

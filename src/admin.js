@@ -1,12 +1,15 @@
 import { Store, readCredential, hash, fail } from './store.js';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { mkdirSync, existsSync, readFileSync } from 'node:fs';
-import { backup } from 'node:sqlite';
+import { mkdirSync, existsSync } from 'node:fs';
+import { backup, DatabaseSync } from 'node:sqlite';
+import { stageManifest, loadManifest, planImport, applyImport } from './migration.js';
+import { cutoverLedger } from './cutover.js';
 
 const data = process.env.WORK_DATA_DIR ?? join(homedir(), '.local/state/work-commander');
 const [command, ...args] = process.argv.slice(2);
-const store = new Store(data);
+// A backup must not run schema migrations before capturing the pre-upgrade DB.
+const store = command === 'backup' ? null : new Store(data);
 try {
   if (command === 'issue') {
     const [role, sessionId] = args;
@@ -25,21 +28,24 @@ try {
     fail(!args[0] || existsSync(path), 'INVALID_DESTINATION', 'Supply a new backup filename in a private directory');
     mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
     process.umask(0o077);
-    await backup(store.db, path);
+    const source = new DatabaseSync(join(data, 'work.db'), { readOnly: true });
+    try { await backup(source, path); } finally { source.close(); }
     console.log(JSON.stringify({ backup: path, includes: 'tasks, goal versions, events, operations, credential hashes; also archive credentials directory separately' }));
-  } else if (command === 'migration-preview') {
-    const rows = JSON.parse(readFileSync(args[0], 'utf8'));
-    fail(!Array.isArray(rows) || rows.length > 5000, 'INVALID_MANIFEST', 'Expected an explicit task manifest array, max 5000');
-    const owners = new Set(), streams = new Set();
-    const conflicts = [];
-    for (const row of rows) {
-      if (!row.workstream || !row.ownerSessionId || !row.callerSessionId || !row.goal || !row.authorization) conflicts.push('Missing binding/goal/authorization');
-      if (owners.has(row.ownerSessionId) || streams.has(row.workstream)) conflicts.push(`Duplicate owner/workstream: ${row.workstream}`);
-      if (store.get('SELECT id FROM tasks WHERE owner=? OR workstream=?', row.ownerSessionId ?? '', row.workstream ?? '')) conflicts.push(`Already managed: ${row.workstream}`);
-      owners.add(row.ownerSessionId); streams.add(row.workstream);
+  } else if (command === 'migration-stage') {
+    console.log(JSON.stringify(stageManifest(data, args[0])));
+  } else if (command === 'migration-cutover') {
+    fail(args[2] !== '--confirm', 'CONFIRM_REQUIRED', 'Ledger cutover requires explicit approval');
+    console.log(JSON.stringify(cutoverLedger(store, loadManifest(data, args[0]), args[1])));
+  } else if (command === 'migration-preview' || command === 'migration-apply') {
+    const [manifestId, manager, planHash, confirm] = args;
+    fail(!/^[a-zA-Z0-9_-]{1,120}$/.test(manager ?? ''), 'MANAGER_REQUIRED', 'Explicit management caller session required');
+    const manifest = loadManifest(data, manifestId);
+    if (command === 'migration-preview') console.log(JSON.stringify(planImport(store, manifest, manager)));
+    else {
+      fail(confirm !== '--confirm', 'CONFIRM_REQUIRED', 'Explicit record migration approval required; no execution authorization is inferred');
+      console.log(JSON.stringify(store.tx(() => applyImport(store, manifest, manager, planHash))));
     }
-    console.log(JSON.stringify({ records: rows.length, conflicts, imported: 0, dispatched: 0, next: 'User must approve single-ledger cutover; this release intentionally has no bulk import/dispatch command' }));
   } else {
-    throw new Error('Usage: admin issue caller SESSION_ID | issue viewer | revoke CREDENTIAL_FILE | backup NEW_FILE | migration-preview MANIFEST.json');
+    throw new Error('Usage: admin issue caller SESSION_ID | issue viewer | revoke CREDENTIAL_FILE | backup NEW_FILE | migration-stage MANIFEST.json | migration-preview MANIFEST_ID MANAGER | migration-apply MANIFEST_ID MANAGER PLAN_HASH --confirm');
   }
-} finally { store.close(); }
+} finally { store?.close(); }

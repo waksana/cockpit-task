@@ -85,8 +85,26 @@ node src/admin.js backup /absolute/private/backups/work-YYYYMMDD.db
 
 `work_read(taskId,view:"operations")` 得到具体步骤和真实 owner。failed 可显式 `work_recover` 继续；unknown 要核对实际效果。确认 applied 则跳过该步骤；确认 not_applied 才允许再次尝试。创建 applied 必须提交准确 sessionId。没有通用轮询或自动重试线程，不会每次启动重发消息。
 
-## 旧账本迁移
+## 记录迁移与账本切换（v1.1）
 
-本次不迁移旧工作。`node src/admin.js migration-preview manifest.json` 只验证显式清单中的 workstream/ownerSessionId/callerSessionId/goal/authorization 和冲突，导入/投递都为零，不读取旧聊天。
+仅在用户批准的任务来源范围内操作。清单是 JSON：namespace、files（原绝对路径及 sha256）、entries（稳定 sourceKey、workstream、primary、title、ownerRef/callerRef、observedAt/observedState、summary、notes、原 raw、artifacts、supersedes）；非任务项目概览放 excluded，不制造待执行目标。同 workstream 可保留多个来源，但必须只有一个明确的 primary 当前观察。
 
-正式切换前用户明确选定目标范围，暂停写入旧账本，核对每条授权/暂停/版本/真实 owner/caller，确认一份真相。可将批准的静态记录作为只读历史导入另行实现；绝不能导入即派单、改 caller 或唤醒旧 owner。没有自动批量迁移命令是刻意的权限边界。
+```sh
+node src/admin.js migration-stage /absolute/private/inventory.json
+node src/admin.js migration-preview MANIFEST_ID MANAGEMENT_CALLER_ID
+node src/admin.js migration-apply MANIFEST_ID MANAGEMENT_CALLER_ID PLAN_HASH --confirm
+```
+
+stage 校验原文件哈希并保存完整私有快照，manifestId 是内容哈希。preview 不改任务。apply 要匹配同一完整 planHash；按 namespace/sourceKey 幂等合并，保留本地新增回执/元数据版本，源差异与归属冲突明确拒绝。原生任务/凭证/owner 不会被导入覆盖，同历史 owner 多目标只保留引用。
+
+命令行 apply 是**本机管理操作**，不是获取讨论方 credential 冒充 caller。建议在本服务维护窗口执行，重启后页面重新同步；也可由讨论方 MCP `work_import` preview/apply 在线操作，提交后直接触发页面事件。两条路径都只处理工作数据库/来源文件，零 Cockpit 调用。v1 升 v2 前先在线 backup；backup 命令不提前迁移数据库。安装脚本在停服务、备份后才启动新 schema。
+
+查询核对覆盖与授权后，再切换批准的 tasks.md：
+
+```sh
+node src/admin.js migration-cutover MANIFEST_ID /absolute/workspace/memory/tasks.md --confirm
+```
+
+切换前重查所有源文件哈希和逐条导入状态；将**实际原文件**移到私有只读 archive，再以不覆盖已存在目标的方式原子放入服务入口。若另一写入者修改/重建文件，拒绝完成切换并保留双方内容，不覆盖新回执。DB 导入与文件切换不是跨资源原子事务：中断时保留数据与归档，明确核对后继续，不声称已切换。最终同步相关短指南，旧 Markdown 不再记录状态；快照/归档只作来源。
+
+迁移不派单、不创建会话、不设置模型或 MCP、不改历史 caller 引用、不发旧回执、不取消或重开任何业务。收到旧在途回执走 work_observe；后续执行必须另有完整授权并显式 adopt 原 owner。没有批量“导入并执行”入口。

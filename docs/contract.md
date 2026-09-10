@@ -1,11 +1,14 @@
 # 契约与边界
 
-## 六个工具
+## 九个工具
 
 全部通过同一 MCP。`credential` 是管理员签发的受保护 JSON 文件路径，不是 token 或自报 sessionId。每项变更带稳定 `idempotencyKey`；同 key 同输入返回原操作/结果，换内容返回冲突。字段严格校验；任意命令、目标 caller 重绑定、批量迁移不在 API 中。
 
 | 工具 | 权限 | 关键输入 / 效果 |
 | --- | --- | --- |
+| work_record | caller | create 只需 title；update 用 taskId/recordRevision 修改标题、说明、来源、意向。零 Cockpit；不能停止或关闭活跃执行。 |
+| work_observe | 管理 legacy 的 caller | 带来源登记旧回执，默认只补历史。确认适用当前授权范围才 updateCurrent=true+reason；不能覆盖已 adopt 的执行。零 Cockpit/通知。 |
+| work_import | caller | preview/apply 本地私有 staging 中的 manifestId；apply 要匹配 planHash。原始来源、记录变化和原 owner 引用保留，零派单副作用。 |
 | work_dispatch | caller | new: workstream/goal/cwd；fork: workstream/goal/sourceSessionId/可选 toEventId；continue: taskId/goalVersion/message。模型默认 gpt-6-astra，可显式 reasoningEffort/contextTier。绑定 caller 来自凭证。 |
 | work_read | 作用域内 caller/owner；viewer 全部只读 | 默认 10 简表；board 返回四栏各 10 项，group+before 分栏续页；taskId+detail 获取目标和成果；events/operations 用 before 游标，最多 50。零 Cockpit 读取。 |
 | work_report | 绑定 owner | taskId/goalVersion/kind/summary/artifacts；accepted、progress、blocked、needs_decision、result。无 caller 聊天通知。 |
@@ -15,9 +18,13 @@
 
 goal 的 objective/scope/acceptance/authorization 都必填。服务不将调查扩成实施，不自动判断“两项目标是否同一”，也不能验证成果真实达到验收；这些仍是用户/agent 的责任。
 
+上述完整 goal 仅在**执行派单**时必填。new/fork 带 taskId+recordRevision 可在同一待办上首次开工；adopt 带这两个字段和完整新授权，只绑定导入记录的原 owner 引用。纯登记不强填 goal，参见 [记录语义](backlog.md)。
+
 ## 状态与版本
 
 `recorded → dispatched → active / blocked / needs_decision / result_reported → delivered / failed / cancelled`。
+
+未开工是独立的 `backlog`，历史导入是 `legacy`，两者 goalVersion=0、无 acceptedVersion、无执行绑定。记录 disposition 的 open/deferred/abandoned/archived 不冒充执行状态；active 任务不能由记录编辑关闭。recordRevision 与 goalVersion 分离。
 
 投递操作另有 running/succeeded/failed/unknown；succeeded 仅表示请求得到基础服务受理。owner 要显式 accepted 当前版本才能报告进度或交付。idle 不是任务状态。目标变更将状态置 recorded，必须新版本承接。旧版本新回执返回 STALE_GOAL；旧幂等重放返回原版本结果，不改新版本。失败/取消同样是完整目标结束，不自动重开。
 
@@ -43,7 +50,7 @@ fork 仅使用 Cockpit 正式原生 fork：源须已加载且空闲，拒绝不�
 
 每个操作只保留实际 calls、responseBytes、byIntent，便于测量。**session/get 目前仍是宽接口**，包含原生模型目录、队列等；本项目仅不保存、不回传它们，不能声称底层已经字段投影。没有扫描全历史、轮询同步或缓存原生状态。未来基础服务若提供小型 prepare/get 控制接口，可在独立适配器替换，不加任务语义到 Cockpit MCP。
 
-工作页按任务最近事件排序，四栏独立分页，不让大量已结束任务遮住旧的在途任务。SSE 只发送失效提示，页面按需读本服务数据；断线重连重新读取当前任务，不以漏掉事件为由缓存聊天或轮询原生会话。
+工作页六栏独立分页；待办按登记顺序，其余按最近事件，避免执行进展挤走旧待办。默认查询未结束，完成历史可搜索。SSE 只发送失效提示，页面按需读本服务数据；断线重连重新读取当前任务，不以漏掉事件为由缓存聊天或轮询原生会话。
 
 只保存 tasks、版本化 goal/授权、有限分页可读的 owner 事件、成果入口、凭证哈希和必要操作信息（含原派单参数及恢复声明）。不保存聊天/模型目录/session snapshots；这些不能作为第二份真相。
 

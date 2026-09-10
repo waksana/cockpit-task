@@ -1,12 +1,20 @@
 import { schemas } from './contracts.js';
-import { canonical, fail, hash, now, uid, WorkError } from './store.js';
+import { canonical, fail, hash, now, uid } from './store.js';
 import { EffectUnknown } from './cockpit.js';
+import { loadManifest, planImport, applyImport } from './migration.js';
 
 const terminal = new Set(['delivered', 'failed', 'cancelled']);
-const statusGroups = {
-  working: ['recorded', 'dispatched', 'active', 'result_reported'],
-  blocked: ['blocked'], decision: ['needs_decision'], closed: ['delivered', 'failed', 'cancelled'],
-};
+const groups = ['backlog', 'working', 'blocked', 'decision', 'deferred', 'closed'];
+const groupSql = `CASE
+  WHEN disposition IN ('abandoned','archived') THEN 'closed'
+  WHEN disposition='deferred' THEN 'deferred'
+  WHEN status='legacy' THEN CASE observed_state
+    WHEN 'done' THEN 'closed' WHEN 'cancelled' THEN 'closed'
+    WHEN 'unknown' THEN 'decision' ELSE observed_state END
+  WHEN status='backlog' THEN 'backlog'
+  WHEN status IN ('delivered','failed','cancelled') THEN 'closed'
+  WHEN status='blocked' THEN 'blocked' WHEN status='needs_decision' THEN 'decision'
+  ELSE 'working' END`;
 const busy = meta => meta.status === 'running' || meta.loading || meta.closing || meta.cancelling ||
   meta.compacting || meta.nativeProcessing || meta.activeOperations > 0 || meta.activeMcpOperations > 0 ||
   meta.activeSubagents > 0 || meta.ask || meta.planRequest || meta.elicitation;
@@ -34,10 +42,14 @@ export class Work {
     fail(task.version !== version, 'STALE_GOAL', `Current goal version is ${task.version}; old receipt cannot update it`);
   }
   summary(task) {
+    const legacy = this.store.get('SELECT owner_ref,caller_ref,observed_state,observed_at FROM legacy_records WHERE task_id=?', task.id);
     return {
       taskId: task.id, workstream: task.workstream, goalVersion: task.version,
+      title: task.title, recordRevision: task.record_revision, disposition: task.disposition,
+      recordKind: legacy ? 'imported' : task.version === 0 ? 'backlog' : 'native',
       ownerSessionId: task.owner, callerSessionId: task.caller,
       status: task.status, summary: task.summary, updatedAt: task.updated,
+      ...(legacy ? { legacy: { ownerRef: legacy.owner_ref, callerRef: legacy.caller_ref, observedState: legacy.observed_state, observedAt: legacy.observed_at } } : {}),
       ...(task.active_op ? { pendingOperationId: task.active_op } : {}),
     };
   }
@@ -61,6 +73,12 @@ export class Work {
   }
   read(principal, input) {
     const s = this.store;
+    if (input.workstream) {
+      fail(input.taskId, 'INVALID_QUERY', 'Choose taskId or workstream, not both', 400);
+      const task = s.get('SELECT id FROM tasks WHERE workstream=?', input.workstream);
+      fail(!task, 'NOT_FOUND', 'Workstream not found', 404);
+      input = { ...input, taskId: task.id };
+    }
     if (input.taskId) {
       fail(input.view === 'board', 'INVALID_QUERY', 'board cannot be combined with taskId', 400);
       const task = s.task(input.taskId);
@@ -80,11 +98,22 @@ export class Work {
         return { items: items.slice(0, input.limit).map(op => this.operationSummary(op.id)),
           nextBefore: items.length > input.limit ? items[input.limit - 1].rowid : null };
       }
+      if (input.view === 'sources') {
+        const items = s.all(`SELECT rowid,* FROM legacy_sources WHERE task_id=? AND rowid<?
+          ORDER BY rowid DESC LIMIT ?`, task.id, input.before ?? Number.MAX_SAFE_INTEGER, input.limit + 1);
+        return { items: items.slice(0, input.limit).map(row => ({
+          namespace: row.namespace, sourceKey: row.source_key, snapshotId: row.snapshot_id,
+          sourceHash: row.content_hash, raw: JSON.parse(row.raw_record),
+        })), nextBefore: items.length > input.limit ? items[input.limit - 1].rowid : null };
+      }
       const result = this.summary(task);
       if (input.view === 'detail') Object.assign(result, {
-        goal: JSON.parse(s.get('SELECT goal FROM versions WHERE task_id=? AND version=?', task.id, task.version).goal),
+        goal: task.version ? JSON.parse(s.get('SELECT goal FROM versions WHERE task_id=? AND version=?', task.id, task.version).goal) : null,
+        notes: task.notes, sources: JSON.parse(task.sources),
+        legacyDetail: s.get('SELECT observed_at,observed_state,summary,notes,supersedes FROM legacy_records WHERE task_id=?', task.id) ?? null,
         acceptedGoalVersion: task.accepted_version, artifacts: JSON.parse(task.artifacts),
         ownerUrl: task.owner ? `${this.cockpitWeb}/session/${encodeURIComponent(task.owner)}` : null,
+        legacyOwnerUrl: result.legacy?.ownerRef ? `${this.cockpitWeb}/session/${encodeURIComponent(result.legacy.ownerRef)}` : null,
         callerUrl: `${this.cockpitWeb}/session/${encodeURIComponent(task.caller)}`,
         workUrl: `${this.publicUrl}/#${task.id}`,
       });
@@ -92,7 +121,7 @@ export class Work {
     }
     if (input.view === 'board') {
       fail(input.before || input.group || input.status, 'INVALID_QUERY', 'board returns independent first pages; page with group + summary', 400);
-      return { groups: Object.fromEntries(Object.keys(statusGroups).map(group => [group, this.read(principal, { ...input, view: 'summary', group })])) };
+      return { groups: Object.fromEntries(groups.map(group => [group, this.read(principal, { ...input, view: 'summary', group })])) };
     }
     fail(input.view !== 'summary', 'INVALID_QUERY', 'Select taskId for detail/events/operations', 400);
     const where = []; const args = [];
@@ -100,13 +129,18 @@ export class Work {
     else if (principal.role === 'owner') { where.push('id=? AND owner=?'); args.push(principal.task_id, principal.session_id); }
     else fail(!['viewer', 'admin'].includes(principal.role), 'FORBIDDEN', 'Unknown credential role', 403);
     if (input.status) { where.push('status=?'); args.push(input.status); }
-    if (input.group) {
-      const statuses = statusGroups[input.group];
-      where.push(`status IN (${statuses.map(() => '?').join(',')})`); args.push(...statuses);
+    if (input.group) { where.push('display_group=?'); args.push(input.group); }
+    else if (!input.includeClosed && !input.status) where.push("display_group<>'closed'");
+    if (input.query) {
+      where.push("(instr(lower(title),lower(?))>0 OR instr(lower(workstream),lower(?))>0 OR instr(lower(summary),lower(?))>0 OR instr(lower(notes),lower(?))>0)");
+      args.push(input.query, input.query, input.query, input.query);
     }
     where.push('activity<?'); args.push(input.before ?? Number.MAX_SAFE_INTEGER, input.limit + 1);
     const items = s.all(`SELECT * FROM (
-      SELECT tasks.*, (SELECT MAX(seq) FROM events WHERE task_id=tasks.id) AS activity FROM tasks
+      SELECT tasks.*, ${groupSql} AS display_group,
+      CASE WHEN ${groupSql}='backlog' THEN 9007199254740991-tasks.rowid
+        ELSE (SELECT MAX(seq) FROM events WHERE task_id=tasks.id) END AS activity
+      FROM tasks LEFT JOIN legacy_records ON legacy_records.task_id=tasks.id
     ) WHERE ${where.join(' AND ')} ORDER BY activity DESC LIMIT ?`, ...args);
     return { items: items.slice(0, input.limit).map(t => this.summary(t)),
       nextBefore: items.length > input.limit ? items[input.limit - 1].activity : null };
@@ -126,7 +160,13 @@ export class Work {
         return JSON.parse(previous.response);
       }
       let response;
-      if (name === 'work_dispatch') { response = this.dispatch(principal, input); run = true; }
+      if (name === 'work_record') response = this.record(principal, input);
+      else if (name === 'work_observe') response = this.observe(principal, input);
+      else if (name === 'work_import') {
+        const manifest = loadManifest(this.store.directory, input.manifestId);
+        const plan = planImport(this.store, manifest, principal.session_id);
+        response = input.mode === 'preview' ? plan : applyImport(this.store, manifest, principal.session_id, input.planHash);
+      } else if (name === 'work_dispatch') { response = this.dispatch(principal, input); run = true; }
       else if (name === 'work_recover') { response = this.recover(principal, input); run = true; }
       else {
         const task = this.store.task(input.taskId);
@@ -159,17 +199,95 @@ export class Work {
     fail(lock && lock.operation_id !== opId, 'SESSION_CONFLICT', `Session reserved by operation ${lock?.operation_id}`);
     this.store.run('INSERT OR IGNORE INTO session_locks(session_id,operation_id) VALUES(?,?)', sessionId, opId);
   }
+  recordCurrent(task, revision) {
+    fail(task.record_revision !== revision, 'STALE_RECORD', `Current recordRevision is ${task.record_revision}; reread before editing`);
+  }
+  record(principal, input) {
+    if (input.action === 'create') {
+      const id = uid(), workstream = input.workstream ?? `backlog-${id}`;
+      fail(this.store.get('SELECT id FROM tasks WHERE workstream=?', workstream), 'WORKSTREAM_EXISTS', 'Update the existing record instead');
+      const summary = input.reason ?? input.title;
+      this.store.run(`INSERT INTO tasks(id,workstream,title,caller,version,status,summary,notes,disposition,sources,created,updated)
+        VALUES(?,?,?,?,0,'backlog',?,?,?,?,?,?)`,
+      id, workstream, input.title, principal.session_id, summary, input.notes ?? '', input.disposition ?? 'open', JSON.stringify(input.sources ?? []), now(), now());
+      const task = this.store.task(id);
+      this.store.event(task, 'record_created', summary);
+      return { task: this.summary(task), nativeCalls: 0 };
+    }
+    const task = this.store.task(input.taskId); this.authorize(principal, 'caller', task);
+    this.recordCurrent(task, input.recordRevision);
+    const legacy = this.store.get('SELECT * FROM legacy_records WHERE task_id=?', task.id);
+    if (input.disposition && input.disposition !== task.disposition) {
+      fail(task.active_op || (task.version > 0 && !terminal.has(task.status)), 'EXECUTION_PROTECTED', 'Record disposition cannot stop, defer or close an execution');
+      fail(legacy && !task.owner && ['working', 'blocked', 'decision', 'unknown'].includes(legacy.observed_state),
+        'LEGACY_EXECUTION_PROTECTED', 'Register a sourced legacy observation first; do not silently close a potentially active owner');
+    }
+    if (input.workstream && input.workstream !== task.workstream) {
+      fail(task.version > 0 || legacy, 'STABLE_WORKSTREAM', 'An execution/import workstream cannot be renamed through metadata');
+      fail(this.store.get('SELECT id FROM tasks WHERE workstream=?', input.workstream), 'WORKSTREAM_EXISTS', 'Workstream already exists');
+    }
+    const notes = input.notes ?? task.notes;
+    this.store.run(`UPDATE tasks SET title=?,notes=?,workstream=?,disposition=?,sources=?,record_revision=record_revision+1,updated=? WHERE id=?`,
+      input.title ?? task.title, notes, input.workstream ?? task.workstream, input.disposition ?? task.disposition,
+      JSON.stringify(input.sources ?? JSON.parse(task.sources)), now(), task.id);
+    if (task.status === 'backlog') this.store.run('UPDATE tasks SET summary=? WHERE id=?',
+      input.reason ?? input.title ?? task.summary, task.id);
+    this.store.event(task, 'record_edited', input.reason ?? 'Record metadata updated; execution authorization unchanged');
+    return { task: this.summary(this.store.task(task.id)), nativeCalls: 0 };
+  }
+  observe(principal, input) {
+    const task = this.store.task(input.taskId); this.authorize(principal, 'caller', task);
+    this.recordCurrent(task, input.recordRevision);
+    const legacy = this.store.get('SELECT * FROM legacy_records WHERE task_id=?', task.id);
+    fail(!legacy, 'NOT_LEGACY', 'Native task outcomes must be reported by their bound owner');
+    if (input.updateCurrent) {
+      fail(task.owner || task.version > 0, 'EXECUTION_PROTECTED', 'A legacy receipt cannot update the current service execution; append it as history only');
+      this.store.run(`UPDATE legacy_records SET observed_state=?,observed_at=?,summary=?,notes=? WHERE task_id=?`,
+        input.observedState, input.observedAt, input.summary, input.notes ?? legacy.notes, task.id);
+    }
+    this.store.run(`UPDATE tasks SET record_revision=record_revision+1,updated=? WHERE id=?`, now(), task.id);
+    if (input.updateCurrent) {
+      this.store.run('UPDATE tasks SET summary=?,artifacts=? WHERE id=?', input.summary, JSON.stringify(input.artifacts), task.id);
+    }
+    this.store.event({ ...task, version: 0 }, 'legacy_observation',
+      `${input.observedAt} [${input.observedState}] ${input.summary}\nSource: ${input.source}\nCurrent observation updated: ${input.updateCurrent}${input.reason ? `; ${input.reason}` : ''}${input.notes !== undefined ? `\nNotes: ${input.notes}` : ''}`, input.artifacts);
+    return { task: this.summary(this.store.task(task.id)), executionChanged: false, notification: 'not_sent', nativeCalls: 0 };
+  }
   dispatch(principal, input) {
     let task;
     if (input.selection === 'continue') {
       task = this.store.task(input.taskId); this.authorize(principal, 'caller', task); this.current(task, input.goalVersion);
       fail(terminal.has(task.status), 'TERMINAL_GOAL', 'Explicitly amend the goal/authorization before reopening');
       fail(!task.owner, 'NO_OWNER', 'Recover the original dispatch; do not create a replacement');
+    } else if (input.taskId) {
+      task = this.store.task(input.taskId); this.authorize(principal, 'caller', task);
+      this.recordCurrent(task, input.recordRevision);
+      fail(task.active_op || task.owner || task.version !== 0, 'ALREADY_BOUND', 'Existing execution must continue/recover its original operation');
+      fail(task.disposition !== 'open', 'RECORD_NOT_OPEN', 'Explicitly reopen this record before authorizing execution');
+      const legacy = this.store.get('SELECT * FROM legacy_records WHERE task_id=?', task.id);
+      if (input.selection === 'adopt') {
+        fail(!legacy?.owner_ref, 'NO_LEGACY_OWNER', 'No unambiguous original owner reference is available');
+        fail(this.store.get('SELECT id FROM tasks WHERE owner=?', legacy.owner_ref), 'OWNER_REUSED', 'Original owner is already execution-bound to another goal; resolve with the user');
+        fail(legacy.owner_ref === task.caller, 'CALLER_IS_OWNER', 'Discussion and execution must remain separate');
+        this.store.run('UPDATE tasks SET owner=? WHERE id=?', legacy.owner_ref, task.id);
+      } else {
+        fail(legacy?.owner_ref, 'ORIGINAL_OWNER_REQUIRED', 'Legacy target must explicitly adopt its original owner, never create a replacement');
+        fail(task.status !== 'backlog' && task.status !== 'legacy', 'NOT_BACKLOG', 'Only an unstarted record can be initialized');
+      }
+      if (input.workstream && input.workstream !== task.workstream) {
+        fail(this.store.get('SELECT id FROM tasks WHERE workstream=?', input.workstream), 'WORKSTREAM_EXISTS', 'Workstream already exists');
+        this.store.run('UPDATE tasks SET workstream=? WHERE id=?', input.workstream, task.id);
+      }
+      this.store.run(`UPDATE tasks SET version=1,status='recorded',record_revision=record_revision+1,updated=? WHERE id=?`, now(), task.id);
+      this.store.run('INSERT INTO versions(task_id,version,goal,reason,created) VALUES(?,?,?,?,?)',
+        task.id, 1, JSON.stringify(input.goal), 'Explicit first execution authorization, not record import', now());
+      task = this.store.task(task.id);
+      this.store.event(task, 'execution_authorized', 'Explicit execution authorization; owner has not accepted');
     } else {
       fail(this.store.get('SELECT id FROM tasks WHERE workstream=?', input.workstream), 'WORKSTREAM_EXISTS', 'Existing goal must continue its original task');
       const id = uid();
-      this.store.run('INSERT INTO tasks(id,workstream,caller,version,status,summary,created,updated) VALUES(?,?,?,?,?,?,?,?)',
-        id, input.workstream, principal.session_id, 1, 'recorded', 'Goal recorded; owner not yet dispatched', now(), now());
+      this.store.run('INSERT INTO tasks(id,workstream,title,caller,version,status,summary,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',
+        id, input.workstream, input.goal.objective.slice(0, 240), principal.session_id, 1, 'recorded', 'Goal recorded; owner not yet dispatched', now(), now());
       this.store.run('INSERT INTO versions(task_id,version,goal,reason,created) VALUES(?,?,?,?,?)',
         id, 1, JSON.stringify(input.goal), 'Explicit initial assignment', now());
       task = this.store.task(id); this.store.event(task, 'created', 'Explicit goal recorded');
@@ -180,6 +298,7 @@ export class Work {
     return response;
   }
   amend(task, input) {
+    fail(task.version === 0, 'NO_EXECUTION_GOAL', 'Register/edit the record, then explicitly dispatch a complete goal');
     fail(task.active_op, 'OPERATION_PENDING', `Resolve ${task.active_op} before changing the goal`);
     const next = task.version + 1;
     this.store.run('INSERT INTO versions(task_id,version,goal,reason,created) VALUES(?,?,?,?,?)',

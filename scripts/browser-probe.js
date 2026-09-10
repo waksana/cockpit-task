@@ -50,7 +50,7 @@ try {
   const cookie = response.headers.get('set-cookie').split(';')[0];
   await cdp('Network.setCookie', { name: 'wc_view', value: cookie.slice('wc_view='.length), url, httpOnly: true, sameSite: 'Strict' });
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
-  await cdp('Page.navigate', { url });
+  await cdp('Page.navigate', { url: process.env.WORK_TASK_ID ? `${url}/#${process.env.WORK_TASK_ID}` : url });
   const waitFor = async expression => {
     const deadline = Date.now() + Number(process.env.WORK_BROWSER_TIMEOUT_MS ?? 15000);
     while (Date.now() < deadline) {
@@ -69,7 +69,7 @@ try {
     returnByValue: true,
   });
   console.log(result.result.value);
-  await cdp('Runtime.evaluate', { expression: "document.querySelector('.card')?.click()" });
+  if (!process.env.WORK_TASK_ID) await cdp('Runtime.evaluate', { expression: "document.querySelector('.card')?.click()" });
   await waitFor("!document.getElementById('detail').hidden");
   if (process.env.WORK_EXPECT_TEXT) {
     await waitFor(`document.getElementById('detail').textContent.includes(${JSON.stringify(process.env.WORK_EXPECT_TEXT)})`);
