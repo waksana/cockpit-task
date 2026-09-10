@@ -41,7 +41,7 @@ journalctl --user -u work-commander -n 40 --no-pager
 
 ## MCP 与 skill
 
-显式授权后，`node scripts/register.js ~/.local/share/work-commander/current --confirm` 增加独立 MCP 定义和两个独立 skill symlink，保持现有定义及原 work-owner 不变。调用 Cockpit `mcp/refresh` 发现新增定义，然后立即 `mcp/global-default {name:"work-commander",on:false}` 设置原生默认关闭，再 `skills/refresh` 刷新 skill 发现；不重载其它 session。安装失败要检查实际步骤，不盲重跑脚本。
+显式授权后，`node scripts/register.js ~/.local/share/work-commander/current --confirm` 增加独立 MCP 定义和两个独立 skill symlink，不创建或恢复旧 work-owner，也不改其它定义。调用 Cockpit `mcp/refresh` 发现新增定义，然后立即 `mcp/global-default {name:"work-commander",on:false}` 设置原生默认关闭，再 `skills/refresh` 刷新 skill 发现；不重载其它 session。安装失败要检查实际步骤，不盲重跑脚本。
 
 注册只用于首次接入，已注册升级不重跑、不批量改默认或会话配置。现有两份 skill 链接应指向 `~/.local/share/work-commander/current/skills/<name>`：先确认实际链接，再从版本化源码按固定版本安装流程升级，随后原生 `skills/refresh` 并核对发现正文与该 release 一致。不要直接编辑不可变 release 或仅改全局 skill；若实际链接固定到旧 commit、不是预期链接或存在本地修改，先解决安装冲突，不能覆盖后声称下次安装可保留。
 
@@ -51,11 +51,15 @@ journalctl --user -u work-commander -n 40 --no-pager
 
 ### 协作入口与旧定义退役
 
-新任务仅使用 `work-commander` / `work-commander-owner`；双 skill 和服务派单模板只保留完整结果责任及遵守项目工程/运行规范的薄引用，不依赖加载旧 `work-owner`。工程规范属于独立 `service-delivery-toolkit`，本模块不复制其正文，也不代替该模块 owner 实施。
+协作入口仅使用 `work-commander` / `work-commander-owner`；双 skill 和服务派单模板只保留完整结果责任及遵守项目工程/运行规范的薄引用，不依赖加载旧 `work-owner`。Git 服务工程入口为独立 `service-delivery-toolkit` 的 `/service-development`，本模块不复制其正文，也不代替该模块 owner 实施。
+
+本机旧入口已于 2026-09-11 退役。工程承接基线为 `service-delivery-toolkit` v0.1.0（`7189bab35fa32cc1fefb32c6fe681326e8d43475`），源目录 `/home/honglai/service-delivery-toolkit`，完整安装位于 `~/.copilot/skills/service-development/`。保护映射见该模块 `docs/engineering-rule-coverage.md`，独立 CI 边界见 `docs/ci-handoff.md`；工程规范已就绪不表示 CI 实际传输已接通，后者仍为 pending，不属于本次退役交付。
 
 旧入口删除是有条件的后续动作，不随本模块安装自动执行：须先确认工程模块的版本化产物和实际安装入口存在，已承接旧规范中的隔离、最新基线集成与竞争处理、短锁与长等待分离、固定产物发布、后继版本验收和自承载重启防死锁；再切换获准工作区的有效引用。新模块未就绪则保留旧定义，如实报告 blocked，由 caller 在依赖就绪后明确续接原 owner，不定时催工、不伪报全部完成。
 
 退役只精确处理旧 `SKILL.md`、`templates.md` 和有效入口；保留历史任务、来源和成果，不全目录递归清理。移除后原生刷新发现并核对入口，无需强制重载忙 session。历史文档中的“旧 skill 未改”是当时交付事实，不追溯改写。
+
+获准的讨论工作区中，`PERSONA.md` 只替换 skill 名称，`guides/maintenance.md` 和 `guides/delivery.md` 切换到双协作入口；`AGENTS.md` 已指向 `work-commander`，不重复改写。人格、历史任务和记忆来源不变。已加载会话可能仍持有旧上下文快照，入口移除不等于强制改写正在执行的 turn；在下一次真实使用时加载新入口，不批量重载或补发旧消息。
 
 **在途兼容**：旧派单的目标、授权、caller 和原回复义务保持不变，不因移除旧入口或导入记录而重演、补发旧回执或另建 owner；caller 用 `work_observe` 带来源记录。只有显式 adopt 后的新执行遵循绑定凭证和服务唯一通知；不能借迁入或入口切换冒充 accepted/delivered。
 

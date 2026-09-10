@@ -1,5 +1,7 @@
 # Work Commander：独立工作工具包
 
+> 首版历史任务说明，不是现行 skill 加载入口。2026-09-11 起协作使用 `work-commander` / `work-commander-owner`，Git 服务工程使用独立 `service-development`；下文旧 `work-owner` 路径仅保留为历史来源，不再要求读取或恢复。现行入口与兼容边界见 [运行文档](docs/operations.md#协作入口与旧定义退役)。
+
 用户于 2026-09-10 20:49（+08:00）明确授权新 session 完整实施。项目名暂用 Work Commander，不代表增加 Commander agent。
 
 ## 目标与分工
