@@ -2,7 +2,7 @@
 
 独立的工作服务 + SQLite + MCP + 两层协作 skill + 私人工作页。Cockpit 仍是唯一真实会话基础服务；这里不保存聊天、模型目录或会话状态副本，不运行指挥 agent、巡查器或自动调度。
 
-**一个 MCP，两份短 skill**：`work-commander` 给讨论方，`work-commander-owner` 承载 work-owner 的 owner 规则。权限由服务签发的 caller/owner 凭证决定，不靠 agent 自报 sessionId。原全局 `work-owner` 不改；本服务任务的最终通知统一由服务发送。
+**一个 MCP，两份协作 skill**：`work-commander` 给讨论方，`work-commander-owner` 给执行方，规定目标、授权、结果责任和服务报告；工程方法遵守目标项目规范，不在协作正文重复。权限由 caller/owner 凭证决定，不靠自报 sessionId；本服务最终通知统一由服务发送。旧 `work-owner` 不再作为新任务入口，工程规则承接完成前仍保留定义，退役条件及旧在途任务兼容见[入口切换](docs/operations.md#协作入口与旧定义退役)。
 
 ## 使用入口
 

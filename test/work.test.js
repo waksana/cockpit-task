@@ -49,6 +49,12 @@ test('one-call dispatch, owner reports, final single notification and compact re
   assert.equal(result.operation.status, 'succeeded');
   assert.equal(result.task.status, 'dispatched');
   assert.deepEqual(f.c.calls.map(c => c.name), ['session/new', 'session/get', 'mcp/session-toggle', 'skills/session-toggle', 'prompt']);
+  const prompt = f.c.calls.at(-1).body.text;
+  assert.match(prompt, /Use skill work-commander-owner/);
+  assert.match(prompt, /follow the target project engineering\/runtime rules/);
+  assert.match(prompt, /binding neither provides engineering isolation nor grants extra authority/);
+  assert.match(prompt, /Do NOT send any separate caller final\/ACK/);
+  assert.doesNotMatch(prompt, /worktree|Use skill work-owner/);
   const report = (kind, key) => f.w.execute(owner, 'work_report', { taskId: id, goalVersion: 1, kind, summary: kind, idempotencyKey: key });
   await report('accepted', 'accept-001'); await report('progress', 'progress-001');
   await report('blocked', 'blocked-001'); await report('needs_decision', 'decision-001'); await report('result', 'result-001');

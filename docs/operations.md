@@ -43,10 +43,21 @@ journalctl --user -u work-commander -n 40 --no-pager
 
 显式授权后，`node scripts/register.js ~/.local/share/work-commander/current --confirm` 增加独立 MCP 定义和两个独立 skill symlink，保持现有定义及原 work-owner 不变。调用 Cockpit `mcp/refresh` 发现新增定义，然后立即 `mcp/global-default {name:"work-commander",on:false}` 设置原生默认关闭，再 `skills/refresh` 刷新 skill 发现；不重载其它 session。安装失败要检查实际步骤，不盲重跑脚本。
 
+注册只用于首次接入，已注册升级不重跑、不批量改默认或会话配置。现有两份 skill 链接应指向 `~/.local/share/work-commander/current/skills/<name>`：先确认实际链接，再从版本化源码按固定版本安装流程升级，随后原生 `skills/refresh` 并核对发现正文与该 release 一致。不要直接编辑不可变 release 或仅改全局 skill；若实际链接固定到旧 commit、不是预期链接或存在本地修改，先解决安装冲突，不能覆盖后声称下次安装可保留。
 
 注册是用户级目录的发现入口，不等于批量启用。讨论方需显式启用 MCP `work-commander` 与 skill `work-commander`。本服务为**自己新建或明确继续的 owner**在投递前启用 MCP 和 `work-commander-owner`。不自动给其它历史 session 设置任何东西。
 
 登记前已加载的讨论 session 可能完全看不到新定义：全局 refresh 不会重载其现有连接。须用户授权后，在该 session 空闲时执行 Cockpit `mcp/reload-session`，核对列表，再单独 enable `work-commander`；重载会重新应用全局默认。不能把 enable 未知服务器的失败当已接入，也不自动重载运行中的讨论。
+
+### 协作入口与旧定义退役
+
+新任务仅使用 `work-commander` / `work-commander-owner`；双 skill 和服务派单模板只保留完整结果责任及遵守项目工程/运行规范的薄引用，不依赖加载旧 `work-owner`。工程规范属于独立 `service-delivery-toolkit`，本模块不复制其正文，也不代替该模块 owner 实施。
+
+旧入口删除是有条件的后续动作，不随本模块安装自动执行：须先确认工程模块的版本化产物和实际安装入口存在，已承接旧规范中的隔离、最新基线集成与竞争处理、短锁与长等待分离、固定产物发布、后继版本验收和自承载重启防死锁；再切换获准工作区的有效引用。新模块未就绪则保留旧定义，如实报告 blocked，由 caller 在依赖就绪后明确续接原 owner，不定时催工、不伪报全部完成。
+
+退役只精确处理旧 `SKILL.md`、`templates.md` 和有效入口；保留历史任务、来源和成果，不全目录递归清理。移除后原生刷新发现并核对入口，无需强制重载忙 session。历史文档中的“旧 skill 未改”是当时交付事实，不追溯改写。
+
+**在途兼容**：旧派单的目标、授权、caller 和原回复义务保持不变，不因移除旧入口或导入记录而重演、补发旧回执或另建 owner；caller 用 `work_observe` 带来源记录。只有显式 adopt 后的新执行遵循绑定凭证和服务唯一通知；不能借迁入或入口切换冒充 accepted/delivered。
 
 管理员签发讨论方或只读凭证：
 

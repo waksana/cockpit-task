@@ -399,7 +399,7 @@ export class Work {
       `Objective: ${goal.objective}`, `Scope: ${goal.scope}`, `Acceptance: ${goal.acceptance}`, `Authorization: ${goal.authorization}`,
       input.message ? `Current instruction: ${input.message}` : '',
       'Read the current task if needed, accept this version with work_report, then own the full result. Report only meaningful progress to service; do not chat-notify caller.',
-      'Acknowledge the current version, never inherit old execution permissions or callbacks. New/forked session is NOT a worktree/database isolation.',
+      'Acknowledge the current version; never inherit old execution permissions or callbacks. Own the complete result and follow the target project engineering/runtime rules; task/session binding neither provides engineering isolation nor grants extra authority.',
       'Decisions/blockers: ask the user in THIS owner session. Finish ordinary work autonomously without stage-by-stage reassignment.',
       'Final: work_deliver persists the full outcome and notifies the bound caller. Do NOT send any separate caller final/ACK. Then deliver normally in this session.',
     ].filter(Boolean).join('\n');
