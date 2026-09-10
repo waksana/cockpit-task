@@ -75,6 +75,16 @@ try {
     await waitFor(`document.getElementById('detail').textContent.includes(${JSON.stringify(process.env.WORK_EXPECT_TEXT)})`);
     console.log(JSON.stringify({ expectedDetailObserved: process.env.WORK_EXPECT_TEXT }));
   }
+  if (process.env.WORK_EXPECT_SOURCE) {
+    await cdp('Runtime.evaluate', { expression: "[...document.querySelectorAll('#detail button')].find(b=>b.textContent==='查看原始来源')?.click()" });
+    await waitFor(`document.querySelector('#detail pre') && [...document.querySelectorAll('#detail pre')].some(p=>p.textContent.includes(${JSON.stringify(process.env.WORK_EXPECT_SOURCE)}))`);
+    console.log(JSON.stringify({ sourceObserved: process.env.WORK_EXPECT_SOURCE }));
+  }
+  if (process.env.WORK_SEARCH) {
+    await cdp('Runtime.evaluate', { expression: `document.getElementById('search').value=${JSON.stringify(process.env.WORK_SEARCH)};document.getElementById('searchForm').requestSubmit()` });
+    await waitFor("document.querySelectorAll('.card').length===1");
+    console.log(JSON.stringify({ searchObserved: process.env.WORK_SEARCH, matchingCards: 1 }));
+  }
   if (screenshot) {
     const image = await cdp('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
     writeFileSync(screenshot, Buffer.from(image.data, 'base64'), { flag: 'wx', mode: 0o600 });

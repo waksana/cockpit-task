@@ -9,7 +9,7 @@
 - 工作页：`http://127.0.0.1:8790/`，需要只读凭证。
 - 服务：`systemctl --user status work-commander`；数据 `~/.local/state/work-commander/`。
 - MCP：`node <安装目录>/src/mcp.js`（stdio），默认连接本机 8790。
-- 文档：[待办与统一记录](docs/backlog.md) · [接入和运行](docs/operations.md) · [工具与可靠性边界](docs/contract.md) · [首版实证](docs/acceptance.md)。
+- 文档：[待办与统一记录](docs/backlog.md) · [接入和运行](docs/operations.md) · [工具与可靠性边界](docs/contract.md) · [统一迁入范围与交付](docs/unified-records-delivery.md) · [首版实证](docs/acceptance.md)。
 - 验证：`npm test`；开发启动：`npm start`，同数据目录持有内核独占锁。
 
 一句话用 `work_record` 登记待办，零会话副作用；补齐授权后通过 `work_dispatch` 在**同 taskId**开工。同目标继续原 owner。元数据用 recordRevision，执行目标/授权用 goalVersion；只有后者变化才 `work_amend`。owner 报告/交付仍用 `work_report`、`work_deliver`。默认 `work_read` 返回 10 个未结束简表，完成历史按需查，不查询 Cockpit。
