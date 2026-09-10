@@ -1,0 +1,54 @@
+# 契约与边界
+
+## 六个工具
+
+全部通过同一 MCP。`credential` 是管理员签发的受保护 JSON 文件路径，不是 token 或自报 sessionId。每项变更带稳定 `idempotencyKey`；同 key 同输入返回原操作/结果，换内容返回冲突。字段严格校验；任意命令、目标 caller 重绑定、批量迁移不在 API 中。
+
+| 工具 | 权限 | 关键输入 / 效果 |
+| --- | --- | --- |
+| work_dispatch | caller | new: workstream/goal/cwd；fork: workstream/goal/sourceSessionId/可选 toEventId；continue: taskId/goalVersion/message。模型默认 gpt-6-astra，可显式 reasoningEffort/contextTier。绑定 caller 来自凭证。 |
+| work_read | 作用域内 caller/owner；viewer 全部只读 | 默认 10 简表；taskId+detail 获取目标和成果；events/operations 用 before 游标，最多 50。零 Cockpit 读取。 |
+| work_report | 绑定 owner | taskId/goalVersion/kind/summary/artifacts；accepted、progress、blocked、needs_decision、result。无 caller 聊天通知。 |
+| work_deliver | 绑定 owner | 同版本完整结果，delivered/failed/cancelled；成功交付必须有结果入口。先持久结果，再唯一尝试通知绑定 caller。 |
+| work_amend | 绑定 caller | 当前 goalVersion、完整 goal、reason；递增目标/授权版本，清承接和当前成果，旧事件保留；不自动发消息。 |
+| work_recover | 绑定 caller | operationId；unknown 必须提供 resolution: applied/not_applied + evidence；确认创建成功还需真实 sessionId。只继续原操作和原 owner。 |
+
+goal 的 objective/scope/acceptance/authorization 都必填。服务不将调查扩成实施，不自动判断“两项目标是否同一”，也不能验证成果真实达到验收；这些仍是用户/agent 的责任。
+
+## 状态与版本
+
+`recorded → dispatched → active / blocked / needs_decision / result_reported → delivered / failed / cancelled`。
+
+投递操作另有 running/succeeded/failed/unknown；succeeded 仅表示请求得到基础服务受理。owner 要显式 accepted 当前版本才能报告进度或交付。idle 不是任务状态。目标变更将状态置 recorded，必须新版本承接。旧版本新回执返回 STALE_GOAL；旧幂等重放返回原版本结果，不改新版本。失败/取消同样是完整目标结束，不自动重开。
+
+最终目标状态与通知状态分开。通知超时不会抹掉已交付结果。页面显示待处理操作；owner 不另发最终消息。普通 progress、blocker、decision 不通知 caller；真实问题直接在 owner session ask_user。
+
+## 原子性、冲突、未知结果
+
+SQLite WAL + synchronous=FULL，目标、版本、事件、幂等键和操作建档在同一事务。外部请求前写 inflight，响应后写完成步骤。操作持有任务和相关 session 的持久保留；内核 flock 防两个服务实例对同数据目录运行。服务退出后不会靠超时释放未知保留；启动把遗留 running 转成 failed 或 unknown，不自动重放。
+
+事务不能跨 Cockpit/原生 runtime。窗口“请求已执行、响应未落盘”故意保留 unknown，包括 HTTP 错误可能发生在副作用之后的情况。单次 MCP call **不是**原子事务、exactly-once 外部执行或最终交付。已确认的步骤会复用；已创建 owner ID 保留。创建结果未知时不会猜一个新 owner。
+
+恢复前用公开基础接口做**限定范围**的实际核对，如某个 task marker 的队列/单页事件、明确创建返回。无法核对就问用户。只有确证 applied 或 not_applied 才提交 resolution；证据是操作者声明，服务不把它冒称程序证明。不是“失败就换 session”：那可能让两个 owner 同时执行同目标。
+
+同服务内部串行化；忙且模型不匹配直接失败，不切模/打断。相同模型可 enqueue。模型不匹配且空闲时请求切换，权威回读确认才投递。用户聊天、其它 MCP 和另一基础客户端不持有本服务锁；检查与操作之间仍可能有竞态。这是用户明确接受的内部尽量防冲突边界，不以长锁阻止用户聊天。
+
+fork 仅使用 Cockpit 正式原生 fork：源须已加载且空闲，拒绝不允许的历史边界由基础服务处理，子 session 不继承执行授权，不能当作配置克隆或 worktree。不复制原生数据库或事件文件。
+
+## 读取成本与保留数据
+
+默认新建且模型匹配：new → get → MCP enable → skill enable → prompt，共 5 次基础 HTTP 调用。模型需要改变再加 setModel + get，共 7。同目标 loaded/matching 4；unloaded 再加 reload + get（6）。已冷恢复的 MCP/skill 必须重新启用。最终通知 1；报告、修订、工作查询 0。
+
+每个操作只保留实际 calls、responseBytes、byIntent，便于测量。**session/get 目前仍是宽接口**，包含原生模型目录、队列等；本项目仅不保存、不回传它们，不能声称底层已经字段投影。没有扫描全历史、轮询同步或缓存原生状态。未来基础服务若提供小型 prepare/get 控制接口，可在独立适配器替换，不加任务语义到 Cockpit MCP。
+
+只保存 tasks、版本化 goal/授权、有限分页可读的 owner 事件、成果入口、凭证哈希和必要操作信息（含原派单参数及恢复声明）。不保存聊天/模型目录/session snapshots；这些不能作为第二份真相。
+
+## 身份与隐私
+
+服务只监听 loopback；API bearer 鉴权，页面使用仅 viewer 的 HttpOnly/SameSite=Strict cookie。Host/Origin 校验，无 CORS，严格 CSP，不渲染任务 HTML，不加载外部资源。只读入口不会匿名公开任务。远程用 SSH 本地端口转发，不新增公网域名。
+
+管理员本机命令签发 caller 绑定已知 session；服务新建 owner 后签发 task+session 绑定能力，存 0600 文件，派单只含路径；MCP 只接受固定 credentials 根内的规范路径。哈希凭证、角色、归属三者由服务验证。viewer 无写权限，owner 无派单/改目标权限，caller 无 owner 代报权限。
+
+同一 OS 用户/allow-all agent 能读同用户文件，因此不是相互不信任 agent 的强隔离；分两个 MCP 不会解决这个边界。凭证路径不应传播，秘密内容不进源码、MCP config 或日志。完全不可信 agent 应在不同 OS 用户/容器运行并配独立秘密交付，不在此版本暗中承诺。
+
+无自动重试、催工、自动拆任务、模型总结聊天或通知 ACK 链。skill 指导规范，服务仅校验它实际知道的权限与转换，不能强制 agent 遵循所有自然语言边界。
