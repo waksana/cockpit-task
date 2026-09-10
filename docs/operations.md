@@ -4,6 +4,8 @@
 
 ## 固定版本安装
 
+标准本机路径可直接在已提交、干净仓库运行 `bash scripts/install.sh`：建立固定 commit release、按 lockfile 安装依赖，安全停止**本服务**、备份数据库、原子切换、安装 user unit、启动并核对健康 release。失败不自动回滚或重放副作用；保留 build 目录和备份供核对。MCP/skill 注册仍是后文的显式步骤。自定义数据目录需先按下文配置环境和 unit，不能仅改一次 shell 变量。
+
 从已经验证、已提交的版本制作只读意义上的固定 release（不修改已发布目录）：
 
 ```sh

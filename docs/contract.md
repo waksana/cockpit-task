@@ -7,7 +7,7 @@
 | 工具 | 权限 | 关键输入 / 效果 |
 | --- | --- | --- |
 | work_dispatch | caller | new: workstream/goal/cwd；fork: workstream/goal/sourceSessionId/可选 toEventId；continue: taskId/goalVersion/message。模型默认 gpt-6-astra，可显式 reasoningEffort/contextTier。绑定 caller 来自凭证。 |
-| work_read | 作用域内 caller/owner；viewer 全部只读 | 默认 10 简表；taskId+detail 获取目标和成果；events/operations 用 before 游标，最多 50。零 Cockpit 读取。 |
+| work_read | 作用域内 caller/owner；viewer 全部只读 | 默认 10 简表；board 返回四栏各 10 项，group+before 分栏续页；taskId+detail 获取目标和成果；events/operations 用 before 游标，最多 50。零 Cockpit 读取。 |
 | work_report | 绑定 owner | taskId/goalVersion/kind/summary/artifacts；accepted、progress、blocked、needs_decision、result。无 caller 聊天通知。 |
 | work_deliver | 绑定 owner | 同版本完整结果，delivered/failed/cancelled；成功交付必须有结果入口。先持久结果，再唯一尝试通知绑定 caller。 |
 | work_amend | 绑定 caller | 当前 goalVersion、完整 goal、reason；递增目标/授权版本，清承接和当前成果，旧事件保留；不自动发消息。 |
@@ -33,6 +33,8 @@ SQLite WAL + synchronous=FULL，目标、版本、事件、幂等键和操作建
 
 同服务内部串行化；忙且模型不匹配直接失败，不切模/打断。相同模型可 enqueue。模型不匹配且空闲时请求切换，权威回读确认才投递。用户聊天、其它 MCP 和另一基础客户端不持有本服务锁；检查与操作之间仍可能有竞态。这是用户明确接受的内部尽量防冲突边界，不以长锁阻止用户聊天。
 
+实际冷恢复可遇到 Cockpit `MCP connections are still settling`：reload 已成功，但原生连接尚未稳定，toggle 返回 HTTP 500。当前公开接口未完整暴露 host pendingConnections，因此不靠固定 sleep 或宽泛轮询冒称已就绪；如实保留步骤为 unknown，未投递 prompt。通过限定的 MCP 状态和错误原因确认未生效后，再显式恢复原操作。这是已实测的基础接口限制，不能当作新的 owner 或自动重放的理由。
+
 fork 仅使用 Cockpit 正式原生 fork：源须已加载且空闲，拒绝不允许的历史边界由基础服务处理，子 session 不继承执行授权，不能当作配置克隆或 worktree。不复制原生数据库或事件文件。
 
 ## 读取成本与保留数据
@@ -40,6 +42,8 @@ fork 仅使用 Cockpit 正式原生 fork：源须已加载且空闲，拒绝不�
 默认新建且模型匹配：new → get → MCP enable → skill enable → prompt，共 5 次基础 HTTP 调用。模型需要改变再加 setModel + get，共 7。同目标 loaded/matching 4；unloaded 再加 reload + get（6）。已冷恢复的 MCP/skill 必须重新启用。最终通知 1；报告、修订、工作查询 0。
 
 每个操作只保留实际 calls、responseBytes、byIntent，便于测量。**session/get 目前仍是宽接口**，包含原生模型目录、队列等；本项目仅不保存、不回传它们，不能声称底层已经字段投影。没有扫描全历史、轮询同步或缓存原生状态。未来基础服务若提供小型 prepare/get 控制接口，可在独立适配器替换，不加任务语义到 Cockpit MCP。
+
+工作页按任务最近事件排序，四栏独立分页，不让大量已结束任务遮住旧的在途任务。SSE 只发送失效提示，页面按需读本服务数据；断线重连重新读取当前任务，不以漏掉事件为由缓存聊天或轮询原生会话。
 
 只保存 tasks、版本化 goal/授权、有限分页可读的 owner 事件、成果入口、凭证哈希和必要操作信息（含原派单参数及恢复声明）。不保存聊天/模型目录/session snapshots；这些不能作为第二份真相。
 

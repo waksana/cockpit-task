@@ -29,8 +29,12 @@ export class Cockpit {
       const raw = await response.text();
       this.metrics.bytes += Buffer.byteLength(raw);
       record?.(name, Buffer.byteLength(raw), false);
-      if (!response.ok) throw new Error(`Cockpit ${name}: HTTP ${response.status}`);
       const value = JSON.parse(raw);
+      if (!response.ok) {
+        const detail = typeof value.error === 'string' ? value.error.slice(0, 500) : '';
+        const safeDetail = this.token ? detail.replaceAll(this.token, '[redacted]') : detail;
+        throw new Error(`Cockpit ${name}: HTTP ${response.status}${safeDetail ? `: ${safeDetail}` : ''}`);
+      }
       if (value.ok === false) throw new Error(`Cockpit ${name} did not acknowledge success`);
       return value;
     } catch (error) {

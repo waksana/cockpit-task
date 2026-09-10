@@ -27,7 +27,8 @@ for (const [name, schema] of Object.entries(schemas)) {
         body: JSON.stringify(input), signal: AbortSignal.timeout(240000), redirect: 'error',
       });
       const result = await response.json();
-      return { content: [{ type: 'text', text: JSON.stringify(result) }], isError: !response.ok };
+      return { content: [{ type: 'text', text: JSON.stringify(result) }],
+        isError: !response.ok || ['failed', 'unknown'].includes(result.operation?.status) };
     } catch (error) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: 'CLIENT_ERROR', message: `${error.message}. If a mutation may have reached the service, read the task or reuse EXACTLY the same idempotency key/input; do not issue a new key.` }) }], isError: true };
     }

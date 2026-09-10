@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, copyFileSync } from 'node:fs';
+import { backup } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store, readCredential, WorkError } from '../src/store.js';
@@ -220,4 +221,41 @@ test('dashboard has independent lane pagination and recent activity order', asyn
   const next = await f.w.execute(f.caller, 'work_read', { view: 'board' });
   assert.equal(next.groups.decision.items[0].taskId, id);
   assert.equal(next.groups.working.items.length, 1);
+});
+test('SSE invalidation and authenticated reads observe the same committed report', async t => {
+  const f = fixture(t), a = await f.dispatch(), id = a.task.taskId;
+  const { app, work } = createApp({ store: f.s, cockpit: f.c, port: 18793 });
+  await app.listen({ host: '127.0.0.1', port: 18793 });
+  const controller = new AbortController(), viewer = f.s.issue('viewer');
+  t.after(async () => { controller.abort(); await app.close(); });
+  const response = await fetch(`http://127.0.0.1:${app.server.address().port}/api/events`, {
+    headers: { authorization: `Bearer ${viewer}` }, signal: controller.signal,
+  });
+  const reader = response.body.getReader();
+  assert.match(new TextDecoder().decode((await reader.read()).value), /event: ready/);
+  await work.execute(f.owner(id), 'work_report', {
+    taskId: id, goalVersion: 1, kind: 'accepted', summary: 'Committed event', idempotencyKey: 'sse-accept-001',
+  });
+  assert.match(new TextDecoder().decode((await reader.read()).value), /event: changed/);
+  const value = await work.execute(f.s.authenticate(viewer), 'work_read', { taskId: id });
+  assert.equal(value.status, 'active');
+  assert.equal(value.summary, 'Committed event');
+  await reader.cancel();
+});
+test('online backup restores versions, task ownership, credentials and idempotency', async t => {
+  const f = fixture(t), a = await f.dispatch(), id = a.task.taskId, owner = f.owner(id);
+  const input = { taskId: id, goalVersion: 1, kind: 'accepted', summary: 'Durable acceptance', idempotencyKey: 'backup-accept-001' };
+  await f.w.execute(owner, 'work_report', input);
+  const snapshot = join(f.dir, 'snapshot.db'), restoredDirectory = join(f.dir, 'restored');
+  await backup(f.s.db, snapshot);
+  mkdirSync(restoredDirectory); copyFileSync(snapshot, join(restoredDirectory, 'work.db'));
+  const restored = new Store(restoredDirectory), work = new Work(restored, f.c);
+  try {
+    const principal = restored.authenticate(readCredential(f.s.task(id).credential_path));
+    const before = restored.get('SELECT count(*) n FROM events').n;
+    const response = await work.execute(principal, 'work_report', input);
+    assert.equal(response.task.status, 'active');
+    assert.equal(restored.task(id).owner, a.task.ownerSessionId);
+    assert.equal(restored.get('SELECT count(*) n FROM events').n, before);
+  } finally { restored.close(); }
 });

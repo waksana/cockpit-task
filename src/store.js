@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { mkdirSync, chmodSync, writeFileSync, readFileSync, lstatSync } from 'node:fs';
+import { mkdirSync, chmodSync, writeFileSync, readFileSync, lstatSync, openSync, closeSync, fsyncSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 export const hash = value => createHash('sha256').update(value).digest('hex');
@@ -104,7 +104,11 @@ export class Store {
     const directory = join(this.directory, 'credentials');
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const path = join(directory, `${name}.json`);
-    writeFileSync(path, JSON.stringify({ token }) + '\n', { mode: 0o600, flag: 'wx' });
+    const fd = openSync(path, 'wx', 0o600);
+    try { writeFileSync(fd, JSON.stringify({ token }) + '\n'); fsyncSync(fd); }
+    finally { closeSync(fd); }
+    const parent = openSync(directory, 'r');
+    try { fsyncSync(parent); } finally { closeSync(parent); }
     return path;
   }
   recoverInterrupted() {
