@@ -120,6 +120,15 @@ $('login').onsubmit = async e => {
   try { await api('/api/login', { token: $('token').value }); $('token').value = ''; await refresh(); connect(); }
   catch (e) { error(e.message); }
 };
+$('credentialFile').onchange = async () => {
+  const file = $('credentialFile').files[0];
+  if (!file) return;
+  try {
+    if (file.size > 4096) throw new Error('凭证文件过大');
+    const { token } = JSON.parse(await file.text());
+    await api('/api/login', { token }); $('credentialFile').value = ''; $('token').value = ''; await refresh(); connect();
+  } catch (e) { error(e.message); }
+};
 $('logout').onclick = async () => { await api('/api/logout', {}); stream?.close(); location.reload(); };
 $('refresh').onclick = refresh;
 window.addEventListener('hashchange', () => detail().catch(e => error(e.message)));

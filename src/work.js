@@ -358,7 +358,9 @@ export class Work {
     }
     this.store.tx(() => {
       // A fast owner may already have accepted while the prompt acknowledgement was in flight.
-      this.store.run(`UPDATE tasks SET status=CASE WHEN status='recorded' THEN 'dispatched' ELSE status END,updated=? WHERE id=?`, now(), task.id);
+      this.store.run(`UPDATE tasks SET
+        summary=CASE WHEN status='recorded' THEN 'Prompt accepted; waiting for owner to accept this goal version' ELSE summary END,
+        status=CASE WHEN status='recorded' THEN 'dispatched' ELSE status END,updated=? WHERE id=?`, now(), task.id);
       this.store.event(this.store.task(task.id), 'dispatch_accepted', 'Native prompt accepted; this is not owner acceptance or goal completion');
     });
   }

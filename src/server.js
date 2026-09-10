@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
 import { readFileSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { ZodError } from 'zod';
@@ -35,7 +35,8 @@ export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127
     console.error('Work Commander request failed:', error.code ?? error.name);
     return reply.code(500).send({ error: 'INTERNAL_ERROR', message: 'Request failed; inspect the service journal, do not blindly repeat side effects' });
   });
-  app.get('/health', async () => ({ ok: store.get('PRAGMA quick_check').quick_check === 'ok', version: JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version }));
+  app.get('/health', async () => ({ ok: store.get('PRAGMA quick_check').quick_check === 'ok',
+    version: JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version, release: basename(root) }));
   for (const [route, file, type] of [['/', 'index.html', 'text/html'], ['/app.js', 'app.js', 'text/javascript'], ['/style.css', 'style.css', 'text/css']]) {
     app.get(route, async (req, reply) => reply.type(type).send(readFileSync(join(root, 'web', file))));
   }

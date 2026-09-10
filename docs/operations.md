@@ -37,7 +37,8 @@ journalctl --user -u work-commander -n 40 --no-pager
 
 ## MCP 与 skill
 
-显式授权后，`node scripts/register.js ~/.local/share/work-commander/current --confirm` 增加独立 MCP 定义和两个独立 skill symlink，保持现有定义及原 work-owner 不变。然后通过 Cockpit 的 `mcp/global-default {name:"work-commander",on:false}` 设置原生默认关闭，`mcp/refresh` 和 `skills/refresh` 刷新发现；不重载其它 session。安装失败要检查实际步骤，不盲重跑脚本。
+显式授权后，`node scripts/register.js ~/.local/share/work-commander/current --confirm` 增加独立 MCP 定义和两个独立 skill symlink，保持现有定义及原 work-owner 不变。调用 Cockpit `mcp/refresh` 发现新增定义，然后立即 `mcp/global-default {name:"work-commander",on:false}` 设置原生默认关闭，再 `skills/refresh` 刷新 skill 发现；不重载其它 session。安装失败要检查实际步骤，不盲重跑脚本。
+
 
 注册是用户级目录的发现入口，不等于批量启用。讨论方需显式启用 MCP `work-commander` 与 skill `work-commander`。本服务为**自己新建或明确继续的 owner**在投递前启用 MCP 和 `work-commander-owner`。不自动给其它历史 session 设置任何东西。
 
@@ -48,7 +49,7 @@ node src/admin.js issue caller ACTUAL_CALLER_SESSION_ID
 node src/admin.js issue viewer
 ```
 
-命令输出 credential 文件路径，不输出 token。将 caller 路径交给对应讨论 session，工具 `credential` 传路径；不要将 viewer 当 caller，不让 owner 用 caller 凭证。页面登录粘贴 viewer 文件中的 token（仅本机查看，不发到聊天）。退出清 cookie；永久失效：
+命令输出 credential 文件路径，不输出 token。将 caller 路径交给对应讨论 session，工具 `credential` 传路径；不要将 viewer 当 caller，不让 owner 用 caller 凭证。页面登录选择 viewer JSON 文件即可，也可粘贴其中的 token（仅本机使用，不发到聊天）。文件在浏览器本地解析，不存聊天或 localStorage。退出清 cookie；永久失效：
 
 ```sh
 node src/admin.js revoke /absolute/path/to/credential.json
