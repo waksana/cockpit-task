@@ -415,6 +415,22 @@ test('legacy continuation explicitly adopts original owner; old receipts never o
   assert.equal(f.s.task(id).status, 'dispatched'); assert.equal(f.s.task(id).version, 1);
   assert.notEqual(f.s.task(id).summary, 'Old research phase done');
 });
+test('imported unassigned ideas start on the same ID but uncertain execution cannot invent an owner', async t => {
+  const f = fixture(t), manifest = migrationFixture(f, [
+    { ownerRef: null, observedState: 'backlog' }, { ownerRef: null, observedState: 'unknown' },
+  ]);
+  const imported = importFixture(f, manifest);
+  await assert.rejects(f.w.execute(f.caller, 'work_dispatch', {
+    selection: 'new', taskId: imported.tasks[1].taskId, recordRevision: 1, goal, cwd: f.dir, idempotencyKey: 'unknown-original-001',
+  }), { code: 'NO_LEGACY_OWNER' });
+  assert.equal(f.c.calls.length, 0);
+  const result = await f.w.execute(f.caller, 'work_dispatch', {
+    selection: 'new', taskId: imported.tasks[0].taskId, recordRevision: 1, goal, cwd: f.dir, idempotencyKey: 'imported-idea-001',
+  });
+  assert.equal(result.task.taskId, imported.tasks[0].taskId);
+  assert.equal(result.task.goalVersion, 1);
+  assert.equal(f.c.calls.filter(c => c.name === 'session/new').length, 1);
+});
 test('v1 upgrade preserves native IDs, credentials, owner binding and unknown-operation checkpoints', t => {
   const dir = mkdtempSync(join(tmpdir(), 'wc-upgrade-'));
   let s = new Store(dir);

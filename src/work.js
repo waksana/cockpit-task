@@ -273,6 +273,8 @@ export class Work {
         this.store.run('UPDATE tasks SET owner=? WHERE id=?', legacy.owner_ref, task.id);
       } else {
         fail(legacy?.owner_ref, 'ORIGINAL_OWNER_REQUIRED', 'Legacy target must explicitly adopt its original owner, never create a replacement');
+        fail(legacy && !['backlog', 'deferred'].includes(legacy.observed_state), 'NO_LEGACY_OWNER',
+          'Historical execution has no unambiguous original owner; resolve its ownership rather than create a replacement');
         fail(task.status !== 'backlog' && task.status !== 'legacy', 'NOT_BACKLOG', 'Only an unstarted record can be initialized');
       }
       if (input.workstream && input.workstream !== task.workstream) {
