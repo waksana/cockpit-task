@@ -26,6 +26,14 @@ test('real MCP stdio client discovers and invokes scoped tools against HTTP serv
   assert.equal(tools.tools.length, 9);
   const result = await client.callTool({ name: 'work_read', arguments: { credential } });
   assert.deepEqual(JSON.parse(result.content[0].text), { items: [], nextBefore: null });
+  const register = { credential, action: 'create', title: 'One phrase is enough', idempotencyKey: 'mcp-backlog-001' };
+  const created = await client.callTool({ name: 'work_record', arguments: register });
+  assert.equal(created.isError, false);
+  const record = JSON.parse(created.content[0].text);
+  assert.equal(record.task.goalVersion, 0); assert.equal(record.task.ownerSessionId, null);
+  const replay = await client.callTool({ name: 'work_record', arguments: register });
+  assert.equal(JSON.parse(replay.content[0].text).task.taskId, record.task.taskId);
+  assert.equal(store.get('SELECT count(*) n FROM operations').n, 0);
   const escaped = await client.callTool({ name: 'work_read', arguments: { credential: '/etc/passwd' } });
   assert.equal(escaped.isError, true);
   assert.equal(JSON.stringify(tools).includes('callerSessionId'), false);

@@ -303,6 +303,15 @@ test('starting a backlog preserves task ID, serializes retries and protects acti
     disposition: 'abandoned', reason: 'Try closing an active owner', idempotencyKey: 'active-close-001',
   }), { code: 'EXECUTION_PROTECTED' });
 });
+test('backlog lane is FIFO while the general list retains latest-activity ordering', async t => {
+  const f = fixture(t);
+  const first = await f.w.execute(f.caller, 'work_record', { action: 'create', title: 'First', idempotencyKey: 'fifo-first-001' });
+  const second = await f.w.execute(f.caller, 'work_record', { action: 'create', title: 'Second', idempotencyKey: 'fifo-second-001' });
+  assert.deepEqual((await f.w.execute(f.caller, 'work_read', { group: 'backlog' })).items.map(v => v.taskId),
+    [first.task.taskId, second.task.taskId]);
+  assert.deepEqual((await f.w.execute(f.caller, 'work_read', {})).items.map(v => v.taskId),
+    [second.task.taskId, first.task.taskId]);
+});
 test('backlog dispatch unknown retains same task and owner and never becomes an editable unstarted record', async t => {
   const f = fixture(t), a = await f.w.execute(f.caller, 'work_record', { action: 'create', title: 'Later', idempotencyKey: 'record-create-001' });
   f.c.failure = { name: 'prompt', error: new EffectUnknown('after send') };
@@ -352,6 +361,23 @@ test('legacy import preserves repeated historical owners, original sources and c
   assert.equal(detail.callerSessionId, 'caller-fixture'); assert.equal(detail.legacy.callerRef, 'historical-caller');
   assert.equal((await f.w.execute(f.caller, 'work_read', { taskId: detail.taskId, view: 'sources' })).items[0].raw.original, 'complete original record 0');
   assert.equal((await f.w.execute(f.caller, 'work_read', { view: 'board' })).groups.deferred.items.length, 1);
+  assert.equal((await f.w.execute(f.caller, 'work_read', { query: 'complete original record 1' })).items.length, 0);
+  assert.equal((await f.w.execute(f.caller, 'work_read', { query: 'complete original record 1', includeClosed: true })).items[0].workstream, 'legacy-1');
+});
+test('import previews bound conflict output without hiding the total or allowing partial application', async t => {
+  const f = fixture(t), entries = Array.from({ length: 25 }, (_, i) => ({ workstream: `legacy-${i}` }));
+  for (const entry of entries) await f.w.execute(f.caller, 'work_record', {
+    action: 'create', title: entry.workstream, workstream: entry.workstream, idempotencyKey: `existing-${entry.workstream}`,
+  });
+  const manifest = migrationFixture(f, entries), plan = planImport(f.s, manifest, f.caller.session_id);
+  assert.equal(plan.conflicts.length, 20); assert.equal(plan.totalConflicts, 25);
+  assert.throws(() => f.s.tx(() => applyImport(f.s, manifest, f.caller.session_id, plan.planHash)), { code: 'IMPORT_CONFLICT' });
+  assert.equal(f.s.get('SELECT count(*) n FROM legacy_sources').n, 0);
+  assert.equal(f.c.calls.length, 0);
+});
+test('staging rejects a combined snapshot that its bounded reader could not load', t => {
+  const f = fixture(t);
+  assert.throws(() => migrationFixture(f, [{ raw: 'x'.repeat(4 * 1024 * 1024) }]), { code: 'MANIFEST_TOO_LARGE' });
 });
 test('import source differences and local late receipts cannot be silently overwritten', async t => {
   const f = fixture(t), manifest = migrationFixture(f, [{}]), imported = importFixture(f, manifest);

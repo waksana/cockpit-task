@@ -132,16 +132,17 @@ export class Work {
     if (input.group) { where.push('display_group=?'); args.push(input.group); }
     else if (!input.includeClosed && !input.status) where.push("display_group<>'closed'");
     if (input.query) {
-      where.push("(instr(lower(title),lower(?))>0 OR instr(lower(workstream),lower(?))>0 OR instr(lower(summary),lower(?))>0 OR instr(lower(notes),lower(?))>0)");
-      args.push(input.query, input.query, input.query, input.query);
+      where.push(`(instr(lower(title),lower(?))>0 OR instr(lower(workstream),lower(?))>0 OR instr(lower(summary),lower(?))>0
+        OR instr(lower(notes),lower(?))>0 OR instr(lower(artifacts),lower(?))>0
+        OR EXISTS (SELECT 1 FROM legacy_sources WHERE legacy_sources.task_id=records.id AND instr(lower(raw_record),lower(?))>0))`);
+      args.push(...Array(6).fill(input.query));
     }
     where.push('activity<?'); args.push(input.before ?? Number.MAX_SAFE_INTEGER, input.limit + 1);
     const items = s.all(`SELECT * FROM (
       SELECT tasks.*, ${groupSql} AS display_group,
-      CASE WHEN ${groupSql}='backlog' THEN 9007199254740991-tasks.rowid
-        ELSE (SELECT MAX(seq) FROM events WHERE task_id=tasks.id) END AS activity
+      ${input.group === 'backlog' ? '9007199254740991-tasks.rowid' : '(SELECT MAX(seq) FROM events WHERE task_id=tasks.id)'} AS activity
       FROM tasks LEFT JOIN legacy_records ON legacy_records.task_id=tasks.id
-    ) WHERE ${where.join(' AND ')} ORDER BY activity DESC LIMIT ?`, ...args);
+    ) AS records WHERE ${where.join(' AND ')} ORDER BY activity DESC LIMIT ?`, ...args);
     return { items: items.slice(0, input.limit).map(t => this.summary(t)),
       nextBefore: items.length > input.limit ? items[input.limit - 1].activity : null };
   }

@@ -41,6 +41,7 @@ export function stageManifest(directory, path) {
   for (const file of manifest.files) file.content = boundedRead(file.path);
   verifyFiles(manifest);
   const data = canonical(manifest), id = hash(data), staged = join(directory, 'import-staging');
+  fail(Buffer.byteLength(data) > 8 * 1024 * 1024, 'MANIFEST_TOO_LARGE', 'Combined migration manifest exceeds 8 MiB; split explicit source batches');
   mkdirSync(staged, { recursive: true, mode: 0o700 });
   const destination = join(staged, `${id}.json`);
   try { writeFileSync(destination, data, { flag: 'wx', mode: 0o600 }); }
@@ -97,12 +98,13 @@ export function planImport(store, manifest, manager) {
   const planHash = hash(canonical({ manifestId: manifest.id, manager, actions, conflicts }));
   return { manifestId: manifest.id, planHash, records: manifest.entries.length, tasks: groups(manifest).size,
     counts: Object.fromEntries(['insert', 'update', 'unchanged'].map(a => [a, actions.filter(v => v.action === a).length])),
-    conflicts, actions: actions.slice(0, 20), moreActions: Math.max(0, actions.length - 20), nativeCalls: 0 };
+    conflicts: conflicts.slice(0, 20), totalConflicts: conflicts.length,
+    actions: actions.slice(0, 20), moreActions: Math.max(0, actions.length - 20), nativeCalls: 0 };
 }
 export function applyImport(store, manifest, manager, expectedPlanHash) {
   const plan = planImport(store, manifest, manager);
   fail(!expectedPlanHash || expectedPlanHash !== plan.planHash, 'PLAN_CHANGED', 'Run a fresh preview; the manifest or task record revisions changed');
-  fail(plan.conflicts.length > 0, 'IMPORT_CONFLICT', JSON.stringify(plan.conflicts).slice(0, 2000));
+  fail(plan.totalConflicts > 0, 'IMPORT_CONFLICT', JSON.stringify(plan.conflicts).slice(0, 2000));
   store.run('INSERT OR IGNORE INTO import_snapshots(id,namespace,files,created) VALUES(?,?,?,?)',
     manifest.id, manifest.namespace, JSON.stringify(manifest.files), now());
   const tasks = [];

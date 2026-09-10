@@ -35,6 +35,6 @@ schema v2 在原 7 表上增加 3 表：
 
 ## 查询与展示
 
-默认 work_read 返回未结束任务；workstream 精确定位、query 搜标题/说明/摘要，includeClosed=true 查历史。board 为待办、执行、受阻、待决定/确认、暂缓、完成历史六栏，分别分页。detail 的 goal 可以为 null；sources 分页展示原文，历史 owner 链接明确标为“引用，未绑定”。
+默认 work_read 按最近活动返回未结束任务；workstream 精确定位，query 搜标题/说明/摘要/成果及导入原文，includeClosed=true 查历史。board 为待办、执行、受阻、待决定/确认、暂缓、完成历史六栏，分别分页；待办栏按登记先后排列，避免旧待办被新活动挤走。detail 的 goal 可以为 null；sources 分页展示原文，历史 owner 链接明确标为“引用，未绑定”。
 
 viewer 仍只读。所有登记、编辑、观察、查询和导入均零 Cockpit 调用，只有显式派工/通知才跨基础服务。没有自动续派、日程、广播或 Markdown 状态双写。
