@@ -37,4 +37,6 @@ v2 第一次在 MCP enable 遇到真实 `MCP connections are still settling`（H
 
 独立 MCP 已注册并设置**原生默认关闭**；两份独立 skill 已被原生发现。没有改原全局 work-owner、替换旧 tasks.md、迁移旧任务、重启 Cockpit、修改并行 owner 的代码或微信发送。正式旧账本切换与公网接入仍须单独确认。
 
+用户随后明确批准实际讨论方接入：仅对空闲的 `8d3fc61c-10a6-4cf1-9a00-07346b6514e7` 执行原生 MCP reload，确认 work-commander connected/enabled，讨论 skill 已 enabled，并签发绑定该 session 的 caller 凭证。**只用于新任务，旧任务不迁移**。未加载/修改其它历史 owner；fixture 会话是本项目明确创建的测试资源。
+
 可复现实证入口：`npm test`；`scripts/mcp-call.js`；`scripts/fixture-check.js`（仅允许 fixture-*）；`scripts/browser-probe.js`（使用本机已有 Chromium，不安装额外浏览器）。真实 fixture 会话保留历史、可卸载休眠，不作为常驻指挥角色。

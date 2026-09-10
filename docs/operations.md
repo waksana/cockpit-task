@@ -44,6 +44,8 @@ journalctl --user -u work-commander -n 40 --no-pager
 
 注册是用户级目录的发现入口，不等于批量启用。讨论方需显式启用 MCP `work-commander` 与 skill `work-commander`。本服务为**自己新建或明确继续的 owner**在投递前启用 MCP 和 `work-commander-owner`。不自动给其它历史 session 设置任何东西。
 
+登记前已加载的讨论 session 可能完全看不到新定义：全局 refresh 不会重载其现有连接。须用户授权后，在该 session 空闲时执行 Cockpit `mcp/reload-session`，核对列表，再单独 enable `work-commander`；重载会重新应用全局默认。不能把 enable 未知服务器的失败当已接入，也不自动重载运行中的讨论。
+
 管理员签发讨论方或只读凭证：
 
 ```sh
