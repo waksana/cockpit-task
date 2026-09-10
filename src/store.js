@@ -29,7 +29,7 @@ export class Store {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     chmodSync(join(this.directory, 'work.db'), 0o600);
     const schema = this.db.prepare('PRAGMA user_version').get().user_version;
-    fail(schema > 2, 'SCHEMA_TOO_NEW', 'Database was written by a newer release', 500);
+    fail(schema > 3, 'SCHEMA_TOO_NEW', 'Database was written by a newer release', 500);
     this.db.exec(`
       BEGIN IMMEDIATE;
       CREATE TABLE IF NOT EXISTS tasks (
@@ -92,6 +92,23 @@ export class Store {
           PRIMARY KEY(namespace,source_key)
         );
         PRAGMA user_version=2;
+      `);
+    });
+    if (schema < 3) this.tx(() => {
+      this.db.exec(`
+        CREATE TABLE dependencies (
+          seq INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id TEXT NOT NULL REFERENCES tasks(id),
+          prerequisite_id TEXT NOT NULL REFERENCES tasks(id),
+          goal_version INTEGER,
+          note TEXT NOT NULL DEFAULT '',
+          CHECK(task_id <> prerequisite_id),
+          CHECK(goal_version IS NULL OR goal_version > 0),
+          UNIQUE(task_id, prerequisite_id),
+          FOREIGN KEY(prerequisite_id, goal_version) REFERENCES versions(task_id, version)
+        );
+        CREATE INDEX dependencies_prerequisite ON dependencies(prerequisite_id);
+        PRAGMA user_version=3;
       `);
     });
   }

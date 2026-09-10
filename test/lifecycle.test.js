@@ -7,6 +7,58 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/store.js';
+import { Work } from '../src/work.js';
+
+test('v2 data migrates in a real server process and dependency edits survive two clean restarts', { timeout: 20000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'wc-dependency-life-'));
+  const store = new Store(directory), token = store.issue('caller', 'lifecycle-caller');
+  const caller = store.authenticate(token), work = new Work(store, {});
+  const ids = [];
+  for (const title of ['Dependent', 'Prerequisite']) {
+    ids.push((await work.execute(caller, 'work_record', { action: 'create', title, idempotencyKey: `life-create-${title}` })).task.taskId);
+  }
+  store.db.exec('DROP TABLE dependencies; PRAGMA user_version=2');
+  store.close();
+  const children = [];
+  const start = async () => {
+    const child = spawn(process.execPath, [join(process.cwd(), 'src/launch.js')], {
+      env: { ...process.env, WORK_DATA_DIR: directory, WORK_PORT: '18812', COCKPIT_URL: 'http://127.0.0.1:1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    children.push(child);
+    await Promise.race([
+      once(child.stdout, 'data'),
+      once(child, 'exit').then(([code]) => { throw new Error(`Service exited ${code}`); }),
+    ]);
+    return child;
+  };
+  const stop = async child => { const exited = once(child, 'exit'); child.kill('SIGTERM'); assert.equal((await exited)[0], 0); };
+  const call = async (name, input) => {
+    const response = await fetch(`http://127.0.0.1:18812/api/tools/${name}`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify(input),
+    });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  t.after(async () => {
+    for (const child of children) if (child.exitCode === null && child.signalCode === null) await stop(child);
+    rmSync(directory, { recursive: true });
+  });
+  let child = await start();
+  const args = { action: 'add', taskId: ids[0], prerequisiteId: ids[1], recordRevision: 1, idempotencyKey: 'life-add-dependency' };
+  const added = await call('work_dependency', args);
+  assert.equal(added.task.conditions.needsConfirmation, 1);
+  await stop(child); child = await start();
+  assert.deepEqual(await call('work_dependency', args), added);
+  const page = await call('work_read', { taskId: ids[0], view: 'dependencies' });
+  assert.equal(page.items[0].prerequisiteId, ids[1]);
+  assert.equal(page.items[0].reason, 'no_bound_goal');
+  await call('work_dependency', { ...args, action: 'remove', recordRevision: 2, idempotencyKey: 'life-remove-dependency' });
+  await stop(child); child = await start();
+  assert.equal((await call('work_read', { taskId: ids[0], view: 'dependencies' })).conditions.total, 0);
+  await stop(child);
+});
 
 test('killed process, restart, kernel lock and replay preserve unknown prompt', { timeout: 20000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'wc-life-'));

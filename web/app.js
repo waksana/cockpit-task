@@ -16,6 +16,11 @@ function stateLabel(task) {
   const disposition = { deferred: '暂缓', abandoned: '已放弃记录', archived: '已归档' }[task.disposition];
   return disposition ? `${disposition} · ${state}` : state;
 }
+function conditionLabel(conditions) {
+  return `前置条件 ${conditions.satisfied}/${conditions.total} 满足` +
+    (conditions.waiting ? ` · ${conditions.waiting} 等待交付` : '') +
+    (conditions.needsConfirmation ? ` · ${conditions.needsConfirmation} 需要确认` : '');
+}
 async function api(path, body) {
   const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const value = await response.json();
@@ -41,6 +46,7 @@ function render() {
       card.append(node('span', `${stateLabel(task)}${task.goalVersion ? ` · v${task.goalVersion}` : ' · 未建立执行授权'}`, 'badge'), node('h3', task.title || task.workstream), node('p', task.summary));
       if (task.legacy && !task.ownerSessionId) card.append(node('small', `来源观察：${task.legacy.observedAt}；非实时会话状态`));
       if (task.pendingOperationId) card.append(node('span', '有待处理投递操作', 'attention'));
+      if (task.conditions.total) card.append(node('small', conditionLabel(task.conditions)));
       card.append(node('small', new Date(task.updatedAt).toLocaleString()));
       card.onclick = () => { location.hash = task.taskId; };
       column.append(card);
@@ -74,6 +80,28 @@ async function detail() {
   const close = node('button', '关闭详情'); close.onclick = () => { location.hash = ''; }; panel.append(close);
   panel.append(node('h2', task.title || task.workstream), node('p', `${stateLabel(task)} · 记录 r${task.recordRevision} · 目标 v${task.goalVersion} · 已承接 v${task.acceptedGoalVersion ?? '—'}`));
   panel.append(node('code', task.workstream), node('p', task.notes, 'longtext'));
+  panel.append(node('h3', '前置条件'), node('p', conditionLabel(task.conditions)),
+    node('p', '就绪仅表示记录的前置条件满足，不等于授权或运行就绪；不自动派工，也不改变当前执行、暂停或决策状态。'));
+  if (task.conditions.total) {
+    const dependencies = node('div'), load = node('button', '查看前置明细');
+    let dependencyBefore;
+    load.onclick = async () => {
+      load.disabled = true;
+      try {
+        const page = await api('/api/read', { taskId: id, view: 'dependencies', limit: 10, ...(dependencyBefore ? { before: dependencyBefore } : {}) });
+        for (const item of page.items) {
+          const row = node('article', undefined, 'event'), link = node('a', item.title ?? item.prerequisiteId);
+          link.href = `#${encodeURIComponent(item.prerequisiteId)}`;
+          const reasons = { no_bound_goal: '需要确认：尚未绑定正式目标；授权后由 caller 显式重新登记',
+            goal_changed: '需要确认：前置目标已变更', delivered: '满足：指定当前目标已交付', not_delivered: '等待：指定目标尚未成功交付' };
+          row.append(link, node('p', `目标 v${item.prerequisiteGoalVersion ?? '—'} · ${reasons[item.reason]}`), node('p', item.note));
+          dependencies.append(row);
+        }
+        dependencyBefore = page.nextBefore; load.hidden = !dependencyBefore; load.textContent = '更多前置条件';
+      } catch (e) { error(e.message); } finally { load.disabled = false; }
+    };
+    panel.append(dependencies, load);
+  }
   if (task.goal) {
     for (const [label, value] of [['目标', task.goal.objective], ['范围', task.goal.scope], ['验收', task.goal.acceptance], ['授权', task.goal.authorization]]) panel.append(node('h3', label), node('p', value, 'longtext'));
   } else panel.append(node('p', '尚无本服务执行授权。登记、暂缓和历史导入均不会启动 owner。'));

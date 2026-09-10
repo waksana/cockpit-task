@@ -446,12 +446,12 @@ test('v1 upgrade preserves native IDs, credentials, owner binding and unknown-op
   s.run(`INSERT INTO operations(id,task_id,version,kind,request,status,step,inflight,steps,created,updated)
     VALUES('old-op','old-task',1,'dispatch','{}','unknown','prompt',1,'{"create":{"sessionId":"old-owner"}}',1,1)`);
   const token = s.issue('owner', 'old-owner', 'old-task'), original = s.authenticate(token);
-  s.db.exec(`DROP TABLE legacy_sources; DROP TABLE legacy_records; DROP TABLE import_snapshots;
+  s.db.exec(`DROP TABLE dependencies; DROP TABLE legacy_sources; DROP TABLE legacy_records; DROP TABLE import_snapshots;
     ALTER TABLE tasks DROP COLUMN title; ALTER TABLE tasks DROP COLUMN notes;
     ALTER TABLE tasks DROP COLUMN record_revision; ALTER TABLE tasks DROP COLUMN disposition;
     ALTER TABLE tasks DROP COLUMN sources; PRAGMA user_version=1;`);
   s.close(); s = new Store(dir);
-  assert.equal(s.get('PRAGMA user_version').user_version, 2);
+  assert.equal(s.get('PRAGMA user_version').user_version, 3);
   assert.equal(s.task('old-task').owner, 'old-owner');
   assert.equal(s.task('old-task').active_op, 'old-op');
   assert.deepEqual(s.authenticate(token), original);

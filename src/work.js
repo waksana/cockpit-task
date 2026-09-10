@@ -2,6 +2,7 @@ import { schemas } from './contracts.js';
 import { canonical, fail, hash, now, uid } from './store.js';
 import { EffectUnknown } from './cockpit.js';
 import { loadManifest, planImport, applyImport } from './migration.js';
+import { dependencySummary, readDependencies, editDependency } from './dependencies.js';
 
 const terminal = new Set(['delivered', 'failed', 'cancelled']);
 const groups = ['backlog', 'working', 'blocked', 'decision', 'deferred', 'closed'];
@@ -49,6 +50,7 @@ export class Work {
       recordKind: legacy ? 'imported' : task.version === 0 ? 'backlog' : 'native',
       ownerSessionId: task.owner, callerSessionId: task.caller,
       status: task.status, summary: task.summary, updatedAt: task.updated,
+      conditions: dependencySummary(this.store, task.id),
       ...(legacy ? { legacy: { ownerRef: legacy.owner_ref, callerRef: legacy.caller_ref, observedState: legacy.observed_state, observedAt: legacy.observed_at } } : {}),
       ...(task.active_op ? { pendingOperationId: task.active_op } : {}),
     };
@@ -83,6 +85,7 @@ export class Work {
       fail(input.view === 'board', 'INVALID_QUERY', 'board cannot be combined with taskId', 400);
       const task = s.task(input.taskId);
       fail(!this.visible(principal, task), 'FORBIDDEN', 'Task is outside credential scope', 403);
+      if (input.view === 'dependencies') return readDependencies(this, principal, task, input);
       if (input.view === 'events') {
         const items = s.all('SELECT * FROM events WHERE task_id=? AND seq<? ORDER BY seq DESC LIMIT ?',
           task.id, input.before ?? Number.MAX_SAFE_INTEGER, input.limit + 1);
@@ -162,6 +165,7 @@ export class Work {
       }
       let response;
       if (name === 'work_record') response = this.record(principal, input);
+      else if (name === 'work_dependency') response = editDependency(this, principal, input);
       else if (name === 'work_observe') response = this.observe(principal, input);
       else if (name === 'work_import') {
         const manifest = loadManifest(this.store.directory, input.manifestId);

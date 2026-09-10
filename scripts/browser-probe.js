@@ -80,6 +80,11 @@ try {
     await waitFor(`document.querySelector('#detail pre') && [...document.querySelectorAll('#detail pre')].some(p=>p.textContent.includes(${JSON.stringify(process.env.WORK_EXPECT_SOURCE)}))`);
     console.log(JSON.stringify({ sourceObserved: process.env.WORK_EXPECT_SOURCE }));
   }
+  if (process.env.WORK_EXPECT_DEPENDENCY) {
+    await cdp('Runtime.evaluate', { expression: "[...document.querySelectorAll('#detail button')].find(b=>b.textContent==='查看前置明细')?.click()" });
+    await waitFor(`document.getElementById('detail').textContent.includes(${JSON.stringify(process.env.WORK_EXPECT_DEPENDENCY)})`);
+    console.log(JSON.stringify({ dependencyObserved: process.env.WORK_EXPECT_DEPENDENCY }));
+  }
   if (process.env.WORK_SEARCH) {
     await cdp('Runtime.evaluate', { expression: `document.getElementById('search').value=${JSON.stringify(process.env.WORK_SEARCH)};document.getElementById('searchForm').requestSubmit()` });
     await waitFor("document.querySelectorAll('.card').length===1");

@@ -12,13 +12,14 @@
 
 本节是后续设计准则，不修改下列现行 API、必填参数、权限或执行行为。
 
-## 九个工具
+## 十个工具
 
 全部通过同一 MCP。`credential` 是管理员签发的受保护 JSON 文件路径，不是 token 或自报 sessionId。每项变更带稳定 `idempotencyKey`；同 key 同输入返回原操作/结果，换内容返回冲突。字段严格校验；任意命令、目标 caller 重绑定、批量迁移不在 API 中。
 
 | 工具 | 权限 | 关键输入 / 效果 |
 | --- | --- | --- |
 | work_record | caller | create 只需 title；update 用 taskId/recordRevision 修改标题、说明、来源、意向。零 Cockpit；不能停止或关闭活跃执行。 |
+| work_dependency | 两端同属的 caller | add/remove 用后续 taskId、前置 prerequisiteId、后续任务 recordRevision；add 可选前置目标版本和短说明，默认绑定当前正式版本。零派工/通知；read 的 dependencies 视图分页查询。 |
 | work_observe | 管理 legacy 的 caller | 带来源登记旧回执，默认只补历史。确认适用当前授权范围才 updateCurrent=true+reason；不能覆盖已 adopt 的执行。零 Cockpit/通知。 |
 | work_import | caller | preview/apply 本地私有 staging 中的 manifestId；apply 要匹配 planHash。原始来源、记录变化和原 owner 引用保留，零派单副作用。 |
 | work_dispatch | caller | new: workstream/goal/cwd；fork: workstream/goal/sourceSessionId/可选 toEventId；continue: taskId/goalVersion/message。模型默认 gpt-6-astra，可显式 reasoningEffort/contextTier。绑定 caller 来自凭证。 |
@@ -36,7 +37,21 @@ goal 的 objective/scope/acceptance/authorization 都必填。服务不将调查
 
 `recorded → dispatched → active / blocked / needs_decision / result_reported → delivered / failed / cancelled`。
 
-未开工是独立的 `backlog`，历史导入是 `legacy`，两者 goalVersion=0、无 acceptedVersion、无执行绑定。记录 disposition 的 open/deferred/abandoned/archived 不冒充执行状态；active 任务不能由记录编辑关闭。recordRevision 与 goalVersion 分离。
+未开工是独立的 `backlog`，历史导入是 `legacy`，两者 goalVersion=0、无 acceptedVersion、无执行绑定。记录 disposition 的 open/deferred/abandoned/archived 不冒充执行状态；active 任务不能由记录编辑关闭。recordRevision 与 goalVersion 分离，显式依赖增删只递增后续任务的 recordRevision。
+
+## 显式前置条件
+
+`work_dependency` 的 `taskId` 是**后续任务**，`prerequisiteId` 是**前置任务**；两端必须都属于当前 caller。除已有凭证、幂等键、后续记录并发版本外，不要求额外业务字段；`prerequisiteGoalVersion` 可选，不填时在事务内绑定前置当前正式版本，`note` 是可选短文本。显式版本必须匹配前置当前目标，不能把过期版本悄悄登记为满足。自依赖、重复、循环和不存在的引用均拒绝，失败不产生部分事件或版本更新。
+
+简表和 detail 的 `conditions` 仅含 ready、total、satisfied、waiting、needsConfirmation。`work_read taskId/view=dependencies` 按 limit/before 展开本任务的直接前置；不复制完整 goal 或逐层展开。关系事实可由后续 owner 读取，但前置标题只在有权读取前置任务时返回；不授予访问其目标、成果、来源或会话的权限。跨 caller 关系禁止，viewer 仍只有读取能力。
+
+- **满足**：绑定的正式 goalVersion 仍为当前版本，并已有该版本的完整 delivered 事件及 delivered 状态；通知是否成功与条件无关。
+- **等待**：当前绑定版本尚未成功交付，包括 failed、cancelled、仅 result_reported。没有自动重试或续派。
+- **需要确认**：登记时无正式 goal（含 legacy v0），或前置后来 amend。无绑定关系不会自动跟随首次授权，旧版本交付不满足新目标。caller 核对实际含义后显式 remove/add 绑定当前版本；不提供人工伪造 delivered 或阶段表达式。
+
+ready 只表示**记录的直接条件**满足，无前置时为 true；不是执行授权、原生运行就绪或“现在应该开工”。不查询 Cockpit 忙闲，不持久化另一套状态；查询时由当前记录推导。前置变化只使页面通过既有失效事件重读，不递归改下游状态或生成逐层通知。已有决策、暂停、活跃执行和历史完成不被关系编辑覆盖，显式 dispatch/continue 保持既有授权边界，不因依赖硬拦。幂等重放返回原变更回执；需要当前条件时另读 work_read。
+
+使用与两条待有权限 caller 登记的案例见 [任务依赖](task-dependencies.md)。
 
 投递操作另有 running/succeeded/failed/unknown；succeeded 仅表示请求得到基础服务受理。owner 要显式 accepted 当前版本才能报告进度或交付。idle 不是任务状态。目标变更将状态置 recorded，必须新版本承接。旧版本新回执返回 STALE_GOAL；旧幂等重放返回原版本结果，不改新版本。失败/取消同样是完整目标结束，不自动重开。
 

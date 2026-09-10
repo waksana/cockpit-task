@@ -23,7 +23,10 @@ test('real MCP stdio client discovers and invokes scoped tools against HTTP serv
   t.after(async () => { await client.close(); await app.close(); store.close(); rmSync(directory, { recursive: true }); });
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 9);
+  assert.equal(tools.tools.length, 10);
+  const dependencyTool = tools.tools.find(tool => tool.name === 'work_dependency');
+  assert.deepEqual(dependencyTool.inputSchema.required.sort(),
+    ['action', 'credential', 'idempotencyKey', 'prerequisiteId', 'recordRevision', 'taskId']);
   const result = await client.callTool({ name: 'work_read', arguments: { credential } });
   assert.deepEqual(JSON.parse(result.content[0].text), { items: [], nextBefore: null });
   const register = { credential, action: 'create', title: 'One phrase is enough', idempotencyKey: 'mcp-backlog-001' };
@@ -33,6 +36,25 @@ test('real MCP stdio client discovers and invokes scoped tools against HTTP serv
   assert.equal(record.task.goalVersion, 0); assert.equal(record.task.ownerSessionId, null);
   const replay = await client.callTool({ name: 'work_record', arguments: register });
   assert.equal(JSON.parse(replay.content[0].text).task.taskId, record.task.taskId);
+  assert.equal(store.get('SELECT count(*) n FROM operations').n, 0);
+  const prerequisite = JSON.parse((await client.callTool({ name: 'work_record', arguments: {
+    ...register, title: 'Prerequisite', idempotencyKey: 'mcp-prerequisite-001',
+  } })).content[0].text);
+  const added = await client.callTool({ name: 'work_dependency', arguments: {
+    credential, action: 'add', taskId: record.task.taskId, prerequisiteId: prerequisite.task.taskId,
+    recordRevision: record.task.recordRevision, idempotencyKey: 'mcp-dependency-001',
+  } });
+  assert.equal(added.isError, false);
+  assert.equal(JSON.parse(added.content[0].text).task.conditions.needsConfirmation, 1);
+  const dependencies = await client.callTool({ name: 'work_read', arguments: {
+    credential, taskId: record.task.taskId, view: 'dependencies',
+  } });
+  assert.equal(JSON.parse(dependencies.content[0].text).items[0].reason, 'no_bound_goal');
+  const removed = await client.callTool({ name: 'work_dependency', arguments: {
+    credential, action: 'remove', taskId: record.task.taskId, prerequisiteId: prerequisite.task.taskId,
+    recordRevision: 2, idempotencyKey: 'mcp-remove-dependency-001',
+  } });
+  assert.equal(removed.isError, false);
   assert.equal(store.get('SELECT count(*) n FROM operations').n, 0);
   const escaped = await client.callTool({ name: 'work_read', arguments: { credential: '/etc/passwd' } });
   assert.equal(escaped.isError, true);

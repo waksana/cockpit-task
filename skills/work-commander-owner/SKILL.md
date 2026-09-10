@@ -24,6 +24,8 @@ owner 负责完整结果并遵守目标项目的工程/运行规范（Git 服务
 
 待办/导入不是授权：goalVersion=0、legacy ownerRef 不表示服务派工；须显式派单和绑定 owner 凭证。recordRevision 元数据变化不使已承接的 goalVersion 失效。
 
+需要前置背景时按需读本 task 的 conditions 或 `work_read taskId/view=dependencies`，不遍历其它任务。ready 只指直接记录条件满足，不是授权或原生运行就绪；failed/cancelled 不是满足，未绑定正式目标或前置 amend 需 caller 核对。关系编辑不改变当前执行、暂停或决策，不能凭 ready 自动开工/续派；新关系也不会撤销已有承接。owner 不能增删关系、冒充 caller 或获取其凭证，仍只按真实目标报告进展与结果。
+
 旧通道在途目标继续原派单的最终回复义务，无需加载旧 work-owner；不因入口退役或记录迁入而补历史回执、取用 caller 凭证、新建 owner 或重开任务。caller 用 `work_observe` 登记有来源的旧回执；不能把旧观察冒充本服务 accepted/delivered。
 
 ## 授权与结果

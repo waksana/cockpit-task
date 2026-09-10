@@ -47,13 +47,23 @@ export const schemas = {
     taskId: id.optional(),
     workstream: id.optional(),
     query: z.string().trim().min(1).max(200).optional(),
-    view: z.enum(['summary', 'board', 'detail', 'events', 'operations', 'sources']).default('summary'),
+    view: z.enum(['summary', 'board', 'detail', 'events', 'operations', 'sources', 'dependencies']).default('summary'),
     group: z.enum(['backlog', 'working', 'blocked', 'decision', 'deferred', 'closed']).optional(),
     status: z.enum(['backlog', 'legacy', 'recorded', 'dispatched', 'active', 'blocked', 'needs_decision', 'result_reported', 'delivered', 'failed', 'cancelled']).optional(),
     includeClosed: z.boolean().default(false),
     limit: z.number().int().min(1).max(50).default(10),
     before: z.number().int().positive().optional(),
   }).strict(),
+  work_dependency: z.object({
+    ...mutation, action: z.enum(['add', 'remove']),
+    taskId: id, prerequisiteId: id, recordRevision: version,
+    prerequisiteGoalVersion: version.optional(),
+    note: z.string().trim().min(1).max(1000).optional(),
+  }).strict().superRefine((v, ctx) => {
+    if (v.action === 'remove' && (v.prerequisiteGoalVersion !== undefined || v.note !== undefined)) {
+      ctx.addIssue({ code: 'custom', message: 'remove requires only the two task IDs and recordRevision; version/note apply to add' });
+    }
+  }),
   work_record: z.object({
     ...mutation, action: z.enum(['create', 'update']),
     taskId: id.optional(), recordRevision: version.optional(),
@@ -115,7 +125,8 @@ export const schemas = {
 };
 export const descriptions = {
   work_dispatch: 'Explicitly execute a complete authorized goal: new/fork may start an existing backlog taskId+recordRevision without changing identity; continue requires original owner/version; adopt explicitly binds an imported legacy task to its preserved original owner. Never register-only; never automatic retry or filesystem isolation. Default Astra.',
-  work_read: 'Unified work/backlog/history query, zero Cockpit calls. Defaults to 10 open records; includeClosed searches history, query searches task text, workstream selects exact task, sources pages immutable legacy records. board has independent lanes; no native session polling.',
+  work_read: 'Unified work/backlog/history query, zero Cockpit calls. Defaults to 10 open records; includeClosed searches history, sources pages immutable legacy records, taskId+dependencies pages prerequisites. Dependency readiness means recorded conditions only, not execution authorization. board has independent lanes; no native session polling.',
+  work_dependency: 'Caller-only add/remove an explicit prerequisite between two tasks belonging to this caller. Uses dependent task recordRevision and idempotencyKey. add binds prerequisiteGoalVersion (default: current authorized version; no goal stays unconfirmed). Only current-version delivered satisfies it; later amendments require explicit remove/add. Query with work_read taskId+dependencies. No dispatch, pause, status changes or notifications.',
   work_record: 'Caller-only lightweight create/update: create needs just title and idempotency key, no goal/model/cwd/session. Update uses recordRevision (not goalVersion). Metadata never changes execution authorization. Deferring/abandoning records cannot stop or close an active owner. Zero Cockpit calls.',
   work_observe: 'Caller-only register a sourced legacy receipt/assessment without pretending to be owner or creating native accepted/delivered events. Requires recordRevision, observedAt and source. Cannot overwrite an adopted current execution. Zero Cockpit calls, notifications or owner wakeups.',
   work_import: 'Caller-only preview/apply a locally staged, hash-bound task-record manifest. Apply requires exact planHash; preserves immutable sources, legacy owner references and local edits. Never binds executing owners, sends historical receipts or calls Cockpit. Use admin migration-stage to stage source files.',

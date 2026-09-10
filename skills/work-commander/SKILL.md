@@ -16,6 +16,7 @@ description: 统一管理待办、任务和历史记录的讨论入口。一句�
 操作前取得管理员签发、绑定**本讨论 session** 的 credential 文件路径；工具 `credential` 传路径，不读取/打印 token，不猜别人的凭证。两入口共用 `work-commander` MCP，按凭证而非自报 sessionId 划分权限；同用户本地信任边界不是恶意 agent 沙箱。
 
 - 只想记一下：`work_record` action=create，只需 title、idempotencyKey；不用 goal、cwd、模型或技术 slug，不创建 session。action=update 用 taskId、recordRevision；disposition 为 open/deferred/abandoned/archived，非 open 必须有 reason。记录操作零 Cockpit 调用，不授权开工，也不停止活跃 owner 或撤销副作用。
+- 明确前置：`work_dependency` action=add/remove，taskId 是后续、prerequisiteId 是前置，带后续 recordRevision、幂等键；两端须归本 caller。add 默认绑定前置当前正式 goalVersion，可选 prerequisiteGoalVersion/note。无正式目标或后来 amend 均需确认，只有指定当前版本完整 delivered 才满足；重新绑定要显式 remove/add，不伪造 legacy 完成。`work_read` 的 conditions 只给直接条件数量，taskId/view=dependencies 按需展开。ready 不等于授权或运行就绪，关系增删不派工、不改执行/决策状态、不重开历史完成。
 - 现在做：`work_dispatch` selection=new/fork，已有待办带**原 taskId、recordRevision**，没有记录则带 workstream；完整 goal 为 objective/scope/acceptance/authorization。new 带绝对 cwd，fork 带 sourceSessionId（可选 toEventId，不带 cwd）。默认 GPT-6 Astra，不静默降级。
 - 同目标继续：传 selection=continue、taskId、goalVersion、message，不新建 session。目标/授权变化先 `work_amend`，得到新版本后显式 continue；修订本身不投递、不自动开工。
 - 旧工作后续执行：按需读 detail/sources，明确新授权，再 selection=adopt，带 taskId、recordRevision、完整 goal，绑定原历史 owner，不另建第二个 owner。历史多目标引用不等于正式绑定；冲突直接问用户，不放宽单目标规则。
