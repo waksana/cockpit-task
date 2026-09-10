@@ -2,6 +2,8 @@
 
 要求 Linux、Node 24+、npm、flock、systemd user manager；Cockpit 公开接口在本机 8771。无需另一个 Copilot runtime。常驻服务数据与源码隔离。
 
+浏览器需有中文字体；本机 headless Chromium 最初缺 CJK 字体，已补装 `fonts-noto-cjk`。工作页不从第三方 CDN 加载字体或脚本。
+
 ## 固定版本安装
 
 标准本机路径可直接在已提交、干净仓库运行 `bash scripts/install.sh`：建立固定 commit release、按 lockfile 安装依赖，安全停止**本服务**、备份数据库、原子切换、安装 user unit、启动并核对健康 release。失败不自动回滚或重放副作用；保留 build 目录和备份供核对。MCP/skill 注册仍是后文的显式步骤。自定义数据目录需先按下文配置环境和 unit，不能仅改一次 shell 变量。
