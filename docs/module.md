@@ -29,6 +29,9 @@ its native busy/schedule fences and exact result validation. Old completed
 checkpoints cannot override contradictory current module state. An HTTP 200
 dispatch envelope alone is not success: check `operation.status`. Existing
 failed/unknown dispatches are not automatically retried or assigned new owners.
+MCP preserves that same HTTP result body and marks failed/unknown operations
+with `isError:true`. Its reported version comes from its installed `package.json`,
+not a separate hardcoded version or a fabricated native-state mirror.
 
 ## Use-time native target checks
 

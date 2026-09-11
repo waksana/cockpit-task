@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { join, relative, isAbsolute } from 'node:path';
 import { schemas, descriptions } from './contracts.js';
 import { readCredential } from './store.js';
@@ -11,7 +11,8 @@ const url = process.env.WORK_URL ?? 'http://127.0.0.1:8790';
 const parsed = new URL(url);
 if (parsed.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)) throw new Error('MCP requires a local work service');
 const credentialRoot = realpathSync(process.env.WORK_CREDENTIAL_DIR ?? join(dataDirectory(), 'credentials'));
-const server = new McpServer({ name: 'work-commander', version: '1.2.5' });
+const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const server = new McpServer({ name: 'work-commander', version });
 for (const [name, schema] of Object.entries(schemas)) {
   server.registerTool(name, {
     description: descriptions[name],

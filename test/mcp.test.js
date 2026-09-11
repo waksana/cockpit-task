@@ -5,14 +5,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { Store } from '../src/store.js';
+import { Store, WorkError, readCredential } from '../src/store.js';
 import { createApp } from '../src/server.js';
 
 test('real MCP stdio client discovers and invokes scoped tools against HTTP service', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'wc-mcp-')), store = new Store(directory);
   mkdirSync(join(directory, 'credentials'), { mode: 0o700 });
   const credential = store.credentialFile(store.issue('caller', 'fixture-caller'), 'caller');
-  const { app } = createApp({ store, cockpit: {}, port: 18791 });
+  let targetChecks = 0;
+  const cockpit = { async meta(sessionId) {
+    targetChecks++;
+    assert.equal(sessionId, 'fixture-caller');
+    throw new WorkError('SESSION_NOT_FOUND', 'Isolated fixture native caller is missing', 404);
+  } };
+  const { app } = createApp({ store, cockpit, port: 18791 });
   await app.listen({ host: '127.0.0.1', port: 18791 });
   const transport = new StdioClientTransport({
     command: process.execPath, args: [join(process.cwd(), 'src/mcp.js')],
@@ -67,6 +73,23 @@ test('real MCP stdio client discovers and invokes scoped tools against HTTP serv
   } });
   assert.equal(removed.isError, false);
   assert.equal(store.get('SELECT count(*) n FROM operations').n, 0);
+  assert.equal(targetChecks, 0);
+  const dispatch = { selection: 'new', taskId: record.task.taskId,
+    recordRevision: store.task(record.task.taskId).record_revision, cwd: directory,
+    goal: { objective: 'Fixture goal', scope: 'Private fixture', acceptance: 'No native creation', authorization: 'Fixture only' },
+    idempotencyKey: 'mcp-missing-caller' };
+  const failed = await client.callTool({ name: 'work_dispatch', arguments: { credential, ...dispatch } });
+  assert.equal(failed.isError, true);
+  const failure = JSON.parse(failed.content[0].text);
+  assert.equal(failure.operation.status, 'failed');
+  assert.match(failure.operation.error, /SESSION_NOT_FOUND/);
+  assert.equal(failure.task.ownerSessionId, null);
+  const http = await app.inject({ method: 'POST', url: '/api/tools/work_dispatch', payload: dispatch,
+    headers: { host: '127.0.0.1:18791', authorization: `Bearer ${readCredential(credential)}` } });
+  assert.equal(http.statusCode, 200);
+  assert.deepEqual(http.json(), failure);
+  assert.equal(targetChecks, 1, 'HTTP readback does not replay the failed native lookup');
+  assert.equal(store.get('SELECT count(*) n FROM credentials').n, 1);
   const escaped = await client.callTool({ name: 'work_read', arguments: { credential: '/etc/passwd' } });
   assert.equal(escaped.isError, true);
   assert.equal(JSON.stringify(tools).includes('callerSessionId'), false);
