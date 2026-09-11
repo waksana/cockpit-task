@@ -10,6 +10,7 @@
 
 - 外部只读工作页：[task.rbym47.com](https://task.rbym47.com/)，由现有 Passkey Gate 保护；新主机需设备验证，不在浏览器放 Task 凭证。接入与边界见[HTTPS 工作页](docs/passkey-access.md)。
 - 工作页不包含登录、凭证输入或认证管理；本机 API/MCP 的 bearer 鉴权仍保留，浏览器通过上方受保护入口访问。
+- [工作台阅读与交互](docs/dashboard.md)：真实已加载数量概览、按阶段分组的单列表、独立分页与任务详情；包含隔离合成预览方式。
 - 服务：`systemctl --user status work-commander`；数据 `~/.local/state/work-commander/`。
 - MCP：`node <安装目录>/src/mcp.js`（stdio），默认连接本机 8790。
 - 文档：[待办与统一记录](docs/backlog.md) · [接入和运行](docs/operations.md) · [工具与可靠性边界](docs/contract.md) · [统一迁入范围与交付](docs/unified-records-delivery.md) · [首版实证](docs/acceptance.md)。
