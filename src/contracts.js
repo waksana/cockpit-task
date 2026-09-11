@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 const id = z.string().min(1).max(120).regex(/^[a-zA-Z0-9_-]+$/);
+const modelId = z.string().min(1).max(120).regex(/^[a-zA-Z0-9_.-]+$/);
 const text = z.string().trim().min(1).max(8000);
 const version = z.number().int().positive();
 const key = z.string().min(8).max(120).regex(/^[a-zA-Z0-9_.:-]+$/);
@@ -21,7 +22,7 @@ export const schemas = {
     cwd: z.string().min(1).max(2048).optional(),
     sourceSessionId: id.optional(),
     toEventId: id.optional(),
-    modelId: id.default('gpt-6-astra'),
+    modelId: modelId.default('gpt-6-astra'),
     reasoningEffort: z.string().max(30).optional(),
     contextTier: z.enum(['default', 'long_context']).optional(),
     message: text.optional(),

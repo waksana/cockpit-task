@@ -1,6 +1,6 @@
 # Managed Cockpit Task module
 
-`module.json` is the schema-v1 official module artifact (package version 1.2.3).
+`module.json` is the schema-v1 official module artifact (package version 1.2.4).
 It declares explicit commander and owner roles with isolated role instruction and
 skill roots. Both use `cockpit-task` at `src/mcp.js`; existing `work-commander`
 MCP/skill installation paths remain available for legacy clients. Selecting a

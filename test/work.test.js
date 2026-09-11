@@ -47,6 +47,66 @@ function fixture(t, options) {
     dispatch(extra = {}) { return w.execute(caller, 'work_dispatch', { selection: 'new', cwd: dir, workstream: 'fixture', goal, idempotencyKey: 'dispatch-001', ...extra }); },
   };
 }
+test('HTTP dispatch accepts dotted models without relaxing other IDs or reserving invalid inputs', async t => {
+  for (const modelId of ['gpt-4.1', 'gpt-5.5']) {
+    const f = fixture(t), { app } = createApp({ store: f.s, cockpit: f.c });
+    t.after(() => app.close());
+    const token = f.s.issue('caller', 'model-caller');
+    const input = { selection: 'new', cwd: f.dir, workstream: 'fixture', goal,
+      modelId, idempotencyKey: 'dotted-model-001' };
+    const dispatch = payload => app.inject({ method: 'POST', url: '/api/tools/work_dispatch', payload,
+      headers: { host: '127.0.0.1:8790', authorization: `Bearer ${token}` } });
+    const invalidModels = ['', 'x'.repeat(121), `${modelId}\n`, `${modelId}\r`, `${modelId}\t`,
+      `${modelId}\0`, `${modelId}\u001b`, `${modelId}\u007f`, ` ${modelId}`, `${modelId} `,
+      `../${modelId}`, `/models/${modelId}`, `models\\${modelId}`, `https://models/${modelId}`,
+      `models%2f${modelId}`];
+    const invalid = [
+      ...invalidModels.map(value => ({ ...input, modelId: value })),
+      ...['taskId', 'workstream', 'sourceSessionId', 'toEventId'].map(field => ({ ...input, [field]: 'invalid.id' })),
+    ];
+    const credentialCount = f.s.get('SELECT count(*) n FROM credentials').n;
+    for (const payload of invalid) {
+      const response = await dispatch(payload);
+      assert.equal(response.statusCode, 400, JSON.stringify(payload));
+      assert.equal(response.json().error, 'INVALID_INPUT');
+    }
+    assert.equal(f.c.calls.length, 0);
+    assert.equal(f.s.get('SELECT count(*) n FROM tasks').n, 0);
+    assert.equal(f.s.get('SELECT count(*) n FROM operations').n, 0);
+    assert.equal(f.s.get('SELECT count(*) n FROM credentials').n, credentialCount);
+    const response = await dispatch(input);
+    assert.equal(response.statusCode, 200);
+    const result = response.json();
+    assert.equal(result.operation.status, 'succeeded');
+    assert.deepEqual(f.c.calls.find(call => call.name === 'setModel').body,
+      { sessionId: result.task.ownerSessionId, modelId });
+    const calls = f.c.calls.length;
+    const repeated = await dispatch(input);
+    assert.equal(repeated.json().task.taskId, result.task.taskId);
+    assert.equal(f.c.calls.length, calls);
+    assert.equal(f.c.calls.filter(call => call.name === 'session/new').length, 1);
+    assert.equal(f.c.calls.filter(call => call.name === 'prompt').length, 1);
+    assert.equal(f.s.get("SELECT count(*) n FROM credentials WHERE role='owner'").n, 1);
+  }
+});
+test('dotted model dispatch still requires authoritative native model confirmation', async t => {
+  const f = fixture(t);
+  const call = f.c.call.bind(f.c);
+  f.c.call = async (name, body) => {
+    if (name === 'setModel') {
+      f.c.calls.push({ name, body });
+      return { acknowledged: true };
+    }
+    return call(name, body);
+  };
+  const result = await f.dispatch({ modelId: 'gpt-4.1' });
+  assert.notEqual(result.operation.status, 'succeeded');
+  assert.equal(f.c.calls.filter(call => call.name === 'setModel').length, 1);
+  assert.equal(f.c.calls.some(call => call.name === 'prompt'), false);
+  const calls = f.c.calls.length;
+  await f.dispatch({ modelId: 'gpt-4.1' });
+  assert.equal(f.c.calls.length, calls);
+});
 test('one-call dispatch, owner reports, final single notification and compact read', async t => {
   const f = fixture(t), result = await f.dispatch(), id = result.task.taskId, owner = f.owner(id);
   assert.equal(result.operation.status, 'succeeded');

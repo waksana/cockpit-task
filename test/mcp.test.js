@@ -25,6 +25,16 @@ test('real MCP stdio client discovers and invokes scoped tools against HTTP serv
   assert.equal(client.getServerVersion().version, JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version);
   const tools = await client.listTools();
   assert.equal(tools.tools.length, 10);
+  const dispatchTool = tools.tools.find(tool => tool.name === 'work_dispatch');
+  const modelSchema = dispatchTool.inputSchema.properties.modelId;
+  assert.equal(modelSchema.default, 'gpt-6-astra');
+  for (const modelId of ['gpt-4.1', 'gpt-5.5']) assert.match(modelId, new RegExp(modelSchema.pattern));
+  for (const modelId of ['gpt-4.1\n', '../gpt-4.1', 'models\\gpt-5.5']) {
+    assert.doesNotMatch(modelId, new RegExp(modelSchema.pattern));
+  }
+  for (const field of ['taskId', 'workstream', 'sourceSessionId', 'toEventId']) {
+    assert.doesNotMatch('invalid.id', new RegExp(dispatchTool.inputSchema.properties[field].pattern));
+  }
   const dependencyTool = tools.tools.find(tool => tool.name === 'work_dependency');
   assert.deepEqual(dependencyTool.inputSchema.required.sort(),
     ['action', 'credential', 'idempotencyKey', 'prerequisiteId', 'recordRevision', 'taskId']);
