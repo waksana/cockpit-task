@@ -1,6 +1,6 @@
 ---
 name: cockpit-task-commander
-description: Cockpit Task commander role: explicitly register, authorize and dispatch complete goals using a session-bound credential; no automatic scheduling.
+description: "Cockpit Task commander role: explicitly register, authorize and dispatch complete goals using a session-bound credential; no automatic scheduling."
 ---
 
 # Explicit work coordination

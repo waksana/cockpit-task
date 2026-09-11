@@ -1,6 +1,6 @@
 ---
 name: cockpit-task-owner
-description: Cockpit Task owner role: accept the current bound authorization, complete one whole goal, and deliver once through the service.
+description: "Cockpit Task owner role: accept the current bound authorization, complete one whole goal, and deliver once through the service."
 ---
 
 # Own the complete authorized result

@@ -1,6 +1,6 @@
 ---
 name: work-commander-owner
-description: Work Commander执行方协作入口。一项独立完整目标一个owner，同目标调查、实现、修正和交付负责到底；按授权版本报告重要进展，真实决策在本session问用户，服务唯一通知caller。
+description: "Work Commander执行方协作入口。一项独立完整目标一个owner，同目标调查、实现、修正和交付负责到底；按授权版本报告重要进展，真实决策在本session问用户，服务唯一通知caller。"
 ---
 
 # Owner：接完整结果，对结果负责

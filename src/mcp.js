@@ -11,7 +11,7 @@ const url = process.env.WORK_URL ?? 'http://127.0.0.1:8790';
 const parsed = new URL(url);
 if (parsed.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)) throw new Error('MCP requires a local work service');
 const credentialRoot = realpathSync(process.env.WORK_CREDENTIAL_DIR ?? join(dataDirectory(), 'credentials'));
-const server = new McpServer({ name: 'work-commander', version: '1.2.1' });
+const server = new McpServer({ name: 'work-commander', version: '1.2.2' });
 for (const [name, schema] of Object.entries(schemas)) {
   server.registerTool(name, {
     description: descriptions[name],
