@@ -85,6 +85,13 @@ test('managed new and fork select owner explicitly without Assistant or legacy g
   for (const selection of ['new', 'fork']) {
     const f = fixture(t, { moduleVersion: '1.2.0' });
     if (selection === 'fork') f.c.sessions.set('source', { loaded: true, status: 'idle' });
+    const call = f.c.call.bind(f.c);
+    f.c.call = async (name, body) => {
+      if (name === 'session/modules/apply') assert.equal(f.c.sessions.get(body.sessionId).loaded, true);
+      const result = await call(name, body);
+      if (name === 'session/fork') f.c.sessions.get(result.sessionId).loaded = false;
+      return result;
+    };
     const result = await f.w.execute(f.caller, 'work_dispatch', {
       selection, ...(selection === 'new' ? { cwd: f.dir } : { sourceSessionId: 'source' }),
       workstream: 'managed', goal, idempotencyKey: 'managed-dispatch',
@@ -94,6 +101,12 @@ test('managed new and fork select owner explicitly without Assistant or legacy g
     if (selection === 'new') assert.deepEqual(created.body, { cwd: f.dir, modules: f.w.ownerModules });
     else assert.deepEqual(created.body, { sessionId: 'source' });
     const role = f.c.calls.find(c => c.name === 'session/modules/apply');
+    if (selection === 'fork') {
+      const resumed = f.c.calls.find(c => c.name === 'session/reload');
+      assert.deepEqual(resumed.body, { sessionId: result.task.ownerSessionId });
+      assert.ok(f.c.calls.indexOf(created) < f.c.calls.indexOf(resumed));
+      assert.ok(f.c.calls.indexOf(resumed) < f.c.calls.indexOf(role));
+    }
     assert.deepEqual(role.body, {
       sessionId: result.task.ownerSessionId, selections: f.w.ownerModules, operationId: result.operation.operationId,
     });
@@ -104,6 +117,17 @@ test('managed new and fork select owner explicitly without Assistant or legacy g
     assert.equal(f.s.get("SELECT count(*) AS n FROM credentials WHERE role='caller'").n, 1);
     assert.equal(JSON.stringify(role.body).includes('assistant'), false);
   }
+});
+test('native schedule refusal during managed apply never cancels schedules or sends a prompt', async t => {
+  const f = fixture(t, { moduleVersion: '1.2.0' });
+  f.c.failure = { name: 'session/modules/apply', error: new EffectUnknown('Session has active schedules') };
+  const result = await f.dispatch();
+  assert.equal(result.operation.status, 'unknown');
+  assert.equal(result.operation.step, 'module');
+  assert.equal(f.c.calls.some(c => c.name === 'prompt' || /schedule|cancel|stop/.test(c.name)), false);
+  const calls = f.c.calls.length;
+  await f.dispatch();
+  assert.equal(f.c.calls.length, calls);
 });
 test('managed owner role failure preserves the same owner and does not send or automatically replay', async t => {
   const f = fixture(t, { moduleVersion: '1.2.0' });

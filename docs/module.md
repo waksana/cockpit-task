@@ -130,8 +130,15 @@ session/modules/apply {
 }
 ```
 
-`session/fork` retains its existing source/event body; the new child is explicitly
-applied the owner role before the goal prompt. Existing owners on explicit
+`session/fork` retains its existing source/event body and returns an unloaded
+child. Task reads that child and explicitly calls `session/reload {sessionId}`,
+reads back the loaded session/model, then calls `session/modules/apply`.
+Apply requires an already loaded, safe-idle session without active native
+schedules; native fork also refuses source schedules/queued work. Task does not
+stop schedules or clear work to force this boundary. Cold load/resume alone does
+not initialize a role or send a seed prompt. Only a response with `phase:"applied"`,
+the correct sessionId and exactly the pinned Task owner selection permits the
+normal business goal prompt. Existing owners on explicit
 continue/adopt use the same apply endpoint; model/cwd/task binding semantics do
 not change. Role application is a persisted operation step: a failure/unknown
 result prevents prompting and does not automatically replay or replace the owner.
