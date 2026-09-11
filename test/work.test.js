@@ -113,6 +113,8 @@ test('managed new and fork select owner explicitly without Assistant or legacy g
     assert.equal(f.c.calls.some(c => /session-toggle/.test(c.name)), false);
     assert.ok(f.c.calls.indexOf(role) < f.c.calls.findIndex(c => c.name === 'prompt'));
     assert.match(f.c.calls.at(-1).body.text, /MCP cockpit-task credential=/);
+    assert.match(f.c.calls.at(-1).body.text, /Use skill cockpit-task-owner/);
+    assert.doesNotMatch(f.c.calls.at(-1).body.text, /Use skill work-commander-owner/);
     assert.equal(f.owner(result.task.taskId).role, 'owner');
     assert.equal(f.s.get("SELECT count(*) AS n FROM credentials WHERE role='caller'").n, 1);
     assert.equal(JSON.stringify(role.body).includes('assistant'), false);

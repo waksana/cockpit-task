@@ -7,6 +7,12 @@ MCP/skill installation paths remain available for legacy clients. Selecting a
 role is not business authorization or a credential. Owner role selection must not
 inherit Assistant identity from cwd or a fork.
 
+Managed skills use unique discovery names `cockpit-task-commander` and
+`cockpit-task-owner` beneath `skills/commander/` and `skills/owner/`. Role
+instructions and managed goal prompts reference these module-only names, avoiding
+native name deduplication with global/project/bundled skills. The original
+`skills/work-commander` and `skills/work-commander-owner` files remain unchanged.
+
 ## Processes and persistent paths
 
 Cockpit, Task and Assistant remain independent processes. Task listens only on

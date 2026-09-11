@@ -1,5 +1,5 @@
 ---
-name: work-commander
+name: cockpit-task-commander
 description: Cockpit Task commander role: explicitly register, authorize and dispatch complete goals using a session-bound credential; no automatic scheduling.
 ---
 

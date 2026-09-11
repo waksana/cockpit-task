@@ -164,8 +164,12 @@ test('module paths are opt-in and manifest roles are explicit, isolated roots', 
   assert.deepEqual(manifest.roles.map(r => r.id), ['commander', 'owner']);
   for (const role of manifest.roles) {
     assert.deepEqual(Object.keys(role.mcp), ['cockpit-task']);
-    const skill = role.id === 'owner' ? 'work-commander-owner' : 'work-commander';
+    const skill = role.id === 'owner' ? 'cockpit-task-owner' : 'cockpit-task-commander';
     assert.ok(readFileSync(new URL(`../${role.skills[0]}/${skill}/SKILL.md`, import.meta.url), 'utf8').includes(`name: ${skill}`));
+    assert.ok(readFileSync(new URL(`../${role.instructions}`, import.meta.url), 'utf8').includes(skill));
+  }
+  for (const legacy of ['work-commander', 'work-commander-owner']) {
+    assert.ok(readFileSync(new URL(`../skills/${legacy}/SKILL.md`, import.meta.url), 'utf8').includes(`name: ${legacy}`));
   }
   const owner = readFileSync(new URL('../roles/owner.md', import.meta.url), 'utf8');
   assert.match(owner, /never inherited from cwd/);
