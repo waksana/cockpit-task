@@ -7,6 +7,30 @@ An explicit authenticated service-delivery `submit` with project `task`, environ
 `production` and a full integrated SHA is required for deployment. Use the original
 request ID for lookup; do not redispatch an uncertain operation.
 
+## New development owner access
+
+Do not reuse another owner's credential file. Ask the installation operator for
+an independent submit credential bound to your session's completion callback.
+The installed operator command is
+`node /opt/service-delivery-toolkit/current/bin/issue-credential.mjs --config PRIVATE_RUNNER_CONFIG --actor UNIQUE_OWNER_ID --session OWNER_SESSION_ID --output NEW_PRIVATE_CREDENTIAL`.
+It exclusively creates a submit-role credential; it does not approve a deployment
+or grant admin/import/boot/recovery permission. The current submit role is not a
+per-project sandbox: deployment still requires a separately registered exact
+project/environment/SHA approval. Keep the credential private and use only your
+authorized target.
+
+After integration, provide the operator your full SHA, unique request ID,
+`task/production`, committed config hash and explicit user deployment authorization.
+The operator reviews the existing allowlist and registers the bound approval
+using the toolkit's `authorize` command, returning a private request JSON path.
+Writing an authorization JSON yourself is not server-side approval.
+
+Run `node /opt/service-delivery-toolkit/current/bin/service-delivery.mjs submit
+--request PRIVATE_REQUEST_JSON --credential OWN_CREDENTIAL` once, then use
+`lookup --request-id ORIGINAL_REQUEST_ID --credential OWN_CREDENTIAL`.
+A build-only `prepare` needs no deployment approval, but it remains a preview
+until submitted. Source integration/push and credential issuance do not deploy.
+
 The loopback process reports `/version` with `sha`, `artifactSha256`, `requestId`,
 `instanceId` and package version. `/health` must agree on the instance. The repository
 HEAD and the current directory name are not substitute process identities.
