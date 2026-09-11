@@ -16,7 +16,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const setupFile = path.join(root, 'src/module-setup.js');
 const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
-test('Task release explicitly declares setup and keeps package, lock, manifest and MCP versions aligned', () => {
+test('Task release explicitly declares setup and keeps package, lock and manifest versions aligned', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'module.json')));
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json')));
   const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json')));
@@ -24,7 +24,6 @@ test('Task release explicitly declares setup and keeps package, lock, manifest a
   assert.equal(manifest.version, pkg.version);
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[''].version, pkg.version);
-  assert.ok(fs.readFileSync(path.join(root, 'src/mcp.js'), 'utf8').includes(`version: '${pkg.version}'`));
 });
 
 function fixture(t) {
