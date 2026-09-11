@@ -437,10 +437,13 @@ export class Work {
       for (const key of ['resume', 'mcp', 'skill', 'model', 'module']) delete steps[key];
       this.store.run('UPDATE operations SET steps=? WHERE id=?', JSON.stringify(steps), id);
       await this.step(id, 'resume', async () => {
-        await this.cockpit.call('session/reload', { sessionId }); return { acknowledged: true };
+        const result = await this.cockpit.call('session/load', { sessionId });
+        if (result.ok !== true || result.sessionId !== sessionId) throw new EffectUnknown('Original session load was not confirmed');
+        return { acknowledged: true };
       });
       this.checkpoint(id, 'inspect');
       meta = await this.cockpit.meta(sessionId);
+      fail(!meta.loaded, 'SESSION_NOT_READY', 'Original session is still unloaded; no prompt sent');
     }
     const matches = m => m.currentModelId === input.modelId &&
       (input.reasoningEffort === undefined || m.currentReasoningEffort === input.reasoningEffort) &&
@@ -464,6 +467,10 @@ export class Work {
   async runDispatch(op) {
     const input = JSON.parse(op.request), id = op.id;
     let task = this.store.task(op.task_id);
+    if (!Object.hasOwn(JSON.parse(op.steps), 'prompt')) {
+      this.checkpoint(id, 'inspect_caller');
+      await this.cockpit.meta(task.caller);
+    }
     if (!task.owner) {
       if (input.selection === 'fork' && !JSON.parse(op.steps).create) {
         this.checkpoint(id, 'inspect_source');
@@ -485,8 +492,6 @@ export class Work {
     const completed = JSON.parse(this.operation(id).steps);
     if (!completed.prompt) {
       await this.prepare(id, task.owner, input);
-      this.checkpoint(id, 'owner_credential');
-      const credential = this.ensureOwnerCredential(task);
       if (this.ownerModules) await this.prepareOwnerModules(id, task.owner, input);
       else {
         await this.step(id, 'mcp', async () => {
@@ -499,6 +504,10 @@ export class Work {
           return { acknowledged: true };
         });
       }
+      this.checkpoint(id, 'inspect_prompt_target');
+      await this.cockpit.meta(task.owner);
+      this.checkpoint(id, 'owner_credential');
+      const credential = this.ensureOwnerCredential(task);
       await this.step(id, 'prompt', async () => {
         const result = await this.cockpit.call('prompt', { sessionId: task.owner, text: this.prompt(task, input, credential), mode: 'enqueue' });
         return { accepted: true, queued: result.queued ?? null };
@@ -550,6 +559,10 @@ export class Work {
     const task = this.store.task(op.task_id);
     this.checkpoint(op.id, 'notification_lock');
     this.store.tx(() => this.lock(task.caller, op.id));
+    if (!Object.hasOwn(JSON.parse(op.steps), 'notify')) {
+      this.checkpoint(op.id, 'inspect_notification_target');
+      await this.cockpit.meta(task.caller);
+    }
     await this.step(op.id, 'notify', async () => {
       const result = await this.cockpit.call('prompt', {
         sessionId: task.caller, mode: 'enqueue',

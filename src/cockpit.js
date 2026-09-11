@@ -44,8 +44,18 @@ export class Cockpit {
     }
   }
   async meta(sessionId) {
-    const { meta } = await this.call('session/get', { sessionId }, false);
-    if (!meta) throw new WorkError('SESSION_NOT_FOUND', 'Native session not found', 404);
+    const result = await this.call('session/get', { sessionId }, false);
+    if (!result || typeof result !== 'object' || Array.isArray(result) || !Object.hasOwn(result, 'meta')
+      || (result.ok !== undefined && result.ok !== true) || result.error !== undefined) {
+      throw new WorkError('UPSTREAM_READ_FAILED', 'Native session metadata response is invalid', 502);
+    }
+    const { meta } = result;
+    if (meta === null) throw new WorkError('SESSION_NOT_FOUND',
+      `Native session ${sessionId} no longer exists; the original reference and history are retained`, 404);
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta) || meta.sessionId !== sessionId
+      || typeof meta.loaded !== 'boolean' || !['idle', 'unloaded', 'running', 'error'].includes(meta.status)) {
+      throw new WorkError('UPSTREAM_READ_FAILED', 'Native session metadata does not match the requested session', 502);
+    }
     return meta;
   }
 }

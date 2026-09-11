@@ -1,6 +1,6 @@
 # Managed Cockpit Task module
 
-`module.json` is the schema-v1 official module artifact (package version 1.2.5).
+`module.json` is the schema-v1 official module artifact (package version 1.2.6).
 It declares explicit commander and owner roles with isolated role instruction and
 skill roots. Both use `cockpit-task` at `src/mcp.js`; existing `work-commander`
 MCP/skill installation paths remain available for legacy clients. Selecting a
@@ -29,6 +29,37 @@ its native busy/schedule fences and exact result validation. Old completed
 checkpoints cannot override contradictory current module state. An HTTP 200
 dispatch envelope alone is not success: check `operation.status`. Existing
 failed/unknown dispatches are not automatically retried or assigned new owners.
+
+## Use-time native target checks
+
+Starting in 1.2.6, only successful `session/get {sessionId}` returning
+`{meta:null}` establishes absence. Metadata must otherwise identify that exact
+session and include the native loaded/status fields. Unloaded sessions exist;
+403/404, timeout, malformed envelopes and mismatched IDs are
+`UPSTREAM_READ_FAILED`, never absence.
+
+Dispatch checks its original caller before native creation/preparation, its
+original owner during preparation, and again immediately before the goal
+prompt. Notifications check their exact caller before sending. Confirmed
+absence records a failed operation with `SESSION_NOT_FOUND`; no prompt,
+replacement session or replacement credential follows. HTTP 200 tool envelopes
+can carry this failed operation and are not success receipts. Read failures
+also refuse the operation, without treating the reference as invalid.
+
+Cold owner preparation uses `session/load {sessionId}` and requires
+`{ok:true,sessionId}` for the original ID, followed by a loaded metadata read.
+It never uses close/resume `session/reload`, cannot recreate a missing empty
+owner, and does not send an initialization message. Applied continue/adopt
+owner selections retain their pinned release, including across service updates.
+
+Native deletion invokes no Task unbind or broadcast. Task does not maintain a
+second native-session catalog or mutable outbound-route registry. Its
+caller/owner fields are historical identity and authorization bindings, so they
+are not cleared, revoked or rewritten after deletion. The failed operation is
+the use-time refusal; operation reservations remain for explicit recovery of
+that original operation, not automatic dispatch. Task records, versions,
+credentials, imported references and final results remain durable, including a
+result whose notification failed. Normal record/history reads remain passive.
 
 ## Processes and persistent paths
 
@@ -257,6 +288,13 @@ session/new {
   cwd,
   modules: [{moduleId: "task", roleId: "owner", version: WORK_COCKPIT_MODULE_VERSION}]
 }
+session/modules/get { sessionId: <bound-owner> }
+```
+
+Only explicit fork/continue/adopt with an absent or different owner selection
+may additionally call:
+
+```
 session/modules/apply {
   sessionId: <bound-owner>,
   selections: [{moduleId: "task", roleId: "owner", version: WORK_COCKPIT_MODULE_VERSION}],
@@ -265,7 +303,7 @@ session/modules/apply {
 ```
 
 `session/fork` retains its existing source/event body and returns an unloaded
-child. Task reads that child and explicitly calls `session/reload {sessionId}`,
+child. Task reads that child and explicitly calls `session/load {sessionId}`,
 reads back the loaded session/model, then calls `session/modules/apply`.
 Apply requires an already loaded, safe-idle session without active native
 schedules; native fork also refuses source schedules/queued work. Task does not
@@ -273,7 +311,7 @@ stop schedules or clear work to force this boundary. Cold load/resume alone does
 not initialize a role or send a seed prompt. Only a response with `phase:"applied"`,
 the correct sessionId and exactly the pinned Task owner selection permits the
 normal business goal prompt. Existing owners on explicit
-continue/adopt use the same apply endpoint; model/cwd/task binding semantics do
+continue/adopt first verify their pinned selection read-only; model/cwd/task binding semantics do
 not change. Role application is a persisted operation step: a failure/unknown
 result prevents prompting and does not automatically replay or replace the owner.
 Managed mode replaces legacy per-session MCP/skill toggles, not business authority.

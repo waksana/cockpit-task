@@ -24,7 +24,10 @@ class FakeCockpit {
       this.modules.set(sessionId, body.modules ? { sessionId, selections: body.modules, phase: 'applied' } : null);
       return { sessionId };
     }
-    if (name === 'session/reload') this.sessions.get(body.sessionId).loaded = true;
+    if (name === 'session/load') {
+      this.sessions.get(body.sessionId).loaded = true;
+      return { ok: true, sessionId: body.sessionId };
+    }
     if (name === 'setModel') this.sessions.get(body.sessionId).currentModelId = body.modelId;
     if (name === 'session/modules/get') return { modules: this.modules.get(body.sessionId) ?? null };
     if (name === 'session/modules/apply') {
@@ -45,7 +48,7 @@ class FakeCockpit {
   }
   async meta(id) {
     this.calls.push({ name: 'session/get', body: { sessionId: id } });
-    if (this.failure?.name === 'session/get') throw this.failure.error;
+    if (this.failure?.name === 'session/get' && (!this.failure.sessionId || this.failure.sessionId === id)) throw this.failure.error;
     const value = this.sessions.get(id);
     if (!value) throw new WorkError('SESSION_NOT_FOUND', 'Not found', 404);
     return { ...value };
@@ -54,6 +57,7 @@ class FakeCockpit {
 function fixture(t, options) {
   const dir = mkdtempSync(join(tmpdir(), 'wc-test-')), s = new Store(dir), c = new FakeCockpit(), w = new Work(s, c, options);
   const caller = s.authenticate(s.issue('caller', 'caller-fixture'));
+  c.sessions.set('caller-fixture', { loaded: false, status: 'unloaded' });
   t.after(() => { s.close(); rmSync(dir, { recursive: true }); });
   return { s, c, w, caller, dir,
     owner(id) { const task = s.task(id); return s.authenticate(readCredential(task.credential_path)); },
@@ -65,6 +69,7 @@ test('HTTP dispatch accepts dotted models without relaxing other IDs or reservin
     const f = fixture(t), { app } = createApp({ store: f.s, cockpit: f.c });
     t.after(() => app.close());
     const token = f.s.issue('caller', 'model-caller');
+    f.c.sessions.set('model-caller', { loaded: false, status: 'unloaded' });
     const input = { selection: 'new', cwd: f.dir, workstream: 'fixture', goal,
       modelId, idempotencyKey: 'dotted-model-001' };
     const dispatch = payload => app.inject({ method: 'POST', url: '/api/tools/work_dispatch', payload,
@@ -124,7 +129,8 @@ test('one-call dispatch, owner reports, final single notification and compact re
   const f = fixture(t), result = await f.dispatch(), id = result.task.taskId, owner = f.owner(id);
   assert.equal(result.operation.status, 'succeeded');
   assert.equal(result.task.status, 'dispatched');
-  assert.deepEqual(f.c.calls.map(c => c.name), ['session/new', 'session/get', 'mcp/session-toggle', 'skills/session-toggle', 'prompt']);
+  assert.deepEqual(f.c.calls.map(c => c.name), ['session/get', 'session/new', 'session/get',
+    'mcp/session-toggle', 'skills/session-toggle', 'session/get', 'prompt']);
   const prompt = f.c.calls.at(-1).body.text;
   assert.match(prompt, /Use skill work-commander-owner/);
   assert.match(prompt, /follow the target project engineering\/runtime rules/);
@@ -177,7 +183,7 @@ test('managed new and fork select owner explicitly without Assistant or legacy g
     const inspected = f.c.calls.find(c => c.name === 'session/modules/get');
     assert.equal(inspected.mutation, false);
     if (selection === 'fork') {
-      const resumed = f.c.calls.find(c => c.name === 'session/reload');
+      const resumed = f.c.calls.find(c => c.name === 'session/load');
       assert.deepEqual(resumed.body, { sessionId: result.task.ownerSessionId });
       assert.ok(f.c.calls.indexOf(created) < f.c.calls.indexOf(resumed));
       assert.ok(f.c.calls.indexOf(resumed) < f.c.calls.indexOf(role));
@@ -238,6 +244,7 @@ test('module GET failures and unconfirmed state never fall through to apply or p
     const { app } = createApp({ store: f.s, cockpit: f.c, moduleVersion: '1.2.5' });
     t.after(() => app.close());
     const token = f.s.issue('caller', 'read-failure-caller');
+    f.c.sessions.set('read-failure-caller', { loaded: false, status: 'unloaded' });
     const input = { selection: 'new', cwd: f.dir, goal, workstream: 'fixture', idempotencyKey: 'module-read-001' };
     const dispatch = () => app.inject({ method: 'POST', url: '/api/tools/work_dispatch', payload: input,
       headers: { host: '127.0.0.1:8790', authorization: `Bearer ${token}` } });
@@ -266,7 +273,7 @@ test('continue preserves the sole applied owner version across service upgrade a
     assert.equal(result.task.ownerSessionId, sessionId);
     assert.deepEqual(f.c.modules.get(sessionId).selections, f.w.ownerModules);
     assert.equal(f.c.calls.slice(calls).some(call => call.name === 'session/modules/apply' || call.name === 'session/new'), false);
-    assert.equal(f.c.calls.slice(calls).filter(call => call.name === 'session/reload').length, Number(cold));
+    assert.equal(f.c.calls.slice(calls).filter(call => call.name === 'session/load').length, Number(cold));
     assert.equal(f.s.get("SELECT count(*) n FROM credentials WHERE role='owner'").n, 1);
   }
 });
@@ -288,6 +295,23 @@ test('explicit adopt preserves an existing sole owner version and applies only w
     assert.deepEqual(f.c.modules.get(sessionId).selections, configured ? oldSelections : f.w.ownerModules);
     assert.equal(f.c.calls.filter(call => call.name === 'prompt').length, 1);
   }
+});
+test('adoption of a missing original owner retains imported identity and fails without issuing a replacement credential', async t => {
+  const f = fixture(t, { moduleVersion: '1.2.6' });
+  const imported = importFixture(f, migrationFixture(f, [{}]));
+  const taskId = imported.tasks[0].taskId, history = f.s.get('SELECT * FROM legacy_records WHERE task_id=?', taskId);
+  const credentials = f.s.all('SELECT * FROM credentials');
+  const result = await f.w.execute(f.caller, 'work_dispatch', {
+    selection: 'adopt', taskId, recordRevision: 1, goal, idempotencyKey: 'adopt-missing-owner',
+  });
+  assert.equal(result.operation.status, 'failed');
+  assert.match(result.operation.error, /SESSION_NOT_FOUND/);
+  assert.equal(result.task.ownerSessionId, history.owner_ref);
+  assert.equal(result.task.callerSessionId, 'caller-fixture');
+  assert.deepEqual(f.s.get('SELECT * FROM legacy_records WHERE task_id=?', taskId), history);
+  assert.deepEqual(f.s.all('SELECT * FROM credentials'), credentials);
+  assert.ok(f.c.calls.every(call => call.name === 'session/get'));
+  assert.equal(f.s.task(taskId).credential_path, null);
 });
 test('explicit recovery of a new owner uses its recorded creation version after service upgrade', async t => {
   const f = fixture(t, { moduleVersion: '1.2.0' });
@@ -412,7 +436,8 @@ test('unknown prompt persists owner and never auto-replays, including restart', 
   assert.equal(f.c.calls.filter(c => c.name === 'prompt').length, 1);
 });
 test('known failure after creation recovers same owner and completed steps', async t => {
-  const f = fixture(t); f.c.failure = { name: 'session/get', error: new WorkError('READ_FAILED', 'offline', 502) };
+  const f = fixture(t);
+  f.c.failure = { name: 'session/get', sessionId: 'owner-2', error: new WorkError('READ_FAILED', 'offline', 502) };
   const a = await f.dispatch();
   assert.equal(a.operation.status, 'failed'); assert.ok(a.task.ownerSessionId);
   f.c.failure = null;
@@ -487,7 +512,7 @@ test('unloaded owner recovery re-enables native defaults without creating a repl
   });
   assert.equal(result.operation.status, 'succeeded');
   assert.equal(f.c.calls.filter(c => c.name === 'session/new').length, 1);
-  assert.equal(f.c.calls.filter(c => c.name === 'session/reload').length, 1);
+  assert.equal(f.c.calls.filter(c => c.name === 'session/load').length, 1);
   assert.equal(f.c.calls.filter(c => c.name === 'mcp/session-toggle').length, 2);
 });
 test('HTTP rejects anonymous tasks, forged roles, hostile origin and unknown input', async t => {

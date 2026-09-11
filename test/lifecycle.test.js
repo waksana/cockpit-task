@@ -122,10 +122,11 @@ test('real admin drain preserves dispatch response, closes SSE only after comple
   const reached = new Promise(resolve => { reachedPrompt = resolve; });
   const upstream = createServer(async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body);
     const name = req.url.slice('/intent/'.length);
     if (name === 'prompt') { reachedPrompt(); await blocked; }
     const value = name === 'session/new' ? { sessionId: 'drain-owner' } :
-      name === 'session/get' ? { meta: { loaded: true, status: 'idle', currentModelId: 'gpt-6-astra' } } :
+      name === 'session/get' ? { meta: { sessionId: input.sessionId, loaded: true, status: 'idle', currentModelId: 'gpt-6-astra' } } :
       { ok: true, status: 'connected' };
     res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(value));
   });
