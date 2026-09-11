@@ -7,11 +7,15 @@ import { ZodError } from 'zod';
 import { Store, WorkError, fail } from './store.js';
 import { Cockpit } from './cockpit.js';
 import { Work } from './work.js';
+import { Lifecycle } from './lifecycle.js';
+import { captureRuntime } from './runtime.js';
+import { timingSafeEqual } from 'node:crypto';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127.0.0.1:${port}`, cockpitWeb } = {}) {
+export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127.0.0.1:${port}`, cockpitWeb,
+  lifecycle = new Lifecycle(), runtime = captureRuntime(), adminToken = process.env.WORK_ADMIN_TOKEN } = {}) {
   const app = Fastify({ logger: false, bodyLimit: 65536, requestTimeout: 240000, forceCloseConnections: true });
-  const work = new Work(store, cockpit, { publicUrl, cockpitWeb });
+  const work = new Work(store, cockpit, { publicUrl, cockpitWeb, lifecycle });
   const origin = new URL(publicUrl).origin;
   const hosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, new URL(publicUrl).host]);
   function auth(req, browser = false) {
@@ -35,12 +39,31 @@ export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127
     console.error('Work Commander request failed:', error.code ?? error.name);
     return reply.code(500).send({ error: 'INTERNAL_ERROR', message: 'Request failed; inspect the service journal, do not blindly repeat side effects' });
   });
+  app.get('/version', async () => ({ ...runtime, observedAt: new Date().toISOString() }));
   app.get('/health', async () => ({ ok: store.get('PRAGMA quick_check').quick_check === 'ok',
-    version: JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version, release: basename(root) }));
+    version: runtime.version, release: basename(root), instanceId: runtime.instanceId,
+    authority: runtime.authority, observedAt: new Date().toISOString() }));
+  app.get('/status', async () => ({ ...lifecycle.status(), instanceId: runtime.instanceId,
+    authority: runtime.authority, observedAt: new Date().toISOString() }));
+  app.post('/admin/restart', async req => {
+    fail(!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.raw.socket.remoteAddress) ||
+      req.headers.origin !== undefined ||
+      ['sec-fetch-site', 'sec-fetch-dest', 'sec-fetch-user'].some(name => req.headers[name] !== undefined),
+    'ADMIN_LOCAL_ONLY', 'Restart requires a non-browser trusted loopback client', 403);
+    if (adminToken) {
+      const actual = Buffer.from(req.headers.authorization ?? '');
+      const expected = Buffer.from(`Bearer ${adminToken}`);
+      fail(actual.length !== expected.length || !timingSafeEqual(actual, expected), 'UNAUTHORIZED', 'Admin bearer credential required', 401);
+    }
+    fail(!req.body || req.body.pending !== true || Object.keys(req.body).length !== 1,
+      'INVALID_INPUT', 'Supply only pending:true; drain cannot be cancelled', 400);
+    return { ok: true, pending: true, ...lifecycle.requestRestart() };
+  });
   for (const [route, file, type] of [['/', 'index.html', 'text/html'], ['/app.js', 'app.js', 'text/javascript'], ['/style.css', 'style.css', 'text/css']]) {
     app.get(route, async (req, reply) => reply.type(type).send(readFileSync(join(root, 'web', file))));
   }
   app.post('/api/login', async (req, reply) => {
+    lifecycle.assertAccepting();
     fail(!req.body || Object.keys(req.body).some(k => k !== 'token'), 'INVALID_INPUT', 'Supply viewer token only', 400);
     const principal = store.authenticate(req.body.token);
     fail(principal.role !== 'viewer', 'FORBIDDEN', 'Browser login requires read-only viewer credential', 403);
@@ -48,10 +71,15 @@ export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127
     return { ok: true };
   });
   app.post('/api/logout', async (req, reply) => {
+    lifecycle.assertAccepting();
     reply.header('set-cookie', 'wc_view=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
     return { ok: true };
   });
-  app.post('/api/tools/:name', async req => work.execute(auth(req), req.params.name, req.body));
+  app.post('/api/tools/:name', async req => {
+    const principal = auth(req);
+    if (req.params.name !== 'work_read') lifecycle.assertAccepting();
+    return work.execute(principal, req.params.name, req.body);
+  });
   app.post('/api/read', async req => work.execute(auth(req, true), 'work_read', req.body));
   app.get('/api/events', async (req, reply) => {
     const principal = auth(req, true);
@@ -74,7 +102,7 @@ export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127
     const close = () => { clearInterval(timer); work.listeners.delete(changed); };
     reply.raw.on('close', close);
   });
-  return { app, work };
+  return { app, work, lifecycle };
 }
 
 async function main() {
@@ -86,9 +114,15 @@ async function main() {
   store.recoverInterrupted();
   const port = Number(process.env.WORK_PORT ?? 8790);
   const cockpit = new Cockpit({ url: process.env.COCKPIT_URL, token: process.env.COCKPIT_API_TOKEN });
-  const { app } = createApp({ store, cockpit, port, cockpitWeb: process.env.COCKPIT_WEB_URL });
-  const stop = async () => { await app.close(); store.close(); process.exit(0); };
-  process.once('SIGTERM', stop); process.once('SIGINT', stop);
+  const lifecycle = new Lifecycle({ onDrained: () => {
+    // Only now may Fastify close read/SSE sockets; no mutation can still be executing.
+    app.close().then(() => { store.close(); process.exit(0); }).catch(error => {
+      console.error(error.message); process.exitCode = 1;
+    });
+  } });
+  const { app } = createApp({ store, cockpit, port, cockpitWeb: process.env.COCKPIT_WEB_URL, lifecycle });
+  const stop = () => lifecycle.requestRestart();
+  process.on('SIGTERM', stop); process.on('SIGINT', stop);
   await app.listen({ host: '127.0.0.1', port });
   console.log(`Work Commander listening on http://127.0.0.1:${port}`);
 }

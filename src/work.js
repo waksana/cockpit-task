@@ -3,6 +3,7 @@ import { canonical, fail, hash, now, uid } from './store.js';
 import { EffectUnknown } from './cockpit.js';
 import { loadManifest, planImport, applyImport } from './migration.js';
 import { dependencySummary, readDependencies, editDependency } from './dependencies.js';
+import { Lifecycle } from './lifecycle.js';
 
 const terminal = new Set(['delivered', 'failed', 'cancelled']);
 const groups = ['backlog', 'working', 'blocked', 'decision', 'deferred', 'closed'];
@@ -21,8 +22,9 @@ const busy = meta => meta.status === 'running' || meta.loading || meta.closing |
   meta.activeSubagents > 0 || meta.ask || meta.planRequest || meta.elicitation;
 
 export class Work {
-  constructor(store, cockpit, { publicUrl = 'http://127.0.0.1:8790', cockpitWeb = 'https://cockpit.rbym47.com' } = {}) {
+  constructor(store, cockpit, { publicUrl = 'http://127.0.0.1:8790', cockpitWeb = 'https://cockpit.rbym47.com', lifecycle = new Lifecycle() } = {}) {
     this.store = store; this.cockpit = cockpit; this.publicUrl = publicUrl; this.cockpitWeb = cockpitWeb;
+    this.lifecycle = lifecycle;
     this.listeners = new Set();
   }
   changed() { for (const listener of this.listeners) listener(); }
@@ -150,6 +152,10 @@ export class Work {
       nextBefore: items.length > input.limit ? items[input.limit - 1].activity : null };
   }
   async execute(principal, name, raw) {
+    if (name === 'work_read') return this.executeAccepted(principal, name, raw);
+    return this.lifecycle.mutation(name, () => this.executeAccepted(principal, name, raw));
+  }
+  async executeAccepted(principal, name, raw) {
     fail(!Object.hasOwn(schemas, name), 'UNKNOWN_TOOL', 'Unknown work operation', 404);
     const input = schemas[name].parse(raw);
     if (name === 'work_read') return this.read(principal, input);

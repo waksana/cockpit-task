@@ -10,7 +10,7 @@ Environment=NODE_ENV=production
 EnvironmentFile=-%h/.config/work-commander/service.env
 Restart=on-failure
 RestartSec=3
-TimeoutStopSec=75
+TimeoutStopSec=infinity
 KillMode=control-group
 UMask=0077
 NoNewPrivileges=true

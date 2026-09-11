@@ -13,6 +13,25 @@
 - 显式前置：`work_dependency add/remove`，查询复用 `work_read`；[语义与调用](docs/task-dependencies.md)。只维护同 caller 的直接关系和条件，不自动派工或修改执行状态。
 - 验证：`npm test`；开发启动：`npm start`，同数据目录持有内核独占锁。
 
+## 运行版本与安全退出
+
+`GET /version` 返回启动时捕获的 `SERVICE_DELIVERY_SHA/ARTIFACT/REQUEST/INSTANCE` 身份及实际包版本；
+`GET /health` 使用同一 `instanceId`，均禁止缓存。源码启动没有合法 SHA 时明确返回
+`sourceSha:null` / `identitySource:"unknown"`，不读取 Git HEAD 冒充已部署版本。
+`GET /status` 只读返回 admission、在途 mutation/dispatch/notification/recovery 数量和退出原因；
+`POST /admin/restart {"pending":true}` 同步关闭新 mutation admission，重复调用幂等，
+等已经接受的真实执行及通知结束才退出，不等仍在 Cockpit 中执行的业务 owner。
+排空期间认证读取继续可用，新 mutation 返回 `503 SERVICE_DRAINING`；静态读取/SSE 不阻止退出。
+没有强制超时、取消操作或自动恢复重放。
+
+管理入口只接受通过现有 Host 防护的非浏览器 loopback 客户端（拒绝 Origin / Sec-Fetch-Site 等浏览器元数据；
+允许 Node fetch 单独发送的 Sec-Fetch-Mode）。
+本机同用户可信边界不是恶意本机进程隔离；不应将端口或管理路径代理到公网。
+可选 `WORK_ADMIN_TOKEN` 要求单独的 bearer 管理凭证，不使用 caller/owner/viewer 凭证；
+未配置时供可信本机 runner 无凭证调用。`service-delivery.json` 声明交付契约，不代表 runner 已安装。
+首次迁移的旧进程**没有**此 drain 协议，须另行批准维护切换并确认真实在途操作已完成，
+不能把旧 `/health` 当安全退出证明。新 unit 使用无限 stop 等待，安装前旧 unit 的 75 秒强停限制仍存在。
+
 一句话用 `work_record` 登记待办，零会话副作用；补齐授权后通过 `work_dispatch` 在**同 taskId**开工。同目标继续原 owner。元数据用 recordRevision，执行目标/授权用 goalVersion；只有后者变化才 `work_amend`。owner 报告/交付仍用 `work_report`、`work_deliver`。默认 `work_read` 返回 10 个未结束简表，完成历史按需查，不查询 Cockpit。
 
 **统一记录**：用户批准的旧任务保留原始来源后迁入，历史 owner/caller 引用与真实执行绑定分离。迁入不派工、不唤醒 owner、不发旧回执；切换后的 Markdown 仅留入口，不再双写状态。旧回执由讨论方 `work_observe` 带来源登记，不能冒充 owner。单用户本地部署不隔离恶意同用户 agent；现有 Cockpit 宽读取和未知副作用仍如实暴露。

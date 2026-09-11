@@ -112,3 +112,79 @@ test('killed process, restart, kernel lock and replay preserve unknown prompt', 
   const competitor = spawn('flock', ['-n', '-E', '73', join(directory, 'service.lock'), 'true']);
   assert.equal((await once(competitor, 'exit'))[0], 73);
 });
+
+test('real admin drain preserves dispatch response, closes SSE only after completion and exits cleanly', { timeout: 20000 }, async t => {
+  const directory = mkdtempSync(join(process.cwd(), '.runtime-life-'));
+  const store = new Store(directory), token = store.issue('caller', 'drain-caller'), viewer = store.issue('viewer');
+  store.close();
+  let releasePrompt, reachedPrompt;
+  const blocked = new Promise(resolve => { releasePrompt = resolve; });
+  const reached = new Promise(resolve => { reachedPrompt = resolve; });
+  const upstream = createServer(async (req, res) => {
+    let body = ''; for await (const chunk of req) body += chunk;
+    const name = req.url.slice('/intent/'.length);
+    if (name === 'prompt') { reachedPrompt(); await blocked; }
+    const value = name === 'session/new' ? { sessionId: 'drain-owner' } :
+      name === 'session/get' ? { meta: { loaded: true, status: 'idle', currentModelId: 'gpt-6-astra' } } :
+      { ok: true, status: 'connected' };
+    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(value));
+  });
+  upstream.listen(0, '127.0.0.1'); await once(upstream, 'listening');
+  const child = spawn(process.execPath, [join(process.cwd(), 'src/launch.js')], {
+    env: { ...process.env, WORK_DATA_DIR: directory, WORK_PORT: '18813', WORK_ADMIN_TOKEN: '',
+      SERVICE_DELIVERY_SHA: 'd'.repeat(40), SERVICE_DELIVERY_INSTANCE: 'drain-instance',
+      COCKPIT_URL: `http://127.0.0.1:${upstream.address().port}` },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const exited = once(child, 'exit');
+  const controller = new AbortController();
+  t.after(async () => {
+    releasePrompt(); controller.abort();
+    if (child.exitCode === null && child.signalCode === null) { child.kill('SIGTERM'); await exited; }
+    upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve));
+    rmSync(directory, { recursive: true });
+  });
+  await Promise.race([once(child.stdout, 'data'), exited.then(([code]) => { throw new Error(`Service exited ${code}`); })]);
+  const base = 'http://127.0.0.1:18813';
+  const post = (path, input, credential) => fetch(`${base}${path}`, {
+    method: 'POST', headers: { 'content-type': 'application/json', ...(credential ? { authorization: `Bearer ${credential}` } : {}) },
+    body: JSON.stringify(input),
+  });
+  const sse = await fetch(`${base}/api/events`, { headers: { authorization: `Bearer ${viewer}` }, signal: controller.signal });
+  assert.equal(sse.status, 200);
+  const version = await (await fetch(`${base}/version`)).json();
+  assert.equal(version.instanceId, 'drain-instance');
+  assert.equal((await (await fetch(`${base}/health`)).json()).instanceId, version.instanceId);
+  const pending = post('/api/tools/work_dispatch', {
+    selection: 'new', workstream: 'drain-fixture', cwd: directory,
+    goal: { objective: 'fixture', scope: 'fixture', acceptance: 'fixture', authorization: 'fixture' },
+    idempotencyKey: 'real-drain-dispatch',
+  }, token).then(async response => ({ status: response.status, body: await response.json() }));
+  await Promise.race([reached, pending.then(value => assert.fail(`Dispatch ended early: ${JSON.stringify(value)}`))]);
+  for (let i = 0; i < 2; i++) {
+    const restart = await post('/admin/restart', { pending: true });
+    assert.equal(restart.status, 200);
+    assert.equal((await restart.json()).activeMutations, 1);
+  }
+  child.kill('SIGTERM');
+  child.kill('SIGINT');
+  assert.equal((await post('/api/tools/work_record', {
+    action: 'create', title: 'denied', idempotencyKey: 'real-drain-denied',
+  }, token)).status, 503);
+  assert.equal((await post('/api/read', {}, token)).status, 200);
+  const status = await (await fetch(`${base}/status`)).json();
+  assert.equal(status.activeDispatches, 1);
+  assert.equal(status.acceptingMutations, false);
+  assert.equal(child.exitCode, null);
+  releasePrompt();
+  const result = await pending;
+  assert.equal(result.status, 200);
+  assert.equal(result.body.operation.status, 'succeeded');
+  assert.equal(result.body.task.status, 'dispatched');
+  assert.equal((await exited)[0], 0);
+  const restored = new Store(directory);
+  try {
+    restored.recoverInterrupted();
+    assert.equal(restored.get('SELECT status FROM operations WHERE id=?', result.body.operation.operationId).status, 'succeeded');
+  } finally { restored.close(); }
+});
