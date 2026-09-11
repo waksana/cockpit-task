@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { readFileSync, realpathSync } from 'node:fs';
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join, relative, isAbsolute } from 'node:path';
 import { schemas, descriptions } from './contracts.js';
 import { readCredential } from './store.js';
@@ -10,8 +10,31 @@ import { dataDirectory } from './module.js';
 const url = process.env.WORK_URL ?? 'http://127.0.0.1:8790';
 const parsed = new URL(url);
 if (parsed.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)) throw new Error('MCP requires a local work service');
-const credentialRoot = realpathSync(process.env.WORK_CREDENTIAL_DIR ?? join(dataDirectory(), 'credentials'));
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+function credentialRoot(value, label) {
+  if (!isAbsolute(value) || realpathSync(value) !== value) {
+    throw new Error(`${label} must be an absolute canonical directory`);
+  }
+  const info = lstatSync(value);
+  if (!info.isDirectory() || (info.mode & 0o077) !== 0 || info.uid !== process.getuid()) {
+    throw new Error(`${label} must be an owned private directory`);
+  }
+  return value;
+}
+const managedCredentialRoot = credentialRoot(
+  process.env.WORK_CREDENTIAL_DIR ?? join(dataDirectory(), 'credentials'), 'WORK_CREDENTIAL_DIR');
+let retainedCredentialRoot = null;
+if (process.env.WORK_RETAINED_CREDENTIAL_DIR) {
+  if (process.env.WORK_COCKPIT_MODULE_VERSION !== version) {
+    throw new Error('WORK_RETAINED_CREDENTIAL_DIR requires the matching managed package version');
+  }
+  retainedCredentialRoot = credentialRoot(process.env.WORK_RETAINED_CREDENTIAL_DIR,
+    'WORK_RETAINED_CREDENTIAL_DIR');
+  if (retainedCredentialRoot === managedCredentialRoot) {
+    throw new Error('WORK_RETAINED_CREDENTIAL_DIR must differ from WORK_CREDENTIAL_DIR');
+  }
+}
+const credentialRoots = [managedCredentialRoot, retainedCredentialRoot].filter(Boolean);
 const server = new McpServer({ name: 'work-commander', version });
 for (const [name, schema] of Object.entries(schemas)) {
   server.registerTool(name, {
@@ -21,8 +44,14 @@ for (const [name, schema] of Object.entries(schemas)) {
       openWorldHint: ['work_dispatch', 'work_deliver', 'work_recover'].includes(name) },
   }, async ({ credential, ...input }) => {
     try {
-      const path = realpathSync(credential), rel = relative(credentialRoot, path);
-      if (rel.startsWith('..') || isAbsolute(rel) || path !== credential) throw new Error('Credential path must be canonical and inside the managed credential directory');
+      const path = realpathSync(credential);
+      const trusted = credentialRoots.some(root => {
+        const rel = relative(root, path);
+        return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+      });
+      if (!trusted || path !== credential) {
+        throw new Error('Credential path must be canonical and inside a configured credential directory');
+      }
       const response = await fetch(`${url}/api/tools/${name}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${readCredential(path)}` },

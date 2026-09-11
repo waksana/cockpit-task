@@ -11,7 +11,7 @@ import { Work } from '../src/work.js';
 const goal = { objective: 'Isolated native-reference fixture', scope: 'Fresh private loopback data only',
   acceptance: 'No replacement or replay', authorization: 'Synthetic local fixture only' };
 
-async function fixture(t, { moduleVersion = '1.2.6' } = {}) {
+async function fixture(t, { moduleVersion = '1.2.7' } = {}) {
   const directory = join(process.cwd(), `.native-reference-${randomUUID()}`);
   mkdirSync(directory, { mode: 0o700 });
   const store = new Store(directory), sessions = new Map(), modules = new Map(), responses = new Map(), calls = [];
@@ -143,7 +143,7 @@ test('new managed owner is created once and never reapplied, closed, or initiali
   assert.deepEqual(f.calls.map(call => call.name), [
     'session/get', 'session/new', 'session/get', 'session/modules/get', 'session/get', 'prompt',
   ]);
-  assert.deepEqual(f.calls[1].body.modules, [{ moduleId: 'task', roleId: 'owner', version: '1.2.6' }]);
+  assert.deepEqual(f.calls[1].body.modules, [{ moduleId: 'task', roleId: 'owner', version: '1.2.7' }]);
   assert.equal(f.calls.at(-1).body.sessionId, result.task.ownerSessionId);
   assert.equal(f.calls.at(-1).body.mode, 'enqueue');
   assert.match(f.calls.at(-1).body.text, /Use skill cockpit-task-owner/);
@@ -200,10 +200,10 @@ for (const outcome of ['missing', 'forbidden', 'schema']) {
 }
 
 test('cold continuation loads only the original ID and keeps its applied owner release', async t => {
-  const f = await fixture(t, { moduleVersion: '1.2.5' }), initial = await f.dispatch(), before = f.calls.length;
+  const f = await fixture(t, { moduleVersion: '1.2.6' }), initial = await f.dispatch(), before = f.calls.length;
   const owner = initial.task.ownerSessionId;
   Object.assign(f.sessions.get(owner), { loaded: false, status: 'unloaded' });
-  const upgraded = new Work(f.store, f.cockpit, { moduleVersion: '1.2.6' });
+  const upgraded = new Work(f.store, f.cockpit, { moduleVersion: '1.2.7' });
   const result = await upgraded.execute(f.caller, 'work_dispatch', {
     selection: 'continue', taskId: initial.task.taskId, goalVersion: 1,
     message: 'Keep the original owner', idempotencyKey: 'cold-continue',
@@ -213,7 +213,7 @@ test('cold continuation loads only the original ID and keeps its applied owner r
   assert.deepEqual(calls.filter(call => call.name === 'session/load').map(call => call.body), [{ sessionId: owner }]);
   assert.equal(calls.filter(call => call.name === 'prompt').length, 1);
   assert.equal(calls.some(call => ['session/new', 'session/reload', 'session/modules/apply'].includes(call.name)), false);
-  assert.equal(f.modules.get(owner).selections[0].version, '1.2.5');
+  assert.equal(f.modules.get(owner).selections[0].version, '1.2.6');
   assert.equal(f.store.get("SELECT count(*) AS n FROM credentials WHERE role='owner'").n, 1);
 });
 

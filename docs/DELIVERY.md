@@ -1,12 +1,24 @@
 # Task delivery and runtime identity
 
-This private project uses the fixed-version reusable build and transfer workflows
-from `waksana/cockpit`. Its integration ref is `main`; push checks/builds only.
+This public-source project uses the fixed-version reusable build and transfer
+workflows from `waksana/cockpit`. Its integration ref is `main`; push checks/builds
+only.
 `service-delivery.json` binds the complete runtime, including its MCP and skills.
 Official Cockpit module artifacts also include `module.json`, `roles/` and the
 role-specific skill roots; managed paths, proxy and provisioning contracts are in
 [Managed Task module](module.md). Existing deployment/data registrations remain
 valid and are not moved by installing a module artifact.
+
+Repository write and workflow authentication is publisher-side only. The official
+ordinary-user default is an anonymously downloadable signed Release artifact,
+pinned and verified by version and digest before installation. Task runtime/setup
+never invokes Git, `gh`, the GitHub API, or asks the consumer for a GitHub account
+or PAT. Any host-provided private authenticated source extension remains opt-in
+operator configuration and must not become the ordinary-user default. Public
+source and Release distribution do not make Task runtime endpoints, task data,
+credentials or backups public; their existing loopback, viewer and Passkey
+protections remain required.
+
 An explicit authenticated service-delivery `submit` with project `task`, environment
 `production` and a full integrated SHA is required for deployment. Use the original
 request ID for lookup; do not redispatch an uncertain operation.

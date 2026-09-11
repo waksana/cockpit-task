@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { request } from 'node:http';
 import { Store, hash } from '../src/store.js';
@@ -9,7 +9,8 @@ import { createApp } from '../src/server.js';
 
 const gatewayUrl = 'https://task.example.com';
 function fixture(t, options = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'wc-gateway-'));
+  const dir = join(process.cwd(), `.gateway-test-${randomUUID()}`);
+  mkdirSync(dir, { mode: 0o700 });
   const store = new Store(dir);
   const viewer = store.issue('viewer'), caller = store.issue('caller', 'fixture-caller');
   const cockpit = { call() { throw new Error('Gateway must not call Cockpit'); } };

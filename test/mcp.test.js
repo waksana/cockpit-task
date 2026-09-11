@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -9,25 +9,56 @@ import { Store, WorkError, readCredential } from '../src/store.js';
 import { createApp } from '../src/server.js';
 
 test('real MCP stdio client discovers and invokes scoped tools against HTTP service', async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'wc-mcp-')), store = new Store(directory);
+  const directory = join(process.cwd(), `.mcp-test-${randomUUID()}`);
+  mkdirSync(directory, { mode: 0o700 });
+  const store = new Store(directory);
   mkdirSync(join(directory, 'credentials'), { mode: 0o700 });
   const credential = store.credentialFile(store.issue('caller', 'fixture-caller'), 'caller');
-  let targetChecks = 0;
+  const retainedDirectory = join(directory, 'retained-credentials');
+  mkdirSync(retainedDirectory, { mode: 0o700 });
+  const retainedCredential = join(retainedDirectory, 'legacy-caller.json');
+  writeFileSync(retainedCredential, `${JSON.stringify({ token: store.issue('caller', 'fixture-caller') })}\n`,
+    { mode: 0o600 });
+  const credentialAlias = join(directory, 'credentials', 'legacy-alias.json');
+  symlinkSync(retainedCredential, credentialAlias);
+  const targetChecks = [];
   const cockpit = { async meta(sessionId) {
-    targetChecks++;
+    targetChecks.push(sessionId);
     assert.equal(sessionId, 'fixture-caller');
     throw new WorkError('SESSION_NOT_FOUND', 'Isolated fixture native caller is missing', 404);
   } };
   const { app } = createApp({ store, cockpit, port: 18791 });
   await app.listen({ host: '127.0.0.1', port: 18791 });
-  const transport = new StdioClientTransport({
-    command: process.execPath, args: [join(process.cwd(), 'src/mcp.js')],
-    env: { ...process.env, WORK_URL: 'http://127.0.0.1:18791', WORK_CREDENTIAL_DIR: join(directory, 'credentials') },
-    stderr: 'pipe',
+  const clients = [];
+  const connect = async extraEnv => {
+    const env = { ...process.env, WORK_URL: 'http://127.0.0.1:18791',
+      WORK_CREDENTIAL_DIR: join(directory, 'credentials') };
+    delete env.WORK_RETAINED_CREDENTIAL_DIR;
+    delete env.WORK_COCKPIT_MODULE_VERSION;
+    Object.assign(env, extraEnv);
+    const transport = new StdioClientTransport({
+      command: process.execPath, args: [join(process.cwd(), 'src/mcp.js')],
+      env,
+      stderr: 'pipe',
+    });
+    const client = new Client({ name: 'work-fixture', version: '1.0.0' });
+    await client.connect(transport);
+    clients.push(client);
+    return client;
+  };
+  t.after(async () => {
+    await Promise.all(clients.map(client => client.close()));
+    await app.close(); store.close(); rmSync(directory, { recursive: true });
   });
-  const client = new Client({ name: 'work-fixture', version: '1.0.0' });
-  t.after(async () => { await client.close(); await app.close(); store.close(); rmSync(directory, { recursive: true }); });
-  await client.connect(transport);
+  const oldClient = await connect();
+  const deniedRetained = await oldClient.callTool({ name: 'work_read',
+    arguments: { credential: retainedCredential } });
+  assert.equal(deniedRetained.isError, true,
+    'an unconfigured old client remains limited to its single credential root');
+  const client = await connect({
+    WORK_COCKPIT_MODULE_VERSION: JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version,
+    WORK_RETAINED_CREDENTIAL_DIR: retainedDirectory,
+  });
   assert.equal(client.getServerVersion().version, JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version);
   const tools = await client.listTools();
   assert.equal(tools.tools.length, 10);
@@ -46,6 +77,10 @@ test('real MCP stdio client discovers and invokes scoped tools against HTTP serv
     ['action', 'credential', 'idempotencyKey', 'prerequisiteId', 'recordRevision', 'taskId']);
   const result = await client.callTool({ name: 'work_read', arguments: { credential } });
   assert.deepEqual(JSON.parse(result.content[0].text), { items: [], nextBefore: null });
+  const retained = await client.callTool({ name: 'work_read', arguments: { credential: retainedCredential } });
+  assert.deepEqual(JSON.parse(retained.content[0].text), { items: [], nextBefore: null });
+  const alias = await client.callTool({ name: 'work_read', arguments: { credential: credentialAlias } });
+  assert.equal(alias.isError, true, 'credential-file symlinks are never accepted');
   const register = { credential, action: 'create', title: 'One phrase is enough', idempotencyKey: 'mcp-backlog-001' };
   const created = await client.callTool({ name: 'work_record', arguments: register });
   assert.equal(created.isError, false);
@@ -73,23 +108,24 @@ test('real MCP stdio client discovers and invokes scoped tools against HTTP serv
   } });
   assert.equal(removed.isError, false);
   assert.equal(store.get('SELECT count(*) n FROM operations').n, 0);
-  assert.equal(targetChecks, 0);
   const dispatch = { selection: 'new', taskId: record.task.taskId,
     recordRevision: store.task(record.task.taskId).record_revision, cwd: directory,
     goal: { objective: 'Fixture goal', scope: 'Private fixture', acceptance: 'No native creation', authorization: 'Fixture only' },
     idempotencyKey: 'mcp-missing-caller' };
+  assert.deepEqual(targetChecks, []);
   const failed = await client.callTool({ name: 'work_dispatch', arguments: { credential, ...dispatch } });
   assert.equal(failed.isError, true);
   const failure = JSON.parse(failed.content[0].text);
   assert.equal(failure.operation.status, 'failed');
   assert.match(failure.operation.error, /SESSION_NOT_FOUND/);
   assert.equal(failure.task.ownerSessionId, null);
+  assert.deepEqual(targetChecks, ['fixture-caller']);
   const http = await app.inject({ method: 'POST', url: '/api/tools/work_dispatch', payload: dispatch,
     headers: { host: '127.0.0.1:18791', authorization: `Bearer ${readCredential(credential)}` } });
   assert.equal(http.statusCode, 200);
   assert.deepEqual(http.json(), failure);
-  assert.equal(targetChecks, 1, 'HTTP readback does not replay the failed native lookup');
-  assert.equal(store.get('SELECT count(*) n FROM credentials').n, 1);
+  assert.deepEqual(targetChecks, ['fixture-caller'], 'HTTP readback does not replay the failed native lookup');
+  assert.equal(store.get('SELECT count(*) n FROM credentials').n, 2);
   const escaped = await client.callTool({ name: 'work_read', arguments: { credential: '/etc/passwd' } });
   assert.equal(escaped.isError, true);
   assert.equal(JSON.stringify(tools).includes('callerSessionId'), false);

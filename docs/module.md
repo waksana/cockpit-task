@@ -1,6 +1,6 @@
 # Managed Cockpit Task module
 
-`module.json` is the schema-v1 official module artifact (package version 1.2.6).
+`module.json` is the schema-v1 official module artifact (package version 1.2.7).
 It declares explicit commander and owner roles with isolated role instruction and
 skill roots. Both use `cockpit-task` at `src/mcp.js`; existing `work-commander`
 MCP/skill installation paths remain available for legacy clients. Selecting a
@@ -81,14 +81,64 @@ installer owns release selection, module configuration and log routing:
 Set `COCKPIT_USER_ROOT` to change the common managed user root. Managed mode is
 explicitly enabled by `WORK_COCKPIT_MODULE_VERSION=<installed-version>`.
 `WORK_DATA_DIR` always wins; an existing installation should register its external
-data/release paths instead of copying data, rebinding tasks or reissuing existing
+data/release paths instead of copying data unless the one-time migration below is
+explicitly approved; neither path permits rebinding tasks or reissuing existing
 credentials. `WORK_CREDENTIAL_DIR` may explicitly override the MCP credential
-root; otherwise it follows `<data>/credentials`. Without managed mode, the legacy
+root; otherwise it follows `<data>/credentials`. During an explicitly managed
+migration, `WORK_RETAINED_CREDENTIAL_DIR` may name the one original credential
+directory retained for existing absolute credential references. It does not change
+where new credentials are issued. Without managed mode, the legacy
 `~/.local/state/work-commander` default and dispatch behavior are unchanged.
 
 Launcher remains `node src/launch.js`; preserve existing lifecycle admission/drain
 and flock. No forced exit, queue cancellation, service restart or database move is
 part of module role application.
+
+### One-time legacy data-root migration
+
+Data-root migration is an operator-owned maintenance action, not module setup or
+service startup behavior. Capture the approved source/destination inventory first.
+Drain the old Task writer, require `safeToRestart:true`, stop it naturally, and
+verify that no Task writer or migration command is using the source. The first
+legacy release without drain support instead requires an independently confirmed
+quiet maintenance window. Do not run old and new writers concurrently.
+
+With the writer stopped, use the existing read-only `admin.js backup` entry to
+write a consistent SQLite backup as the new root's `work.db`; do not copy a live
+database, WAL or SHM file. Keep the original owned private credential directory
+and every real credential file at its original absolute path. Do not symlink,
+copy, re-sign or rebind them, and do not rewrite `tasks.credential_path`,
+`module_provisions.credential_path`, caller/owner IDs, histories, dependencies,
+credential digests or idempotency records. Cockpit's native session database is
+not part of this operation and must not be copied or edited.
+
+Create the distinct new data root and `<new-root>/credentials` as owned private
+0700 directories before startup. Start exactly one new writer with
+`WORK_DATA_DIR=<new-root>`. New credential issuance then writes only beneath the
+new root. Managed MCP children use all three of:
+
+```text
+WORK_CREDENTIAL_DIR=<new-root>/credentials
+WORK_RETAINED_CREDENTIAL_DIR=<old-root>/credentials
+WORK_COCKPIT_MODULE_VERSION=<installed-version>
+```
+
+The retained setting is deliberately one exact root, not a path list or global
+allowlist. Both roots and every supplied credential path must be canonical;
+credential symlinks remain invalid, and the managed version must exactly match
+the MCP package version. Token authentication still resolves the preserved
+digest and immutable caller/owner/task binding in the migrated DB.
+
+An already-running legacy MCP keeps working with original credential paths when
+the service loopback URL/port is preserved: it still trusts only its original
+single root. That old client cannot use newly issued files in the new root and
+does not understand `WORK_RETAINED_CREDENTIAL_DIR`; restart it on 1.2.7 with the
+managed root contract when both generations are needed. Before proxy cutover,
+verify representative preserved caller and owner reads through both an existing
+legacy MCP and a new managed MCP, then verify a newly issued credential uses the
+new root. Any missing file, digest mismatch, unexpected active operation or
+native metadata read failure stops cutover; none permits replacement issuance,
+session creation, replay or ID rebinding.
 
 ### Independent consumer runner startup contract
 
@@ -115,6 +165,7 @@ or a `WORK_CONFIG_FILE`; it consumes the following startup environment.
 | `WORK_MODULE_GATEWAY_URL` | Canonical HTTPS Cockpit origin, including an optional non-default port, trusted for viewer-only proxy requests |
 | `WORK_GATEWAY_URL` | Optional preserved legacy gateway origin, e.g. `https://task.rbym47.com` |
 | `WORK_MODULE_MANAGER_CREDENTIAL` | Absolute protected manager JSON credential file reference; Task reads its token server-side |
+| `WORK_RETAINED_CREDENTIAL_DIR` | Optional one canonical private legacy credential directory for managed migration compatibility |
 | `WORK_COCKPIT_MODULE_VERSION` | Selected installed Task version, enables explicit Task owner role preparation |
 | `COCKPIT_MODULE_ID` | Literal `task` |
 | `COCKPIT_MODULE_VERSION` | Selected manifest version; must equal the actual running package version and, when supplied, `WORK_COCKPIT_MODULE_VERSION` |
@@ -149,6 +200,11 @@ For each role MCP child launch Node with the pinned `src/mcp.js` and:
   browser `/modules/task` route).
 - `WORK_CREDENTIAL_DIR=<registered-data>/credentials`, an existing canonical
   directory; `WORK_DATA_DIR` may also be supplied to preserve the same data root.
+- During a managed data-root migration only,
+  `WORK_RETAINED_CREDENTIAL_DIR=<old-data>/credentials` may name one distinct,
+  existing canonical directory containing the original real credential files.
+  The MCP accepts canonical regular credential files below either exact root;
+  credential/root symlinks, lists of roots and non-managed use are rejected.
 - Optional `COCKPIT_USER_ROOT` and `WORK_COCKPIT_MODULE_VERSION` if relying on managed
   defaults instead of explicit data/credential paths.
 
@@ -188,8 +244,9 @@ behind the HTTPS proxy; this setting does not enable TLS on the Task listener.
 
 The existing `WORK_GATEWAY_URL=https://task.rbym47.com` can remain configured:
 when both distinct gateway origins exist, the legacy gateway gets empty-base HTML
-and links, preserving its current root URL. Existing WORK_PUBLIC_URL pointing to
-that legacy gateway also retains root-based task links.
+and links, preserving its current root URL, assets, `POST /api/read` and
+`GET /api/events` while the Cockpit gateway emits `/modules/task` URLs. Existing
+`WORK_PUBLIC_URL` pointing to that legacy gateway also retains root-based task links.
 
 The proxy must replace incoming browser bearer credentials with its private
 **viewer** bearer and set Host to the configured module gateway host. It must
