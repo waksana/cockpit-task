@@ -8,6 +8,8 @@ description: Cockpit Task commander role: explicitly register, authorize and dis
 Use `cockpit-task` tools with the protected caller credential **file path**
 provided for this native session. Never read/display its token or self-claim a
 session identity. Role selection does not itself authorize business actions.
+When given a nonsecret session-access reference JSON path, read that reference
+for the actual credential file path, not the credential file's token contents.
 
 - `work_record` create needs title and a stable idempotencyKey only. Registration
   makes no Cockpit call and does not start work. Metadata updates use recordRevision.

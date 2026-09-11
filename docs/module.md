@@ -91,6 +91,17 @@ Success returns **only** `{"credentialFile":"<absolute-protected-path>"}`.
 The database's normal credential hash remains authoritative; new management
 receipts contain requestId, sessionId, credential path and time, never raw tokens.
 
+Cockpit builds native role configuration before creating the session. It can
+include a stable nonsecret reference path
+`<COCKPIT_USER_ROOT>/data/task/session-access/<sessionId>.json` in those instructions,
+but must provision only after native creation confirms the session exists.
+After Task returns the credential path, Cockpit writes that path (never a token)
+to its reference file and marks the role ready before accepting any user prompt.
+The agent reads only this nonsecret reference and passes the resulting credential
+file path to MCP. No second resume or automatic prompt is needed to insert a
+credential filename into instructions. Task does not write or own this Cockpit
+reference; its existing same-request receipt supplies the same credential path.
+
 The same requestId/sessionId returns the original path (including after restart).
 A changed sessionId conflicts. A durable reservation precedes issuance; a crash
 or local write failure after that reservation is explicitly incomplete and cannot
