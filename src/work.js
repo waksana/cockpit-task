@@ -7,6 +7,7 @@ import { Lifecycle } from './lifecycle.js';
 import { normalizeBasePath } from './module.js';
 
 const terminal = new Set(['delivered', 'failed', 'cancelled']);
+const moduleVersionPattern = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?$/;
 const groups = ['backlog', 'working', 'blocked', 'decision', 'deferred', 'closed'];
 const groupSql = `CASE
   WHEN disposition IN ('abandoned','archived') THEN 'closed'
@@ -27,7 +28,7 @@ export class Work {
     lifecycle = new Lifecycle(), basePath = '', moduleVersion } = {}) {
     this.store = store; this.cockpit = cockpit; this.publicUrl = publicUrl; this.cockpitWeb = cockpitWeb;
     this.basePath = normalizeBasePath(basePath);
-    fail(moduleVersion !== undefined && !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?$/.test(moduleVersion),
+    fail(moduleVersion !== undefined && !moduleVersionPattern.test(moduleVersion),
       'INVALID_MODULE_VERSION', 'Managed mode requires a valid module version', 400);
     this.ownerModules = moduleVersion ? [{ moduleId: 'task', roleId: 'owner', version: moduleVersion }] : null;
     this.lifecycle = lifecycle;
@@ -475,7 +476,7 @@ export class Work {
             sessionId: input.sourceSessionId, ...(input.toEventId ? { toEventId: input.toEventId } : {}),
           } : { cwd: input.cwd, ...(this.ownerModules ? { modules: this.ownerModules } : {}) });
         if (!result.sessionId || typeof result.sessionId !== 'string') throw new EffectUnknown('Creation returned no valid session ID');
-        return { sessionId: result.sessionId };
+        return { sessionId: result.sessionId, ...(this.ownerModules ? { selections: this.ownerModules } : {}) };
       });
       this.checkpoint(id, 'bind_owner');
       this.bindOwner(task.id, created.sessionId, id);
@@ -486,16 +487,7 @@ export class Work {
       await this.prepare(id, task.owner, input);
       this.checkpoint(id, 'owner_credential');
       const credential = this.ensureOwnerCredential(task);
-      if (this.ownerModules) await this.step(id, 'module', async () => {
-        const result = await this.cockpit.call('session/modules/apply', {
-          sessionId: task.owner, selections: this.ownerModules, operationId: id,
-        });
-        if (result.modules?.phase !== 'applied' || result.modules.sessionId !== task.owner ||
-          canonical(result.modules.selections) !== canonical(this.ownerModules)) {
-          throw new EffectUnknown('Task owner module application was not confirmed; no prompt sent');
-        }
-        return { acknowledged: true };
-      });
+      if (this.ownerModules) await this.prepareOwnerModules(id, task.owner, input);
       else {
         await this.step(id, 'mcp', async () => {
           const result = await this.cockpit.call('mcp/session-toggle', { sessionId: task.owner, name: 'work-commander', on: true });
@@ -518,6 +510,40 @@ export class Work {
         summary=CASE WHEN status='recorded' THEN 'Prompt accepted; waiting for owner to accept this goal version' ELSE summary END,
         status=CASE WHEN status='recorded' THEN 'dispatched' ELSE status END,updated=? WHERE id=?`, now(), task.id);
       this.store.event(this.store.task(task.id), 'dispatch_accepted', 'Native prompt accepted; this is not owner acceptance or goal completion');
+    });
+  }
+  async prepareOwnerModules(id, sessionId, input) {
+    this.checkpoint(id, 'module');
+    const { modules } = await this.cockpit.call('session/modules/get', { sessionId }, false);
+    if (modules !== null && (!modules || modules.sessionId !== sessionId || modules.phase !== 'applied' ||
+      modules.nativePresent === false || !Array.isArray(modules.selections))) {
+      throw new EffectUnknown('Task owner module state was not confirmed; no application or prompt sent');
+    }
+    const steps = JSON.parse(this.operation(id).steps);
+    const expected = steps.create?.selections ?? this.ownerModules;
+    const soleOwner = modules !== null && modules.selections.length === 1 && modules.selections[0]?.moduleId === 'task' &&
+      modules.selections[0].roleId === 'owner' &&
+      typeof modules.selections[0].version === 'string' &&
+      moduleVersionPattern.test(modules.selections[0].version) &&
+      canonical(modules.selections) === canonical([
+        { moduleId: 'task', roleId: 'owner', version: modules.selections[0].version },
+      ]);
+    if (soleOwner && (['continue', 'adopt'].includes(input.selection) ||
+      canonical(modules.selections) === canonical(expected))) return;
+    // Re-applying closes the runtime and can destroy a never-prompted native session.
+    fail(input.selection === 'new', 'MODULE_NOT_CONFIRMED',
+      'New session must already have its requested Task owner module; no application or prompt sent');
+    fail(Object.hasOwn(steps, 'module'), 'MODULE_NOT_CONFIRMED',
+      'Completed module application no longer matches native state; no application or prompt sent');
+    await this.step(id, 'module', async () => {
+      const applied = await this.cockpit.call('session/modules/apply', {
+        sessionId, selections: expected, operationId: id,
+      });
+      if (applied.modules?.phase !== 'applied' || applied.modules.sessionId !== sessionId || applied.modules.nativePresent === false ||
+        canonical(applied.modules.selections) !== canonical(expected)) {
+        throw new EffectUnknown('Task owner module application was not confirmed; no prompt sent');
+      }
+      return { selections: expected };
     });
   }
   async runNotification(op) {

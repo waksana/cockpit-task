@@ -1,6 +1,6 @@
 # Managed Cockpit Task module
 
-`module.json` is the schema-v1 official module artifact (package version 1.2.4).
+`module.json` is the schema-v1 official module artifact (package version 1.2.5).
 It declares explicit commander and owner roles with isolated role instruction and
 skill roots. Both use `cockpit-task` at `src/mcp.js`; existing `work-commander`
 MCP/skill installation paths remain available for legacy clients. Selecting a
@@ -12,6 +12,23 @@ Managed skills use unique discovery names `cockpit-task-commander` and
 instructions and managed goal prompts reference these module-only names, avoiding
 native name deduplication with global/project/bundled skills. The original
 `skills/work-commander` and `skills/work-commander-owner` files remain unchanged.
+
+Before sending an owner prompt, managed dispatch reads `session/modules/get`
+and checks the exact session, `applied` phase and sole Task owner selection.
+`new` already supplies the requested modules to native creation; it only
+verifies that selection and never invokes apply on the empty session. New
+creation checkpoints retain the selected version for explicit recovery after
+a service update. An already-applied sole owner on `continue` or `adopt` keeps
+its pinned version, even when the shared Task service runs a newer release.
+
+Explicit fork/continue/adopt still use the existing safe apply operation when
+the required owner environment is absent or differs. Only an explicit
+`modules:null` means no configuration; missing/malformed responses, uncertain
+phases or `nativePresent:false` never trigger apply or prompt. Apply retains
+its native busy/schedule fences and exact result validation. Old completed
+checkpoints cannot override contradictory current module state. An HTTP 200
+dispatch envelope alone is not success: check `operation.status`. Existing
+failed/unknown dispatches are not automatically retried or assigned new owners.
 
 ## Processes and persistent paths
 

@@ -13,21 +13,34 @@ import { createApp } from '../src/server.js';
 
 const goal = { objective: 'Complete isolated fixture', scope: 'Fixture directory only', acceptance: 'Durable artifact and truthful outcome', authorization: 'Create fixture file; no external sends' };
 class FakeCockpit {
-  calls = []; sessions = new Map(); failure; gate;
-  async call(name, body) {
-    this.calls.push({ name, body });
+  calls = []; sessions = new Map(); modules = new Map(); failure; gate; loseEmptyOnApply = false;
+  async call(name, body, mutation = true) {
+    this.calls.push({ name, body, mutation });
     if (this.gate?.name === name) await this.gate.promise;
     if (this.failure?.name === name) throw this.failure.error;
     if (name === 'session/new' || name === 'session/fork') {
       const sessionId = `owner-${this.sessions.size + 1}`;
       this.sessions.set(sessionId, { loaded: true, status: 'idle', currentModelId: 'gpt-6-astra' });
+      this.modules.set(sessionId, body.modules ? { sessionId, selections: body.modules, phase: 'applied' } : null);
       return { sessionId };
     }
     if (name === 'session/reload') this.sessions.get(body.sessionId).loaded = true;
     if (name === 'setModel') this.sessions.get(body.sessionId).currentModelId = body.modelId;
-    if (name === 'session/modules/apply') return { modules: {
-      sessionId: body.sessionId, selections: body.selections, operationId: body.operationId, phase: 'applied',
-    } };
+    if (name === 'session/modules/get') return { modules: this.modules.get(body.sessionId) ?? null };
+    if (name === 'session/modules/apply') {
+      if (this.loseEmptyOnApply && !this.sessions.get(body.sessionId).hasMessage) {
+        this.sessions.delete(body.sessionId);
+        throw new EffectUnknown('Native module session working directory is unavailable');
+      }
+      const modules = { sessionId: body.sessionId, selections: body.selections,
+        operationId: body.operationId, phase: 'applied' };
+      this.modules.set(body.sessionId, modules);
+      return { modules };
+    }
+    if (name === 'prompt') {
+      const session = this.sessions.get(body.sessionId);
+      if (session) session.hasMessage = true;
+    }
     return { ok: true, queued: true, status: 'connected' };
   }
   async meta(id) {
@@ -146,9 +159,9 @@ test('managed new and fork select owner explicitly without Assistant or legacy g
     const f = fixture(t, { moduleVersion: '1.2.0' });
     if (selection === 'fork') f.c.sessions.set('source', { loaded: true, status: 'idle' });
     const call = f.c.call.bind(f.c);
-    f.c.call = async (name, body) => {
+    f.c.call = async (name, body, mutation) => {
       if (name === 'session/modules/apply') assert.equal(f.c.sessions.get(body.sessionId).loaded, true);
-      const result = await call(name, body);
+      const result = await call(name, body, mutation);
       if (name === 'session/fork') f.c.sessions.get(result.sessionId).loaded = false;
       return result;
     };
@@ -161,61 +174,197 @@ test('managed new and fork select owner explicitly without Assistant or legacy g
     if (selection === 'new') assert.deepEqual(created.body, { cwd: f.dir, modules: f.w.ownerModules });
     else assert.deepEqual(created.body, { sessionId: 'source' });
     const role = f.c.calls.find(c => c.name === 'session/modules/apply');
+    const inspected = f.c.calls.find(c => c.name === 'session/modules/get');
+    assert.equal(inspected.mutation, false);
     if (selection === 'fork') {
       const resumed = f.c.calls.find(c => c.name === 'session/reload');
       assert.deepEqual(resumed.body, { sessionId: result.task.ownerSessionId });
       assert.ok(f.c.calls.indexOf(created) < f.c.calls.indexOf(resumed));
       assert.ok(f.c.calls.indexOf(resumed) < f.c.calls.indexOf(role));
+      assert.deepEqual(role.body, {
+        sessionId: result.task.ownerSessionId, selections: f.w.ownerModules, operationId: result.operation.operationId,
+      });
+      assert.ok(f.c.calls.indexOf(inspected) < f.c.calls.indexOf(role));
+    } else {
+      assert.equal(role, undefined);
     }
-    assert.deepEqual(role.body, {
-      sessionId: result.task.ownerSessionId, selections: f.w.ownerModules, operationId: result.operation.operationId,
-    });
     assert.equal(f.c.calls.some(c => /session-toggle/.test(c.name)), false);
-    assert.ok(f.c.calls.indexOf(role) < f.c.calls.findIndex(c => c.name === 'prompt'));
+    assert.ok(f.c.calls.indexOf(inspected) < f.c.calls.findIndex(c => c.name === 'prompt'));
     assert.match(f.c.calls.at(-1).body.text, /MCP cockpit-task credential=/);
     assert.match(f.c.calls.at(-1).body.text, /Use skill cockpit-task-owner/);
     assert.doesNotMatch(f.c.calls.at(-1).body.text, /Use skill work-commander-owner/);
     assert.equal(f.owner(result.task.taskId).role, 'owner');
     assert.equal(f.s.get("SELECT count(*) AS n FROM credentials WHERE role='caller'").n, 1);
-    assert.equal(JSON.stringify(role.body).includes('assistant'), false);
+    assert.equal(JSON.stringify(created.body).includes('assistant'), false);
   }
+});
+test('new owner survives a native fixture that loses never-prompted sessions on module apply', async t => {
+  const control = new FakeCockpit();
+  control.loseEmptyOnApply = true;
+  const created = await control.call('session/new', { modules: [{ moduleId: 'task', roleId: 'owner', version: '1.2.5' }] });
+  await assert.rejects(control.call('session/modules/apply', { sessionId: created.sessionId }),
+    { code: 'EFFECT_UNKNOWN' });
+  assert.equal(control.sessions.has(created.sessionId), false);
+
+  const f = fixture(t, { moduleVersion: '1.2.5' });
+  f.c.loseEmptyOnApply = true;
+  const result = await f.dispatch();
+  assert.equal(result.operation.status, 'succeeded');
+  assert.equal(f.c.sessions.get(result.task.ownerSessionId).hasMessage, true);
+  assert.equal(f.c.calls.filter(call => call.name === 'session/modules/get').length, 1);
+  assert.equal(f.c.calls.some(call => call.name === 'session/modules/apply' || call.name === 'session/reload'), false);
+  assert.equal(f.c.calls.filter(call => call.name === 'prompt').length, 1);
+});
+test('module GET failures and unconfirmed state never fall through to apply or prompt despite HTTP 200', async t => {
+  for (const state of ['read-error', 'missing', 'null', 'native-absent', 'wrong-session', 'pending', 'unknown', 'wrong-version', 'assistant', 'extra']) {
+    const f = fixture(t, { moduleVersion: '1.2.5' });
+    const call = f.c.call.bind(f.c);
+    f.c.call = async (name, body, mutation) => {
+      const result = await call(name, body, mutation);
+      if (name !== 'session/modules/get') return result;
+      assert.equal(mutation, false);
+      if (state === 'read-error') throw new WorkError('UPSTREAM_READ_FAILED', 'Fixture read failed', 502);
+      if (state === 'missing') return { ok: true };
+      if (state === 'null') return { modules: null };
+      const modules = structuredClone(result.modules);
+      if (state === 'native-absent') modules.nativePresent = false;
+      if (state === 'wrong-session') modules.sessionId = 'other-session';
+      if (state === 'pending' || state === 'unknown') modules.phase = state;
+      if (state === 'wrong-version') modules.selections[0].version = '1.2.0';
+      if (state === 'assistant') modules.selections = [{ moduleId: 'assistant', roleId: 'assistant', version: '1.0.0' }];
+      if (state === 'extra') modules.selections.push({ moduleId: 'task', roleId: 'commander', version: '1.2.5' });
+      return { ok: true, modules };
+    };
+    const { app } = createApp({ store: f.s, cockpit: f.c, moduleVersion: '1.2.5' });
+    t.after(() => app.close());
+    const token = f.s.issue('caller', 'read-failure-caller');
+    const input = { selection: 'new', cwd: f.dir, goal, workstream: 'fixture', idempotencyKey: 'module-read-001' };
+    const dispatch = () => app.inject({ method: 'POST', url: '/api/tools/work_dispatch', payload: input,
+      headers: { host: '127.0.0.1:8790', authorization: `Bearer ${token}` } });
+    const response = await dispatch();
+    assert.equal(response.statusCode, 200);
+    assert.ok(['failed', 'unknown'].includes(response.json().operation.status), state);
+    assert.equal(f.c.calls.some(call => call.name === 'session/modules/apply' || call.name === 'prompt'), false);
+    const calls = f.c.calls.length;
+    const repeated = await dispatch();
+    assert.equal(repeated.json().task.ownerSessionId, response.json().task.ownerSessionId);
+    assert.equal(f.c.calls.length, calls);
+  }
+});
+test('continue preserves the sole applied owner version across service upgrade and cold load', async t => {
+  for (const cold of [false, true]) {
+    const f = fixture(t, { moduleVersion: '1.2.0' }), initial = await f.dispatch();
+    const sessionId = initial.task.ownerSessionId;
+    f.c.sessions.get(sessionId).loaded = !cold;
+    const upgraded = new Work(f.s, f.c, { moduleVersion: '1.2.5' });
+    const calls = f.c.calls.length;
+    const result = await upgraded.execute(f.caller, 'work_dispatch', {
+      selection: 'continue', taskId: initial.task.taskId, goalVersion: 1,
+      message: 'Explicit continuation', idempotencyKey: 'preserve-owner-version',
+    });
+    assert.equal(result.operation.status, 'succeeded');
+    assert.equal(result.task.ownerSessionId, sessionId);
+    assert.deepEqual(f.c.modules.get(sessionId).selections, f.w.ownerModules);
+    assert.equal(f.c.calls.slice(calls).some(call => call.name === 'session/modules/apply' || call.name === 'session/new'), false);
+    assert.equal(f.c.calls.slice(calls).filter(call => call.name === 'session/reload').length, Number(cold));
+    assert.equal(f.s.get("SELECT count(*) n FROM credentials WHERE role='owner'").n, 1);
+  }
+});
+test('explicit adopt preserves an existing sole owner version and applies only when owner is absent', async t => {
+  for (const configured of [false, true]) {
+    const f = fixture(t, { moduleVersion: '1.2.5' });
+    const imported = importFixture(f, migrationFixture(f, [{}]));
+    const sessionId = 'same-old-owner';
+    f.c.sessions.set(sessionId, { loaded: true, status: 'idle', currentModelId: 'gpt-6-astra', hasMessage: true });
+    const oldSelections = [{ moduleId: 'task', roleId: 'owner', version: '1.2.0' }];
+    if (configured) f.c.modules.set(sessionId, { sessionId, phase: 'applied', selections: oldSelections });
+    const result = await f.w.execute(f.caller, 'work_dispatch', {
+      selection: 'adopt', taskId: imported.tasks[0].taskId, recordRevision: 1, goal, idempotencyKey: 'adopt-owner-version',
+    });
+    assert.equal(result.operation.status, 'succeeded');
+    assert.equal(result.task.ownerSessionId, sessionId);
+    assert.equal(f.c.calls.some(call => call.name === 'session/new' || call.name === 'session/fork'), false);
+    assert.equal(f.c.calls.filter(call => call.name === 'session/modules/apply').length, Number(!configured));
+    assert.deepEqual(f.c.modules.get(sessionId).selections, configured ? oldSelections : f.w.ownerModules);
+    assert.equal(f.c.calls.filter(call => call.name === 'prompt').length, 1);
+  }
+});
+test('explicit recovery of a new owner uses its recorded creation version after service upgrade', async t => {
+  const f = fixture(t, { moduleVersion: '1.2.0' });
+  f.c.failure = { name: 'session/modules/get', error: new WorkError('UPSTREAM_READ_FAILED', 'Fixture read failed', 502) };
+  const initial = await f.dispatch();
+  assert.equal(initial.operation.status, 'failed');
+  f.c.failure = null;
+  const upgraded = new Work(f.s, f.c, { moduleVersion: '1.2.5' });
+  const result = await upgraded.execute(f.caller, 'work_recover', {
+    operationId: initial.operation.operationId, idempotencyKey: 'recover-recorded-version',
+  });
+  assert.equal(result.operation.status, 'succeeded');
+  assert.equal(result.task.ownerSessionId, initial.task.ownerSessionId);
+  assert.equal(f.c.calls.filter(call => call.name === 'session/new').length, 1);
+  assert.equal(f.c.calls.some(call => call.name === 'session/modules/apply'), false);
+  assert.deepEqual(f.c.modules.get(initial.task.ownerSessionId).selections, f.w.ownerModules);
+});
+test('a completed apply checkpoint cannot hide changed native modules during explicit recovery', async t => {
+  const f = fixture(t, { moduleVersion: '1.2.5' });
+  f.c.sessions.set('source', { loaded: true, status: 'idle' });
+  f.c.failure = { name: 'prompt', error: new WorkError('PROMPT_NOT_SENT', 'Fixture refused before sending') };
+  const initial = await f.dispatch({ selection: 'fork', sourceSessionId: 'source', cwd: undefined });
+  assert.equal(initial.operation.status, 'failed');
+  const sessionId = initial.task.ownerSessionId;
+  f.c.modules.set(sessionId, { sessionId, phase: 'applied',
+    selections: [{ moduleId: 'assistant', roleId: 'assistant', version: '1.0.0' }] });
+  f.c.failure = null;
+  const calls = f.c.calls.length;
+  const recovered = await f.w.execute(f.caller, 'work_recover', {
+    operationId: initial.operation.operationId, idempotencyKey: 'recover-changed-modules',
+  });
+  assert.equal(recovered.operation.status, 'failed');
+  assert.match(recovered.operation.error, /MODULE_NOT_CONFIRMED/);
+  assert.equal(f.c.calls.slice(calls).some(call => call.name === 'session/modules/apply' || call.name === 'prompt'), false);
 });
 test('native schedule refusal during managed apply never cancels schedules or sends a prompt', async t => {
   const f = fixture(t, { moduleVersion: '1.2.0' });
+  f.c.sessions.set('source', { loaded: true, status: 'idle' });
   f.c.failure = { name: 'session/modules/apply', error: new EffectUnknown('Session has active schedules') };
-  const result = await f.dispatch();
+  const dispatch = () => f.dispatch({ selection: 'fork', sourceSessionId: 'source', cwd: undefined });
+  const result = await dispatch();
   assert.equal(result.operation.status, 'unknown');
   assert.equal(result.operation.step, 'module');
   assert.equal(f.c.calls.some(c => c.name === 'prompt' || /schedule|cancel|stop/.test(c.name)), false);
   const calls = f.c.calls.length;
-  await f.dispatch();
+  await dispatch();
   assert.equal(f.c.calls.length, calls);
 });
 test('managed owner role failure preserves the same owner and does not send or automatically replay', async t => {
   const f = fixture(t, { moduleVersion: '1.2.0' });
+  f.c.sessions.set('source', { loaded: true, status: 'idle' });
   f.c.failure = { name: 'session/modules/apply', error: new EffectUnknown('role result unknown') };
-  const first = await f.dispatch();
+  const dispatch = () => f.dispatch({ selection: 'fork', sourceSessionId: 'source', cwd: undefined });
+  const first = await dispatch();
   assert.equal(first.operation.status, 'unknown');
   assert.equal(first.operation.step, 'module');
   assert.equal(f.c.calls.some(c => c.name === 'prompt'), false);
   const calls = f.c.calls.length;
-  const repeat = await f.dispatch();
+  const repeat = await dispatch();
   assert.equal(repeat.task.ownerSessionId, first.task.ownerSessionId);
   assert.equal(f.c.calls.length, calls);
 });
 test('unconfirmed or Assistant-inheriting module responses never send an owner prompt', async t => {
   for (const change of [
     modules => ({ ...modules, phase: 'failed' }),
+    modules => ({ ...modules, nativePresent: false }),
     modules => ({ ...modules, sessionId: 'another-session' }),
     modules => ({ ...modules, selections: [...modules.selections, { moduleId: 'assistant', roleId: 'assistant', version: '1.0.0' }] }),
   ]) {
     const f = fixture(t, { moduleVersion: '1.2.0' });
+    f.c.sessions.set('source', { loaded: true, status: 'idle' });
     const call = f.c.call.bind(f.c);
     f.c.call = async (name, body) => {
       const result = await call(name, body);
       return name === 'session/modules/apply' ? { modules: change(result.modules) } : result;
     };
-    const result = await f.dispatch();
+    const result = await f.dispatch({ selection: 'fork', sourceSessionId: 'source', cwd: undefined });
     assert.equal(result.operation.status, 'unknown');
     assert.equal(result.operation.step, 'module');
     assert.equal(f.c.calls.some(c => c.name === 'prompt'), false);
