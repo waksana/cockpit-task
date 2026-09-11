@@ -1,6 +1,6 @@
 # Managed Cockpit Task module
 
-`module.json` is the schema-v1 official module artifact (package version 1.2.1).
+`module.json` is the schema-v1 official module artifact (package version 1.2.3).
 It declares explicit commander and owner roles with isolated role instruction and
 skill roots. Both use `cockpit-task` at `src/mcp.js`; existing `work-commander`
 MCP/skill installation paths remain available for legacy clients. Selecting a
@@ -273,3 +273,84 @@ For a pre-upgrade consistent SQLite snapshot use existing
 It uses `node:sqlite` online backup without running schema migrations on the source;
 also preserve the existing credentials directory. A rollback must not overwrite
 business records, external data paths or credentials.
+
+## Fresh local configuration initialization
+
+`node src/module-setup.js` is the noninteractive, local-only bootstrap entry for
+an explicitly fresh installation. The host sends exactly one stdin JSON request:
+
+```json
+{"operation":"config-initialize","operationId":"task-install-0001","dataDirectory":"/absolute/private/task-data"}
+```
+
+The absolute `dataDirectory` must be canonical (no symlink aliases, trailing
+slash, dot segments, NUL or newline), either absent or already empty and owned
+0700. Its parent must already be an owned canonical 0700 directory. Missing
+ancestors, public permissions, existing database/business files, credential
+directories and service locks are refused **before** constructing `Store`.
+The CLI never chmods/adopts an existing installation, moves/copies native data,
+connects to Cockpit, starts a service or creates a caller/native session.
+
+Success is one JSON line, exit 0, containing only this path contract:
+
+```json
+{
+  "ok": true,
+  "operationId": "task-install-0001",
+  "dataDirectory": "/absolute/private/task-data",
+  "credentialDirectory": "/absolute/private/task-data/credentials",
+  "managerCredentialFile": "/absolute/private/task-data/credentials/module-manager.json",
+  "viewerCredentialFile": "/absolute/private/task-data/credentials/module-viewer.json"
+}
+```
+
+The viewer is issued through the existing `Store.issue('viewer')` with null
+session/task scope. The independent manager token uses a separate 32-byte random
+value and is **not** a caller/owner/viewer database principal. Both files use
+the existing private JSON `{token}` credential format and 0600 permissions;
+tokens never appear on stdout or in the setup receipt. There are no task,
+business-operation or module-caller-provision rows.
+
+Before any database or credential creation, an exclusive, fsynced
+`.module-setup.json` claims the directory for the exact operation ID. Atomic,
+fsynced stages precede store creation, viewer issuance, manager issuance and
+store close. Partial failures preserve the last phase and all partial
+files/rows. Identical-ID invocations only read a completed result or refuse
+with `SETUP_OUTCOME_UNKNOWN`; they never mint again or automatically continue.
+Another ID receives `SETUP_OPERATION_CONFLICT` and cannot bypass a claimed
+directory. A malformed/incomplete claim also refuses initialization.
+Completed readback checks the fixed result paths and protected credential-file
+hashes without opening/migrating the database; changed/missing credentials are
+not repaired or reissued. No claim/lock is removed or stolen, and no failure
+path clears data.
+
+Errors exit 2 and return only
+`{"ok":false,"error":{"code":"STABLE_CODE"}}`. Codes include
+`INVALID_SETUP_REQUEST`, `INVALID_SETUP_DIRECTORY`, `UNSAFE_SETUP_DIRECTORY`,
+`UNSAFE_SETUP_FILE`, `SETUP_DIRECTORY_NOT_EMPTY`, `SETUP_OPERATION_CONFLICT`,
+`SETUP_OUTCOME_UNKNOWN` and `SETUP_IO_FAILED`. Transport size/deadline policy is
+the host's responsibility; there are no prompts, automatic retries or service
+operations.
+
+The host can map returned paths directly to the existing startup contract:
+`WORK_DATA_DIR=dataDirectory`,
+`WORK_MODULE_MANAGER_CREDENTIAL=managerCredentialFile`, and the viewer file to
+its private read-only HTTP proxy bearer. MCP's existing credential root is
+`WORK_CREDENTIAL_DIR=credentialDirectory`. This does not authorize caller/owner
+provisioning or business writes. Service startup remains a separate explicit
+launch through `src/launch.js` and the normal flock, identity, viewer auth and
+manager-authenticated drain controls.
+
+The optional manifest declaration for host-owned integration is
+`configLifecycle:{"initialize":{"entry":"src/module-setup.js"}}`, explicitly
+declared by Task 1.2.3. It is not a default for every module or a new generic
+hook framework. Cockpit owns the installer/parser/API integration.
+
+`node --test test/module-setup.test.js` uses real Node subprocesses to cover
+empty/missing directories, idempotent readback, concurrent claims, existing-data
+refusal, unsafe paths/permissions, injected failure and process exit after
+viewer issuance. A synthetic isolated initialized directory also starts the
+real `src/launch.js` service: `/version` and `/health` agree, the viewer can read
+but cannot write, the manager is not a viewer principal, and manager `/drain`
+exits naturally. Outbound fetch is forbidden in that fixture; no native session
+is needed or created.
