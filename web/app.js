@@ -6,6 +6,14 @@ const groups = [
   ['待决定 / 待确认', 'decision'], ['暂缓 / 待发布', 'deferred'], ['完成历史', 'closed'],
 ];
 let stream, pages = {}, refreshBusy = false, dirty = false, detailGeneration = 0;
+let session;
+const initialUrl = new URL(location.href);
+const initialTask = initialUrl.searchParams.get('task');
+if (initialTask) {
+  initialUrl.searchParams.delete('task');
+  initialUrl.hash = initialTask;
+  history.replaceState(null, '', initialUrl);
+}
 function node(tag, text, className) {
   const el = document.createElement(tag); if (text !== undefined) el.textContent = text;
   if (className) el.className = className; return el;
@@ -24,8 +32,18 @@ function conditionLabel(conditions) {
 async function api(path, body) {
   const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const value = await response.json();
+  if (response.status === 401 && value.error === 'PASSKEY_REQUIRED') session = { mode: 'passkey' };
   if (!response.ok) { const e = new Error(value.message); e.status = response.status; throw e; }
   return value;
+}
+function requireLogin() {
+  stream?.close();
+  if (session?.mode === 'passkey') {
+    location.replace(`/_gate/login?return=${encodeURIComponent(location.pathname + location.search + location.hash)}`);
+    return;
+  }
+  $('login').hidden = false; $('board').hidden = true; $('detail').hidden = true; $('logout').hidden = true;
+  $('connection').textContent = '未登录';
 }
 function safeLink(value, label = value) {
   try {
@@ -161,12 +179,19 @@ async function refresh() {
       const page = await api('/api/read', { view: 'board', limit: 10, ...(query ? { query } : {}) });
       pages = page.groups;
       for (const lane of Object.values(pages)) lane.query = query;
-      $('login').hidden = true; $('board').hidden = false; $('logout').hidden = false;
+      if (!session) {
+        const response = await fetch('/api/session');
+        if (!response.ok) { const e = new Error('无法读取登录状态'); e.status = response.status; throw e; }
+        session = await response.json();
+      }
+      $('login').hidden = true; $('board').hidden = false;
+      $('logout').hidden = session.mode === 'passkey' && !session.managementUrl;
+      $('logout').textContent = session.mode === 'passkey' ? 'Passkey 管理' : '退出';
       error(''); render(); await detail();
     } while (dirty);
   } catch (e) {
     if (e.status === 401) {
-      stream?.close(); $('login').hidden = false; $('board').hidden = true; $('detail').hidden = true; $('logout').hidden = true; $('connection').textContent = '未登录';
+      requireLogin();
     } else error(e.message);
   } finally { refreshBusy = false; }
 }
@@ -174,7 +199,7 @@ function connect() {
   stream?.close(); stream = new EventSource('/api/events');
   stream.addEventListener('ready', () => { $('connection').textContent = '实时已连接'; refresh(); });
   stream.addEventListener('changed', refresh);
-  stream.onerror = () => { $('connection').textContent = '连接中断，自动重连'; };
+  stream.onerror = () => { $('connection').textContent = '连接中断，自动重连'; refresh(); };
 }
 $('login').onsubmit = async e => {
   e.preventDefault();
@@ -190,7 +215,10 @@ $('credentialFile').onchange = async () => {
     await api('/api/login', { token }); $('credentialFile').value = ''; $('token').value = ''; await refresh(); connect();
   } catch (e) { error(e.message); }
 };
-$('logout').onclick = async () => { await api('/api/logout', {}); stream?.close(); location.reload(); };
+$('logout').onclick = async () => {
+  if (session?.mode === 'passkey') { location.assign(session.managementUrl); return; }
+  await api('/api/logout', {}); stream?.close(); location.reload();
+};
 $('refresh').onclick = refresh;
 $('searchForm').onsubmit = e => { e.preventDefault(); refresh(); };
 window.addEventListener('hashchange', () => detail().catch(e => error(e.message)));

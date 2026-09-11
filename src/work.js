@@ -28,6 +28,11 @@ export class Work {
     this.listeners = new Set();
   }
   changed() { for (const listener of this.listeners) listener(); }
+  taskUrl(id) {
+    const url = new URL(this.publicUrl);
+    url.searchParams.set('task', id);
+    return url.href;
+  }
   authorize(principal, role, task) {
     fail(principal.role !== role, 'FORBIDDEN', `Requires ${role} credential`, 403);
     if (task) {
@@ -120,7 +125,7 @@ export class Work {
         ownerUrl: task.owner ? `${this.cockpitWeb}/session/${encodeURIComponent(task.owner)}` : null,
         legacyOwnerUrl: result.legacy?.ownerRef ? `${this.cockpitWeb}/session/${encodeURIComponent(result.legacy.ownerRef)}` : null,
         callerUrl: `${this.cockpitWeb}/session/${encodeURIComponent(task.caller)}`,
-        workUrl: `${this.publicUrl}/#${task.id}`,
+        workUrl: this.taskUrl(task.id),
       });
       return result;
     }
@@ -503,7 +508,7 @@ export class Work {
     await this.step(op.id, 'notify', async () => {
       const result = await this.cockpit.call('prompt', {
         sessionId: task.caller, mode: 'enqueue',
-        text: `workstream=${task.workstream}; taskId=${task.id}; goalVersion=${op.version}; final=${task.status}\nResult: ${task.summary}\nDetails: ${this.publicUrl}/#${task.id}\nOwner: ${this.cockpitWeb}/session/${task.owner}\nThis is the service's sole final notification. Record this goal version only; no ACK, auto-follow-up, or historical replay.`,
+        text: `workstream=${task.workstream}; taskId=${task.id}; goalVersion=${op.version}; final=${task.status}\nResult: ${task.summary}\nDetails: ${this.taskUrl(task.id)}\nOwner: ${this.cockpitWeb}/session/${task.owner}\nThis is the service's sole final notification. Record this goal version only; no ACK, auto-follow-up, or historical replay.`,
       });
       return { accepted: true, queued: result.queued ?? null };
     });

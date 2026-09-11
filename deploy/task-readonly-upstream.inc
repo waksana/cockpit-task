@@ -1,0 +1,13 @@
+proxy_pass http://127.0.0.1:8790;
+proxy_http_version 1.1;
+proxy_set_header Connection "";
+proxy_set_header Host task.rbym47.com;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $remote_addr;
+proxy_set_header X-Forwarded-Proto https;
+proxy_set_header Cookie "";
+# Root-only file containing only: proxy_set_header Authorization "Bearer <dedicated viewer>";
+include /etc/nginx/task-viewer-secret.inc;
+proxy_buffering off;
+proxy_cache off;
+proxy_read_timeout 75s;
