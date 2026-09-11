@@ -104,6 +104,8 @@ test('independent module identity reports verified inventory provenance without 
   assert.equal(version.instanceId, instanceId);
   assert.equal(health.instanceId, instanceId);
   assert.equal(health.version, packageVersion);
+  assert.equal(health.moduleVersion, packageVersion);
+  assert.equal(health.moduleDigest, version.moduleDigest);
   assert.equal(version.identitySource, 'module-environment');
   assert.equal(version.sha, null);
   assert.equal(version.artifactSha256, null);

@@ -8,6 +8,8 @@ import { Store, readCredential, WorkError } from '../src/store.js';
 import { createApp } from '../src/server.js';
 import { dataDirectory, normalizeBasePath } from '../src/module.js';
 import { Work } from '../src/work.js';
+import { captureRuntime } from '../src/runtime.js';
+import { Lifecycle } from '../src/lifecycle.js';
 
 function fixture(t, options = {}) {
   const dir = join(process.cwd(), `.module-test-${randomUUID()}`);
@@ -116,10 +118,45 @@ test('credential-file failure leaves a durable reservation, never a second issue
 test('unconfigured manager route is absent and drain denies new provisioning', async t => {
   const f = fixture(t, { moduleManagerCredential: null });
   assert.equal((await f.provision()).statusCode, 404);
+  assert.equal((await f.provision({ pending: true }, { url: '/drain' })).statusCode, 404);
   const managed = fixture(t);
   managed.lifecycle.requestRestart();
   assert.equal((await managed.provision()).statusCode, 503);
   assert.equal(managed.calls(), 0);
+});
+
+test('module drain authenticates the manager, preserves in-flight effects and returns same-instance identity', async t => {
+  let finish, drained = 0;
+  const lifecycle = new Lifecycle({ onDrained: () => { drained++; } });
+  const packageVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version;
+  const runtime = captureRuntime({ COCKPIT_MODULE_ID: 'task', COCKPIT_MODULE_VERSION: packageVersion,
+    COCKPIT_MODULE_DIGEST: 'd'.repeat(64), COCKPIT_MODULE_INSTANCE: randomUUID() });
+  const f = fixture(t, { runtime, lifecycle });
+  const admitted = lifecycle.mutation('fixture', () => new Promise(resolve => { finish = resolve; }));
+  t.after(() => finish());
+  for (const extra of [
+    { headers: { host: f.headers.host } },
+    { headers: { ...f.headers, origin: 'http://127.0.0.1:8790' } },
+    { headers: { ...f.headers, 'sec-fetch-mode': 'cors' } },
+    { remoteAddress: '198.51.100.2' },
+  ]) {
+    const response = await f.provision({ pending: true }, { url: '/drain', ...extra });
+    assert.ok([401, 403].includes(response.statusCode));
+  }
+  for (const body of [{ pending: false }, { pending: true, force: true }]) {
+    assert.equal((await f.provision(body, { url: '/drain' })).statusCode, 400);
+  }
+  const response = await f.provision({ pending: true }, { url: '/drain' });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), { ok: true, pending: true, ...lifecycle.status(),
+    instanceId: runtime.instanceId, moduleVersion: packageVersion, moduleDigest: runtime.moduleDigest });
+  assert.equal(response.json().activeMutations, 1);
+  assert.equal(response.json().safeToRestart, false);
+  assert.equal((await f.provision()).statusCode, 503);
+  assert.equal(drained, 0);
+  finish(); await admitted;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(drained, 1);
 });
 
 test('module capability and health are reported by the same running instance', async t => {
@@ -142,7 +179,7 @@ test('base paths cover HTML/deep links while legacy gateway retains empty-prefix
     assert.ok(page.body.includes(`href="${prefix}/style.css"`));
     assert.ok(page.body.includes(`src="${prefix}/app.js"`));
     assert.ok(page.body.includes(`name="task-base-path" content="${prefix}"`));
-    for (const path of ['/admin/module/caller', '/api/tools/work_record', '/version', '/status', '/health']) {
+    for (const path of ['/admin/module/caller', '/drain', '/api/tools/work_record', '/version', '/status', '/health']) {
       const response = await f.app.inject({ method: 'POST', url: path, headers: { host, authorization: `Bearer ${viewer}` }, payload: {} });
       assert.equal(response.statusCode, 404);
     }
@@ -161,6 +198,9 @@ test('module paths are opt-in and manifest roles are explicit, isolated roots', 
   const manifest = JSON.parse(readFileSync(new URL('../module.json', import.meta.url)));
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url)));
   assert.equal(manifest.version, pkg.version);
+  assert.deepEqual(manifest.service, {
+    entry: 'src/launch.js', healthPath: '/health', versionPath: '/version', drainPath: '/drain', publicPath: '/modules/task',
+  });
   assert.deepEqual(manifest.roles.map(r => r.id), ['commander', 'owner']);
   for (const role of manifest.roles) {
     assert.deepEqual(Object.keys(role.mcp), ['cockpit-task']);

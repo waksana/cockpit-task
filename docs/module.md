@@ -40,6 +40,8 @@ part of module role application.
 
 ### Independent consumer runner startup contract
 
+The manifest declares `service.entry:"src/launch.js"`, `healthPath:"/health"`,
+`versionPath:"/version"`, `drainPath:"/drain"` and `publicPath:"/modules/task"`.
 The non-Docker consumer runner launches Node 24 from the selected immutable
 release directory with argv `["node","src/launch.js"]`. `flock` must be available
 on PATH. The launcher acquires `<WORK_DATA_DIR>/service.lock` and alone sets
@@ -67,10 +69,14 @@ or a `WORK_CONFIG_FILE`; it consumes the following startup environment.
 | `COCKPIT_MODULE_DIGEST` | Verified catalog inventory digest, exactly 64 lowercase hex characters |
 | `COCKPIT_MODULE_INSTANCE` | Fresh UUID allocated for this service process instance |
 
+`WORK_PORT` must equal the port in the supervisor's registered `serviceUrl`.
+`COCKPIT_MODULE_PORT` is not consumed by Task; setting only that variable does not
+configure its listening port.
+
 Pass all four `COCKPIT_MODULE_*` identity fields together. `/version` reports
 `moduleApi:1`, actual package `version`, `moduleVersion`, `moduleDigest`, the
 runner's `instanceId`, and `identitySource:"module-environment"`. `/health` reports
-that same captured instanceId and package version. Environment mutation does not
+that same captured instanceId, package version, moduleVersion and moduleDigest. Environment mutation does not
 rewrite identity after startup. The module digest is a **catalog inventory**
 digest, not a private-CD artifact hash; Task does not pretend to recompute the
 runner's catalog verification.
@@ -98,7 +104,10 @@ Do not pass the module manager credential/token to role MCP clients; they receiv
 only scoped caller/owner credential file paths per the handshake below.
 The service does not write its log destination: the runner routes stdout/stderr
 to `<root>/logs/task`. It waits for real same-instance `/version` and `/health`,
-not merely a spawned process. Stop uses normal SIGTERM/SIGINT or the existing
+not merely a spawned process. The managed supervisor stops through
+`POST /drain {"pending":true}` with the dedicated module-manager bearer described
+below, then waits for natural exit without force signals or a kill timeout.
+Legacy manual shutdown still handles normal SIGTERM/SIGINT or the existing
 trusted `/admin/restart {"pending":true}` admission/drain path; `WORK_ADMIN_TOKEN`
 remains the optional pre-existing local-admin bearer and is not the module-manager
 credential. No force timeout, data relocation, private-CD takeover or production
@@ -132,7 +141,7 @@ paths are not a broader grant. `/api/events` streams invalidations and reauthori
 by reconnecting within 60 seconds. Both configured gateway hosts independently
 enforce the viewer role and this allowlist inside Task as defense in depth.
 
-**Never proxy** `/api/tools/:name`, `/admin/*`, `/health`, `/version`, or `/status`
+**Never proxy** `/api/tools/:name`, `/admin/*`, `/drain`, `/health`, `/version`, or `/status`
 through the public module route. Protected local MCP writes keep their existing
 caller/owner token roles. Browser authentication does not grant either role.
 Health/version/status remain available for separately trusted service management.
@@ -144,6 +153,30 @@ file containing `{ "token": "<dedicated high-entropy management token>" }`.
 No route is registered if absent. Do not reuse a viewer, caller or owner token.
 This credential is supplied only to the trusted Cockpit module manager and Task
 service; never to a browser or role MCP process.
+
+The same manager credential authorizes the optional `POST /drain` route; it is
+also absent unless the credential file is configured. Drain uses the same
+non-browser loopback/Host/Origin checks as provisioning and requires exactly
+`{"pending":true}`. It closes mutation admission synchronously, leaves admitted
+operations and notifications intact, and returns:
+
+```
+{
+  "ok": true, "pending": true, "restartPending": true,
+  "acceptingMutations": false, "inFlight": 1, "activeMutations": 1,
+  "activeDispatches": 1, "activeNotifications": 0, "activeRecoveries": 0,
+  "safeToRestart": false, "reason": "in-flight-mutations",
+  "instanceId": "<same-runtime-UUID>",
+  "moduleVersion": "<actual-module-version>",
+  "moduleDigest": "<catalog-inventory-digest>"
+}
+```
+
+Counts/reason/safeToRestart reflect the actual current lifecycle, not these example
+values. The process exits only after admitted mutations settle. There is no drain
+cancellation, forced termination, schedule cancellation or task replay. The
+supervisor checks the returned instance identity against the owned child; it must
+not drain or take over a separately registered external service.
 
 The manager performs one explicit call:
 

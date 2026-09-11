@@ -6,6 +6,13 @@
   "description": "Explicit task records, authorized dispatch and owner reporting; no autonomous scheduling.",
   "compatibility": { "cockpitApi": 1, "nodeMajor": 24, "platform": "linux", "arch": "x64" },
   "configVersion": 1,
+  "service": {
+    "entry": "src/launch.js",
+    "healthPath": "/health",
+    "versionPath": "/version",
+    "drainPath": "/drain",
+    "publicPath": "/modules/task"
+  },
   "roles": [
     {
       "id": "commander",

@@ -71,6 +71,7 @@ export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127
   app.get('/version', async () => ({ ...runtime, observedAt: new Date().toISOString() }));
   app.get('/health', async () => ({ ok: store.get('PRAGMA quick_check').quick_check === 'ok',
     version: runtime.version, release: basename(root), instanceId: runtime.instanceId,
+    moduleVersion: runtime.moduleVersion, moduleDigest: runtime.moduleDigest,
     authority: runtime.authority, observedAt: new Date().toISOString() }));
   app.get('/status', async () => ({ ...lifecycle.status(), instanceId: runtime.instanceId,
     authority: runtime.authority, observedAt: new Date().toISOString() }));
@@ -88,7 +89,7 @@ export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127
       'INVALID_INPUT', 'Supply only pending:true; drain cannot be cancelled', 400);
     return { ok: true, pending: true, ...lifecycle.requestRestart() };
   });
-  if (managerToken) app.post('/admin/module/caller', async req => {
+  const authorizeManager = req => {
     fail(!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.raw.socket.remoteAddress) ||
       req.headers.origin !== undefined || Object.keys(req.headers).some(name => name.startsWith('sec-fetch-')),
     'MODULE_MANAGER_LOCAL_ONLY', 'Module management requires a non-browser trusted loopback client', 403);
@@ -96,8 +97,20 @@ export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127
     const expected = Buffer.from(`Bearer ${managerToken}`);
     fail(actual.length !== expected.length || !timingSafeEqual(actual, expected),
       'UNAUTHORIZED', 'Module manager credential required', 401);
-    return lifecycle.mutation('module_caller', () => manager.provision(req.body));
-  });
+  };
+  if (managerToken) {
+    app.post('/admin/module/caller', async req => {
+      authorizeManager(req);
+      return lifecycle.mutation('module_caller', () => manager.provision(req.body));
+    });
+    app.post('/drain', async req => {
+      authorizeManager(req);
+      fail(!req.body || req.body.pending !== true || Object.keys(req.body).length !== 1,
+        'INVALID_INPUT', 'Supply only pending:true; drain cannot be cancelled', 400);
+      return { ok: true, pending: true, ...lifecycle.requestRestart(),
+        instanceId: runtime.instanceId, moduleVersion: runtime.moduleVersion, moduleDigest: runtime.moduleDigest };
+    });
+  }
   for (const [route, file, type] of [['/', 'index.html', 'text/html'], ['/app.js', 'app.js', 'text/javascript'], ['/style.css', 'style.css', 'text/css']]) {
     app.get(route, async (req, reply) => {
       let content = readFileSync(join(root, 'web', file), 'utf8');
