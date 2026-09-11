@@ -38,6 +38,72 @@ Launcher remains `node src/launch.js`; preserve existing lifecycle admission/dra
 and flock. No forced exit, queue cancellation, service restart or database move is
 part of module role application.
 
+### Independent consumer runner startup contract
+
+The non-Docker consumer runner launches Node 24 from the selected immutable
+release directory with argv `["node","src/launch.js"]`. `flock` must be available
+on PATH. The launcher acquires `<WORK_DATA_DIR>/service.lock` and alone sets
+`WORK_LOCK_HELD=1` for the server child; never set that flag to bypass the launcher.
+The runner owns parsing `module-config/task.json` and mapping its validated
+references to environment variables. Task does not read a second config database
+or a `WORK_CONFIG_FILE`; it consumes the following startup environment.
+
+| Variable | Consumer runner value / meaning |
+| --- | --- |
+| `COCKPIT_USER_ROOT` | Absolute Cockpit user root, default `~/.cockpit` |
+| `WORK_DATA_DIR` | Registered Task data directory, normally `<root>/data/task`; preserve external data overrides |
+| `WORK_PORT` | Allocated Task loopback HTTP port, e.g. `8790`; server binds `127.0.0.1` only |
+| `COCKPIT_URL` | Cockpit internal HTTP origin, e.g. `http://127.0.0.1:8771`; no module prefix |
+| `COCKPIT_API_TOKEN` | Optional existing Cockpit internal bearer, only if required by that endpoint; never UI config contents |
+| `COCKPIT_WEB_URL` | Cockpit browser origin used for `/session/<id>` links |
+| `WORK_PUBLIC_URL` | Browser Task URL, normally `https://<cockpit>/modules/task/` |
+| `WORK_BASE_PATH` | `/modules/task` |
+| `WORK_MODULE_GATEWAY_URL` | Canonical HTTPS Cockpit origin trusted for viewer-only proxy requests |
+| `WORK_GATEWAY_URL` | Optional preserved legacy gateway origin, e.g. `https://task.rbym47.com` |
+| `WORK_MODULE_MANAGER_CREDENTIAL` | Absolute protected manager JSON credential file reference; Task reads its token server-side |
+| `WORK_COCKPIT_MODULE_VERSION` | Selected installed Task version, enables explicit Task owner role preparation |
+| `COCKPIT_MODULE_ID` | Literal `task` |
+| `COCKPIT_MODULE_VERSION` | Selected manifest version; must equal the actual running package version and, when supplied, `WORK_COCKPIT_MODULE_VERSION` |
+| `COCKPIT_MODULE_DIGEST` | Verified catalog inventory digest, exactly 64 lowercase hex characters |
+| `COCKPIT_MODULE_INSTANCE` | Fresh UUID allocated for this service process instance |
+
+Pass all four `COCKPIT_MODULE_*` identity fields together. `/version` reports
+`moduleApi:1`, actual package `version`, `moduleVersion`, `moduleDigest`, the
+runner's `instanceId`, and `identitySource:"module-environment"`. `/health` reports
+that same captured instanceId and package version. Environment mutation does not
+rewrite identity after startup. The module digest is a **catalog inventory**
+digest, not a private-CD artifact hash; Task does not pretend to recompute the
+runner's catalog verification.
+
+Do not manufacture or inherit `SERVICE_DELIVERY_SHA`, `SERVICE_DELIVERY_ARTIFACT`,
+`SERVICE_DELIVERY_REQUEST` or `SERVICE_DELIVERY_INSTANCE` into a consumer launch.
+Private-CD and consumer-module identity authorities are mutually exclusive:
+simultaneous identities fail closed rather than overriding private-CD priority or
+combining incomparable provenance. A private-CD launch with its existing complete
+four-field identity remains unchanged and reports `identitySource:"delivery-environment"`.
+Consumer mode keeps `sha`, `artifactSha256` and `requestId` null; legacy/private-CD
+mode keeps `moduleVersion` and `moduleDigest` null. Partial, malformed, wrong-module
+or wrong-package module identities reject startup rather than reporting readiness.
+
+For each role MCP child launch Node with the pinned `src/mcp.js` and:
+
+- `WORK_URL=http://127.0.0.1:<WORK_PORT>` (the Task service, not Cockpit or its
+  browser `/modules/task` route).
+- `WORK_CREDENTIAL_DIR=<registered-data>/credentials`, an existing canonical
+  directory; `WORK_DATA_DIR` may also be supplied to preserve the same data root.
+- Optional `COCKPIT_USER_ROOT` and `WORK_COCKPIT_MODULE_VERSION` if relying on managed
+  defaults instead of explicit data/credential paths.
+
+Do not pass the module manager credential/token to role MCP clients; they receive
+only scoped caller/owner credential file paths per the handshake below.
+The service does not write its log destination: the runner routes stdout/stderr
+to `<root>/logs/task`. It waits for real same-instance `/version` and `/health`,
+not merely a spawned process. Stop uses normal SIGTERM/SIGINT or the existing
+trusted `/admin/restart {"pending":true}` admission/drain path; `WORK_ADMIN_TOKEN`
+remains the optional pre-existing local-admin bearer and is not the module-manager
+credential. No force timeout, data relocation, private-CD takeover or production
+startup is implied by this contract.
+
 ## HTTP proxy contract
 
 Set `WORK_BASE_PATH=/modules/task`. Cockpit strips `/modules/task` before forwarding

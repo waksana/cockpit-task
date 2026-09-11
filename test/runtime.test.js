@@ -12,6 +12,9 @@ const goal = { objective: 'fixture', scope: 'fixture', acceptance: 'fixture', au
 const instanceId = '5188fc5f-f63e-4baa-8b6b-04fdd9f18dce';
 const deliveryEnv = { SERVICE_DELIVERY_SHA: 'a'.repeat(40), SERVICE_DELIVERY_ARTIFACT: 'b'.repeat(64),
   SERVICE_DELIVERY_REQUEST: 'runtime-request', SERVICE_DELIVERY_INSTANCE: instanceId };
+const packageVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version;
+const moduleEnv = { COCKPIT_MODULE_ID: 'task', COCKPIT_MODULE_VERSION: packageVersion,
+  COCKPIT_MODULE_DIGEST: 'c'.repeat(64), COCKPIT_MODULE_INSTANCE: instanceId };
 function gate() {
   let release, reached;
   return { promise: new Promise(resolve => { release = resolve; }),
@@ -85,6 +88,51 @@ test('delivery identity rejects every partial environment and malformed complete
     for (const value of values) assert.throws(() => captureRuntime({ ...deliveryEnv, [name]: value }), /Invalid SERVICE_DELIVERY identity/);
   }
   assert.throws(() => captureRuntime(Object.fromEntries(fields.map(name => [name, '']))), /Invalid SERVICE_DELIVERY identity/);
+});
+
+test('independent module identity reports verified inventory provenance without fabricating private CD fields', async t => {
+  const env = { ...moduleEnv, WORK_COCKPIT_MODULE_VERSION: packageVersion };
+  const runtime = captureRuntime(env);
+  env.COCKPIT_MODULE_DIGEST = 'd'.repeat(64);
+  env.COCKPIT_MODULE_INSTANCE = 'changed';
+  const f = await fixture(t, { runtime });
+  const version = (await f.request('/version')).json(), health = (await f.request('/health')).json();
+  assert.equal(version.moduleApi, 1);
+  assert.equal(version.version, packageVersion);
+  assert.equal(version.moduleVersion, packageVersion);
+  assert.equal(version.moduleDigest, 'c'.repeat(64));
+  assert.equal(version.instanceId, instanceId);
+  assert.equal(health.instanceId, instanceId);
+  assert.equal(health.version, packageVersion);
+  assert.equal(version.identitySource, 'module-environment');
+  assert.equal(version.sha, null);
+  assert.equal(version.artifactSha256, null);
+  assert.equal(version.requestId, null);
+  const delivery = captureRuntime(deliveryEnv);
+  assert.equal(delivery.identitySource, 'delivery-environment');
+  assert.equal(delivery.moduleDigest, null);
+  assert.equal(delivery.moduleVersion, null);
+});
+
+test('module runtime rejects partial, malformed, wrong-package and conflicting authority identities', () => {
+  const fields = Object.keys(moduleEnv);
+  for (let mask = 1; mask < 15; mask++) {
+    const env = Object.fromEntries(fields.filter((name, index) => mask & (1 << index)).map(name => [name, moduleEnv[name]]));
+    assert.throws(() => captureRuntime(env), /Invalid COCKPIT_MODULE identity/);
+  }
+  const invalid = {
+    COCKPIT_MODULE_ID: ['', 'assistant', null],
+    COCKPIT_MODULE_VERSION: ['', '99.0.0', `${packageVersion}\n`, null],
+    COCKPIT_MODULE_DIGEST: ['', 'c'.repeat(63), 'C'.repeat(64), `${'c'.repeat(64)}\n`, null],
+    COCKPIT_MODULE_INSTANCE: ['', 'instance', `${instanceId}\n`, null],
+  };
+  for (const [name, values] of Object.entries(invalid)) {
+    for (const value of values) assert.throws(() => captureRuntime({ ...moduleEnv, [name]: value }), /Invalid COCKPIT_MODULE identity/);
+  }
+  assert.throws(() => captureRuntime({ ...moduleEnv, WORK_COCKPIT_MODULE_VERSION: '99.0.0' }), /Invalid COCKPIT_MODULE identity/);
+  assert.throws(() => captureRuntime({ ...moduleEnv, ...deliveryEnv }), /Conflicting runtime identity authorities/);
+  assert.throws(() => captureRuntime({ ...moduleEnv, ...deliveryEnv,
+    COCKPIT_MODULE_INSTANCE: 'ca5d280d-2736-44ca-94e6-9cb38af72f92' }), /Conflicting runtime identity authorities/);
 });
 
 for (const kind of ['dispatch', 'notification']) {
