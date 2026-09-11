@@ -1,6 +1,6 @@
 # Managed Cockpit Task module
 
-`module.json` is the schema-v1 official module artifact (package version 1.2.0).
+`module.json` is the schema-v1 official module artifact (package version 1.2.1).
 It declares explicit commander and owner roles with isolated role instruction and
 skill roots. Both use `cockpit-task` at `src/mcp.js`; existing `work-commander`
 MCP/skill installation paths remain available for legacy clients. Selecting a
@@ -60,7 +60,7 @@ or a `WORK_CONFIG_FILE`; it consumes the following startup environment.
 | `COCKPIT_WEB_URL` | Cockpit browser origin used for `/session/<id>` links |
 | `WORK_PUBLIC_URL` | Browser Task URL, normally `https://<cockpit>/modules/task/` |
 | `WORK_BASE_PATH` | `/modules/task` |
-| `WORK_MODULE_GATEWAY_URL` | Canonical HTTPS Cockpit origin trusted for viewer-only proxy requests |
+| `WORK_MODULE_GATEWAY_URL` | Canonical HTTPS Cockpit origin, including an optional non-default port, trusted for viewer-only proxy requests |
 | `WORK_GATEWAY_URL` | Optional preserved legacy gateway origin, e.g. `https://task.rbym47.com` |
 | `WORK_MODULE_MANAGER_CREDENTIAL` | Absolute protected manager JSON credential file reference; Task reads its token server-side |
 | `WORK_COCKPIT_MODULE_VERSION` | Selected installed Task version, enables explicit Task owner role preparation |
@@ -122,6 +122,18 @@ static references, browser API/SSE requests and task deep links, not API routing
 `/modules/task/` URL for new installations).
 
 Set `WORK_MODULE_GATEWAY_URL=https://<cockpit-origin>` for the trusted Cockpit proxy.
+Canonical HTTPS origins with explicit non-default ports are supported, for example
+`WORK_MODULE_GATEWAY_URL=https://127.0.0.1:34907` with
+`WORK_PUBLIC_URL=https://127.0.0.1:34907/modules/task/`. The gateway value must
+exactly equal the URL's canonical origin: no trailing slash, path, query,
+fragment or credentials. Default HTTPS port 443 is omitted in canonical form.
+The proxy must preserve the configured Host **including its port**. If Origin
+is present, it must exactly match that gateway's HTTPS origin; trusting two
+gateway origins does not allow cross-origin requests between them, even on the
+same hostname with different ports. Requests without Origin still require the
+viewer bearer and the same method/path allowlist. Task remains loopback HTTP
+behind the HTTPS proxy; this setting does not enable TLS on the Task listener.
+
 The existing `WORK_GATEWAY_URL=https://task.rbym47.com` can remain configured:
 when both distinct gateway origins exist, the legacy gateway gets empty-base HTML
 and links, preserving its current root URL. Existing WORK_PUBLIC_URL pointing to

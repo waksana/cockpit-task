@@ -100,8 +100,74 @@ test('gateway stream delivers committed changes and closes for Gate reauthorizat
 });
 
 test('gateway configuration fails closed on insecure URL or unbounded streams', () => {
-  for (const gatewayUrl of ['http://task.example.com', 'https://task.example.com/', 'https://task.example.com/path', 'https://user:pass@task.example.com']) {
-    assert.throws(() => createApp({ gatewayUrl }), /canonical HTTPS origin/);
+  for (const value of ['http://task.example.com', 'https://task.example.com/', 'https://task.example.com/path', 'https://user:pass@task.example.com',
+    'https://127.0.0.1:34907/', 'https://127.0.0.1:34907/path', 'https://127.0.0.1:34907?query',
+    'https://127.0.0.1:34907#fragment', 'https://127.0.0.1:443', 'https://127.0.0.1:034907']) {
+    for (const key of ['gatewayUrl', 'moduleGatewayUrl']) {
+      assert.throws(() => createApp({ [key]: value }), /canonical HTTPS origin/);
+    }
   }
   assert.throws(() => createApp({ gatewayStreamMs: 60001 }), /reauthorize within 60 seconds/);
 });
+
+for (const legacyOrigin of ['https://task.example.com', 'https://127.0.0.1:34908']) {
+  test(`real HTTP forwarding accepts a port-qualified HTTPS module origin and isolates legacy ${legacyOrigin}`, async t => {
+    const moduleOrigin = 'https://127.0.0.1:34907';
+    const f = fixture(t, { gatewayUrl: legacyOrigin, moduleGatewayUrl: moduleOrigin,
+      publicUrl: legacyOrigin, basePath: '/modules/task', gatewayStreamMs: 30 });
+    const address = await f.app.listen({ host: '127.0.0.1', port: 0 });
+    const forwarded = (path, { host, origin, token = f.viewer, method = 'GET', payload } = {}) => new Promise((resolve, reject) => {
+      const req = request(new URL(path, address), { method, headers: {
+        host, ...(origin ? { origin } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(payload ? { 'content-type': 'application/json' } : {}),
+      } }, res => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', chunk => { body += chunk; });
+        res.on('error', reject);
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
+      });
+      req.setTimeout(2000, () => req.destroy(new Error('Fixture HTTP request timed out')));
+      req.on('error', reject);
+      req.end(payload ? JSON.stringify(payload) : undefined);
+    });
+    for (const [origin, prefix, otherOrigin] of [[moduleOrigin, '/modules/task', legacyOrigin], [legacyOrigin, '', moduleOrigin]]) {
+      const host = new URL(origin).host;
+      const page = await forwarded('/?task=fixture', { host, origin });
+      assert.equal(page.status, 200);
+      assert.ok(page.body.includes(`href="${prefix}/style.css"`));
+      assert.ok(page.body.includes(`src="${prefix}/app.js"`));
+      assert.ok(page.body.includes(`name="task-base-path" content="${prefix}"`));
+      for (const path of ['/app.js', '/style.css']) {
+        assert.equal((await forwarded(path, { host, origin })).status, 200);
+        assert.equal((await forwarded(path, { host, origin, method: 'HEAD' })).status, 200);
+      }
+      const board = await forwarded('/api/read', { host, origin, method: 'POST', payload: { view: 'board' } });
+      assert.equal(board.status, 200);
+      assert.ok(JSON.parse(board.body).groups);
+      const events = await forwarded('/api/events', { host, origin });
+      assert.equal(events.status, 200);
+      assert.match(events.headers['content-type'], /text\/event-stream/);
+      assert.match(events.body, /event: ready/);
+      assert.equal((await forwarded('/', { host })).status, 200);
+      assert.equal((await forwarded('/', { host, origin, token: null })).status, 401);
+      assert.equal((await forwarded('/', { host, origin, token: f.caller })).status, 403);
+      for (const crossOrigin of [otherOrigin, 'https://127.0.0.1', 'https://127.0.0.1:443',
+        'https://127.0.0.1:34909', 'http://127.0.0.1:34907', `${origin}/`]) {
+        assert.equal((await forwarded('/api/read', { host, origin: crossOrigin, method: 'POST', payload: {} })).status, 403, crossOrigin);
+      }
+      for (const path of ['/admin/module/caller', '/admin/restart', '/drain', '/api/tools/work_record', '/version', '/health', '/status']) {
+        for (const method of ['GET', 'POST']) {
+          assert.equal((await forwarded(path, { host, origin, method, ...(method === 'POST' ? { payload: {} } : {}) })).status, 404);
+        }
+      }
+      assert.equal((await forwarded('/', { host, origin, method: 'POST', payload: {} })).status, 404);
+      assert.equal((await forwarded('/api/read', { host, origin })).status, 404);
+    }
+    for (const host of ['127.0.0.1', '127.0.0.1:443', '127.0.0.1:34909', 'other.example.com:34907']) {
+      assert.equal((await forwarded('/', { host, origin: moduleOrigin })).status, 403, host);
+    }
+    assert.equal(f.work.taskUrl('fixture-id'), `${legacyOrigin}/?task=fixture-id`);
+    assert.equal(f.work.listeners.size, 0);
+  });
+}

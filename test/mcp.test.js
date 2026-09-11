@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -22,6 +22,7 @@ test('real MCP stdio client discovers and invokes scoped tools against HTTP serv
   const client = new Client({ name: 'work-fixture', version: '1.0.0' });
   t.after(async () => { await client.close(); await app.close(); store.close(); rmSync(directory, { recursive: true }); });
   await client.connect(transport);
+  assert.equal(client.getServerVersion().version, JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version);
   const tools = await client.listTools();
   assert.equal(tools.tools.length, 10);
   const dependencyTool = tools.tools.find(tool => tool.name === 'work_dependency');

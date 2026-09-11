@@ -20,7 +20,7 @@ export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127
   const gateways = [gatewayUrl, moduleGatewayUrl].filter(Boolean).map(value => {
     const gateway = new URL(value);
     if (gateway.protocol !== 'https:' || gateway.origin !== value ||
-      gateway.username || gateway.password || gateway.port) throw new Error('gatewayUrl must be a canonical HTTPS origin');
+      gateway.username || gateway.password) throw new Error('gatewayUrl must be a canonical HTTPS origin');
     return gateway;
   });
   const gateway = gateways.find(value => value.origin === gatewayUrl);
@@ -47,7 +47,9 @@ export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127
   }
   app.addHook('onRequest', async (req, reply) => {
     fail(!hosts.has(req.headers.host), 'INVALID_HOST', 'Use the configured loopback host', 403);
-    if (req.headers.origin) fail(!origins.has(req.headers.origin), 'INVALID_ORIGIN', 'Cross-origin access denied', 403);
+    const requestGateway = gateways.find(value => req.headers.host === value.host);
+    if (req.headers.origin) fail(!origins.has(req.headers.origin) ||
+      (requestGateway && req.headers.origin !== requestGateway.origin), 'INVALID_ORIGIN', 'Cross-origin access denied', 403);
     if (viaGateway(req)) {
       const path = req.raw.url.split('?')[0];
       fail(!((['GET', 'HEAD'].includes(req.method) && gatewayReads.has(path)) ||
