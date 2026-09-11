@@ -132,7 +132,8 @@ test('real admin drain preserves dispatch response, closes SSE only after comple
   upstream.listen(0, '127.0.0.1'); await once(upstream, 'listening');
   const child = spawn(process.execPath, [join(process.cwd(), 'src/launch.js')], {
     env: { ...process.env, WORK_DATA_DIR: directory, WORK_PORT: '18813', WORK_ADMIN_TOKEN: '',
-      SERVICE_DELIVERY_SHA: 'd'.repeat(40), SERVICE_DELIVERY_INSTANCE: 'drain-instance',
+      SERVICE_DELIVERY_SHA: 'd'.repeat(40), SERVICE_DELIVERY_ARTIFACT: 'e'.repeat(64),
+      SERVICE_DELIVERY_REQUEST: 'real-drain-request', SERVICE_DELIVERY_INSTANCE: 'da97a7a9-08c6-4bb9-bc8f-b4ce113f78a3',
       COCKPIT_URL: `http://127.0.0.1:${upstream.address().port}` },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -153,7 +154,9 @@ test('real admin drain preserves dispatch response, closes SSE only after comple
   const sse = await fetch(`${base}/api/events`, { headers: { authorization: `Bearer ${viewer}` }, signal: controller.signal });
   assert.equal(sse.status, 200);
   const version = await (await fetch(`${base}/version`)).json();
-  assert.equal(version.instanceId, 'drain-instance');
+  assert.deepEqual({ sha: version.sha, artifactSha256: version.artifactSha256, requestId: version.requestId, instanceId: version.instanceId }, {
+    sha: 'd'.repeat(40), artifactSha256: 'e'.repeat(64), requestId: 'real-drain-request', instanceId: 'da97a7a9-08c6-4bb9-bc8f-b4ce113f78a3',
+  });
   assert.equal((await (await fetch(`${base}/health`)).json()).instanceId, version.instanceId);
   const pending = post('/api/tools/work_dispatch', {
     selection: 'new', workstream: 'drain-fixture', cwd: directory,
@@ -174,6 +177,7 @@ test('real admin drain preserves dispatch response, closes SSE only after comple
   assert.equal((await post('/api/read', {}, token)).status, 200);
   const status = await (await fetch(`${base}/status`)).json();
   assert.equal(status.activeDispatches, 1);
+  assert.equal(status.inFlight, 1);
   assert.equal(status.acceptingMutations, false);
   assert.equal(child.exitCode, null);
   releasePrompt();

@@ -9,6 +9,9 @@ import { Store, readCredential } from '../src/store.js';
 import { createApp } from '../src/server.js';
 
 const goal = { objective: 'fixture', scope: 'fixture', acceptance: 'fixture', authorization: 'fixture' };
+const instanceId = '5188fc5f-f63e-4baa-8b6b-04fdd9f18dce';
+const deliveryEnv = { SERVICE_DELIVERY_SHA: 'a'.repeat(40), SERVICE_DELIVERY_ARTIFACT: 'b'.repeat(64),
+  SERVICE_DELIVERY_REQUEST: 'runtime-request', SERVICE_DELIVERY_INSTANCE: instanceId };
 function gate() {
   let release, reached;
   return { promise: new Promise(resolve => { release = resolve; }),
@@ -38,8 +41,7 @@ async function fixture(t, options = {}) {
 }
 
 test('runtime identity is captured once; source mode never derives a Git SHA', async t => {
-  const env = { SERVICE_DELIVERY_SHA: 'a'.repeat(40), SERVICE_DELIVERY_ARTIFACT: 'b'.repeat(64),
-    SERVICE_DELIVERY_REQUEST: 'runtime-request', SERVICE_DELIVERY_INSTANCE: 'runtime-instance' };
+  const env = { ...deliveryEnv };
   const runtime = captureRuntime(env);
   env.SERVICE_DELIVERY_SHA = 'c'.repeat(40);
   env.SERVICE_DELIVERY_INSTANCE = 'changed';
@@ -47,18 +49,42 @@ test('runtime identity is captured once; source mode never derives a Git SHA', a
   const version = await f.request('/version'), health = await f.request('/health');
   assert.equal(version.headers['cache-control'], 'no-store');
   assert.equal(health.headers['cache-control'], 'no-store');
-  assert.equal(version.json().sourceSha, 'a'.repeat(40));
-  assert.equal(version.json().artifactDigest, 'b'.repeat(64));
-  assert.equal(version.json().requestId, 'runtime-request');
+  const { sha, artifactSha256, requestId, instanceId: actualInstanceId } = version.json();
+  assert.deepEqual({ sha, artifactSha256, requestId, instanceId: actualInstanceId }, {
+    sha: 'a'.repeat(40), artifactSha256: 'b'.repeat(64), requestId: 'runtime-request', instanceId,
+  });
+  assert.equal(Object.hasOwn(version.json(), 'sourceSha'), false);
+  assert.equal(Object.hasOwn(version.json(), 'artifactDigest'), false);
   assert.equal(version.json().instanceId, health.json().instanceId);
-  assert.equal(version.json().instanceId, 'runtime-instance');
+  assert.equal(version.json().instanceId, instanceId);
   assert.equal(version.json().version, JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version);
-  for (const source of [{}, { SERVICE_DELIVERY_SHA: 'main' }]) {
-    const unknown = captureRuntime(source);
-    assert.equal(unknown.sourceSha, null);
+  const first = captureRuntime({});
+  for (const unknown of [first, captureRuntime({})]) {
+    assert.equal(unknown.sha, null);
+    assert.equal(unknown.artifactSha256, null);
+    assert.equal(unknown.requestId, null);
     assert.equal(unknown.identitySource, 'unknown');
-    assert.ok(unknown.instanceId);
+    assert.match(unknown.instanceId, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
   }
+  assert.notEqual(first.instanceId, captureRuntime({}).instanceId);
+});
+
+test('delivery identity rejects every partial environment and malformed complete identities', () => {
+  const fields = Object.keys(deliveryEnv);
+  for (let mask = 1; mask < 15; mask++) {
+    const env = Object.fromEntries(fields.filter((name, index) => mask & (1 << index)).map(name => [name, deliveryEnv[name]]));
+    assert.throws(() => captureRuntime(env), /Invalid SERVICE_DELIVERY identity/);
+  }
+  const invalid = {
+    SERVICE_DELIVERY_SHA: ['', 'main', 'a'.repeat(39), 'a'.repeat(64), 'A'.repeat(40), `${'a'.repeat(40)}\n`, null],
+    SERVICE_DELIVERY_ARTIFACT: ['', 'b'.repeat(63), 'B'.repeat(64), `sha256:${'b'.repeat(64)}`, `${'b'.repeat(64)}\n`, null],
+    SERVICE_DELIVERY_REQUEST: ['', ' \n\t', null],
+    SERVICE_DELIVERY_INSTANCE: ['', 'runtime-instance', '5188fc5ff63e4baa8b6b04fdd9f18dce', `${instanceId}\n`, null],
+  };
+  for (const [name, values] of Object.entries(invalid)) {
+    for (const value of values) assert.throws(() => captureRuntime({ ...deliveryEnv, [name]: value }), /Invalid SERVICE_DELIVERY identity/);
+  }
+  assert.throws(() => captureRuntime(Object.fromEntries(fields.map(name => [name, '']))), /Invalid SERVICE_DELIVERY identity/);
 });
 
 for (const kind of ['dispatch', 'notification']) {
@@ -87,6 +113,7 @@ for (const kind of ['dispatch', 'notification']) {
     const restart = await f.request('/admin/restart', { pending: true });
     assert.equal(restart.statusCode, 200);
     assert.equal(restart.json().activeMutations, 1);
+    assert.equal(restart.json().inFlight, 1);
     assert.equal(restart.json()[kind === 'dispatch' ? 'activeDispatches' : 'activeNotifications'], 1);
     assert.equal(restart.json().safeToRestart, false);
     assert.deepEqual((await f.request('/admin/restart', { pending: true })).json(), restart.json());
@@ -116,6 +143,7 @@ for (const kind of ['dispatch', 'notification']) {
     await tick();
     assert.equal(exited, 1);
     assert.equal(lifecycle.status().activeMutations, 0);
+    assert.equal((await f.request('/status')).json().inFlight, 0);
     assert.equal(lifecycle.status().safeToRestart, true);
     lifecycle.requestRestart(); await tick();
     assert.equal(exited, 1);

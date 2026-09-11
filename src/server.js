@@ -107,6 +107,7 @@ export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127
 
 async function main() {
   if (process.env.WORK_LOCK_HELD !== '1') throw new Error('Start via npm start / src/launch.js to acquire the process lock');
+  const runtime = captureRuntime();
   const directory = process.env.WORK_DATA_DIR ?? join(homedir(), '.local/state/work-commander');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   // The launcher holds a kernel flock; recovery is only safe with one service writer.
@@ -120,7 +121,7 @@ async function main() {
       console.error(error.message); process.exitCode = 1;
     });
   } });
-  const { app } = createApp({ store, cockpit, port, cockpitWeb: process.env.COCKPIT_WEB_URL, lifecycle });
+  const { app } = createApp({ store, cockpit, port, cockpitWeb: process.env.COCKPIT_WEB_URL, lifecycle, runtime });
   const stop = () => lifecycle.requestRestart();
   process.on('SIGTERM', stop); process.on('SIGINT', stop);
   await app.listen({ host: '127.0.0.1', port });

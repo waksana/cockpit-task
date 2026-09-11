@@ -16,9 +16,11 @@
 ## 运行版本与安全退出
 
 `GET /version` 返回启动时捕获的 `SERVICE_DELIVERY_SHA/ARTIFACT/REQUEST/INSTANCE` 身份及实际包版本；
-`GET /health` 使用同一 `instanceId`，均禁止缓存。源码启动没有合法 SHA 时明确返回
-`sourceSha:null` / `identitySource:"unknown"`，不读取 Git HEAD 冒充已部署版本。
-`GET /status` 只读返回 admission、在途 mutation/dispatch/notification/recovery 数量和退出原因；
+`GET /health` 使用同一 `instanceId`，均禁止缓存。源码启动未设置这四项身份时明确返回
+`sha:null` / `artifactSha256:null` / `identitySource:"unknown"` 并生成独立 UUID，不读取 Git HEAD 冒充已部署版本。
+交付身份四项必须全部提供且合法（40 位 SHA、64 位 artifact SHA256、非空 request、UUID instance），
+部分或畸形配置会拒绝启动；`/version` 的规范字段为 `sha`、`artifactSha256`、`requestId`、`instanceId`。
+`GET /status` 只读返回 admission、在途 mutation/dispatch/notification/recovery 数量、总数 `inFlight` 和退出原因；
 `POST /admin/restart {"pending":true}` 同步关闭新 mutation admission，重复调用幂等，
 等已经接受的真实执行及通知结束才退出，不等仍在 Cockpit 中执行的业务 owner。
 排空期间认证读取继续可用，新 mutation 返回 `503 SERVICE_DRAINING`；静态读取/SSE 不阻止退出。

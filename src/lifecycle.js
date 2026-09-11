@@ -30,7 +30,7 @@ export class Lifecycle {
     const activeMutations = [...this.active.values()].reduce((total, count) => total + count, 0);
     return {
       restartPending: this.pending, acceptingMutations: !this.pending,
-      activeMutations, activeDispatches: this.active.get('work_dispatch') ?? 0,
+      inFlight: activeMutations, activeMutations, activeDispatches: this.active.get('work_dispatch') ?? 0,
       activeNotifications: this.active.get('work_deliver') ?? 0,
       activeRecoveries: this.active.get('work_recover') ?? 0,
       safeToRestart: this.pending && activeMutations === 0,
