@@ -66,7 +66,8 @@ result whose notification failed. Normal record/history reads remain passive.
 
 ## Processes and persistent paths
 
-Cockpit, Task and Assistant remain independent processes. Task listens only on
+Cockpit and Task run in separate processes; Assistant supplies role content, not
+a service process. WeChat retains its own connector process. Task listens only on
 loopback and remains the sole writer of its business database. The Cockpit module
 installer owns release selection, module configuration and log routing:
 
