@@ -14,6 +14,7 @@ export function captureRuntime(env = process.env) {
   }
   return Object.freeze({
     projectId: 'task',
+    moduleApi: 1,
     version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version,
     sha: managed ? env.SERVICE_DELIVERY_SHA : null,
     artifactSha256: managed ? env.SERVICE_DELIVERY_ARTIFACT : null,

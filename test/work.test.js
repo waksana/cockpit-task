@@ -25,6 +25,9 @@ class FakeCockpit {
     }
     if (name === 'session/reload') this.sessions.get(body.sessionId).loaded = true;
     if (name === 'setModel') this.sessions.get(body.sessionId).currentModelId = body.modelId;
+    if (name === 'session/modules/apply') return { modules: {
+      sessionId: body.sessionId, selections: body.selections, operationId: body.operationId, phase: 'applied',
+    } };
     return { ok: true, queued: true, status: 'connected' };
   }
   async meta(id) {
@@ -35,8 +38,8 @@ class FakeCockpit {
     return { ...value };
   }
 }
-function fixture(t) {
-  const dir = mkdtempSync(join(tmpdir(), 'wc-test-')), s = new Store(dir), c = new FakeCockpit(), w = new Work(s, c);
+function fixture(t, options) {
+  const dir = mkdtempSync(join(tmpdir(), 'wc-test-')), s = new Store(dir), c = new FakeCockpit(), w = new Work(s, c, options);
   const caller = s.authenticate(s.issue('caller', 'caller-fixture'));
   t.after(() => { s.close(); rmSync(dir, { recursive: true }); });
   return { s, c, w, caller, dir,
@@ -77,6 +80,60 @@ test('idempotent duplicate dispatch creates one session; changed input conflicts
   assert.equal(a.task.taskId, b.task.taskId);
   assert.equal(f.c.calls.filter(c => c.name === 'session/new').length, 1);
   await assert.rejects(f.dispatch({ message: 'changed' }), { code: 'IDEMPOTENCY_CONFLICT' });
+});
+test('managed new and fork select owner explicitly without Assistant or legacy global toggles', async t => {
+  for (const selection of ['new', 'fork']) {
+    const f = fixture(t, { moduleVersion: '1.2.0' });
+    if (selection === 'fork') f.c.sessions.set('source', { loaded: true, status: 'idle' });
+    const result = await f.w.execute(f.caller, 'work_dispatch', {
+      selection, ...(selection === 'new' ? { cwd: f.dir } : { sourceSessionId: 'source' }),
+      workstream: 'managed', goal, idempotencyKey: 'managed-dispatch',
+    });
+    assert.equal(result.operation.status, 'succeeded');
+    const created = f.c.calls.find(c => c.name === `session/${selection}`);
+    if (selection === 'new') assert.deepEqual(created.body, { cwd: f.dir, modules: f.w.ownerModules });
+    else assert.deepEqual(created.body, { sessionId: 'source' });
+    const role = f.c.calls.find(c => c.name === 'session/modules/apply');
+    assert.deepEqual(role.body, {
+      sessionId: result.task.ownerSessionId, selections: f.w.ownerModules, operationId: result.operation.operationId,
+    });
+    assert.equal(f.c.calls.some(c => /session-toggle/.test(c.name)), false);
+    assert.ok(f.c.calls.indexOf(role) < f.c.calls.findIndex(c => c.name === 'prompt'));
+    assert.match(f.c.calls.at(-1).body.text, /MCP cockpit-task credential=/);
+    assert.equal(f.owner(result.task.taskId).role, 'owner');
+    assert.equal(f.s.get("SELECT count(*) AS n FROM credentials WHERE role='caller'").n, 1);
+    assert.equal(JSON.stringify(role.body).includes('assistant'), false);
+  }
+});
+test('managed owner role failure preserves the same owner and does not send or automatically replay', async t => {
+  const f = fixture(t, { moduleVersion: '1.2.0' });
+  f.c.failure = { name: 'session/modules/apply', error: new EffectUnknown('role result unknown') };
+  const first = await f.dispatch();
+  assert.equal(first.operation.status, 'unknown');
+  assert.equal(first.operation.step, 'module');
+  assert.equal(f.c.calls.some(c => c.name === 'prompt'), false);
+  const calls = f.c.calls.length;
+  const repeat = await f.dispatch();
+  assert.equal(repeat.task.ownerSessionId, first.task.ownerSessionId);
+  assert.equal(f.c.calls.length, calls);
+});
+test('unconfirmed or Assistant-inheriting module responses never send an owner prompt', async t => {
+  for (const change of [
+    modules => ({ ...modules, phase: 'failed' }),
+    modules => ({ ...modules, sessionId: 'another-session' }),
+    modules => ({ ...modules, selections: [...modules.selections, { moduleId: 'assistant', roleId: 'assistant', version: '1.0.0' }] }),
+  ]) {
+    const f = fixture(t, { moduleVersion: '1.2.0' });
+    const call = f.c.call.bind(f.c);
+    f.c.call = async (name, body) => {
+      const result = await call(name, body);
+      return name === 'session/modules/apply' ? { modules: change(result.modules) } : result;
+    };
+    const result = await f.dispatch();
+    assert.equal(result.operation.status, 'unknown');
+    assert.equal(result.operation.step, 'module');
+    assert.equal(f.c.calls.some(c => c.name === 'prompt'), false);
+  }
 });
 test('owner credentials cannot report other task; payload identity rejected', async t => {
   const f = fixture(t), a = await f.dispatch(), b = await f.dispatch({ workstream: 'second', idempotencyKey: 'dispatch-002' });

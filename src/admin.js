@@ -1,12 +1,12 @@
 import { Store, readCredential, hash, fail } from './store.js';
-import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { mkdirSync, existsSync } from 'node:fs';
 import { backup, DatabaseSync } from 'node:sqlite';
 import { stageManifest, loadManifest, planImport, applyImport } from './migration.js';
 import { cutoverLedger } from './cutover.js';
+import { dataDirectory } from './module.js';
 
-const data = process.env.WORK_DATA_DIR ?? join(homedir(), '.local/state/work-commander');
+const data = dataDirectory();
 const [command, ...args] = process.argv.slice(2);
 // A backup must not run schema migrations before capturing the pre-upgrade DB.
 const store = command === 'backup' ? null : new Store(data);

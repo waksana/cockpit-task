@@ -3,6 +3,10 @@
 This private project uses the fixed-version reusable build and transfer workflows
 from `waksana/cockpit`. Its integration ref is `main`; push checks/builds only.
 `service-delivery.json` binds the complete runtime, including its MCP and skills.
+Official Cockpit module artifacts also include `module.json`, `roles/` and the
+role-specific skill roots; managed paths, proxy and provisioning contracts are in
+[Managed Task module](module.md). Existing deployment/data registrations remain
+valid and are not moved by installing a module artifact.
 An explicit authenticated service-delivery `submit` with project `task`, environment
 `production` and a full integrated SHA is required for deployment. Use the original
 request ID for lookup; do not redispatch an uncertain operation.

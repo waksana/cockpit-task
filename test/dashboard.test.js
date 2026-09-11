@@ -7,7 +7,7 @@ import { fixtureRead, fixtureTask, groupNames } from './dashboard-fixture.js';
 const source = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
 const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
 
-async function page({ denied = false, url = 'https://work.example.com/', records, respond } = {}) {
+async function page({ denied = false, url = 'https://work.example.com/', records, respond, basePath = '' } = {}) {
   const elements = new Map(), requests = [], streams = [], listeners = {};
   let focused, copied;
   class Element {
@@ -31,6 +31,7 @@ async function page({ denied = false, url = 'https://work.example.com/', records
     navigator: { clipboard: { async writeText(text) { copied = text; } } },
     history: { replaceState(_state, _unused, value) { location.href = value; } },
     document: { getElementById(id) { return elements.get(id) || all().find(e => e.id === id); },
+      querySelector() { return { content: basePath }; },
       createElement: tag => new Element(tag), get activeElement() { return focused; } },
     window: { scrollY: 150, scrollTo(_x, y) { this.scrollY = y; }, addEventListener(name, listener) { listeners[name] = listener; } },
     fetch: async (path, options) => {
@@ -78,6 +79,19 @@ test('dashboard loads directly without authentication UI and renders the agreed 
   assert.match(html, /Cockpit Task/);
   assert.match(p.get('countNote').textContent, /不代表全量统计/);
   assert.equal(p.get('metric-working').children[1].textContent, '3');
+});
+
+test('module dashboard keeps API, SSE and reopen/deep links beneath its base path', async () => {
+  const p = await page({ basePath: '/modules/task', url: 'https://cockpit.example.com/modules/task/' });
+  assert.deepEqual(p.requests.map(r => r.path), ['/modules/task/api/read']);
+  assert.equal(p.streams[0].path, '/modules/task/api/events');
+  p.deny();
+  await p.get('refresh').onclick();
+  assert.equal(p.get('reopen').href, 'https://cockpit.example.com/modules/task/');
+  const detail = await page({ basePath: '/modules/task', url: 'https://cockpit.example.com/modules/task/?task=working-0' });
+  assert.equal(detail.location.pathname, '/modules/task/');
+  assert.equal(detail.location.hash, '#working-0');
+  assert.ok(detail.requests.every(r => r.path === '/modules/task/api/read'));
 });
 
 test('initial access failure does not loop, expose a login or start an unauthenticated stream', async () => {

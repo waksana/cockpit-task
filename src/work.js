@@ -4,6 +4,7 @@ import { EffectUnknown } from './cockpit.js';
 import { loadManifest, planImport, applyImport } from './migration.js';
 import { dependencySummary, readDependencies, editDependency } from './dependencies.js';
 import { Lifecycle } from './lifecycle.js';
+import { normalizeBasePath } from './module.js';
 
 const terminal = new Set(['delivered', 'failed', 'cancelled']);
 const groups = ['backlog', 'working', 'blocked', 'decision', 'deferred', 'closed'];
@@ -22,14 +23,20 @@ const busy = meta => meta.status === 'running' || meta.loading || meta.closing |
   meta.activeSubagents > 0 || meta.ask || meta.planRequest || meta.elicitation;
 
 export class Work {
-  constructor(store, cockpit, { publicUrl = 'http://127.0.0.1:8790', cockpitWeb = 'https://cockpit.rbym47.com', lifecycle = new Lifecycle() } = {}) {
+  constructor(store, cockpit, { publicUrl = 'http://127.0.0.1:8790', cockpitWeb = 'https://cockpit.rbym47.com',
+    lifecycle = new Lifecycle(), basePath = '', moduleVersion } = {}) {
     this.store = store; this.cockpit = cockpit; this.publicUrl = publicUrl; this.cockpitWeb = cockpitWeb;
+    this.basePath = normalizeBasePath(basePath);
+    fail(moduleVersion !== undefined && !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?$/.test(moduleVersion),
+      'INVALID_MODULE_VERSION', 'Managed mode requires a valid module version', 400);
+    this.ownerModules = moduleVersion ? [{ moduleId: 'task', roleId: 'owner', version: moduleVersion }] : null;
     this.lifecycle = lifecycle;
     this.listeners = new Set();
   }
   changed() { for (const listener of this.listeners) listener(); }
   taskUrl(id) {
     const url = new URL(this.publicUrl);
+    if (this.basePath && url.pathname === '/') url.pathname = `${this.basePath}/`;
     url.searchParams.set('task', id);
     return url.href;
   }
@@ -410,7 +417,7 @@ export class Work {
       'Use skill work-commander-owner. You are the sole owner of ONE complete goal.',
       `taskId=${task.id}; goalVersion=${task.version}; workstream=${task.workstream}`,
       `owner_session_id=${task.owner}; caller_session_id=${task.caller}`,
-      `MCP work-commander credential=${credential} (path, not token; do not display file contents).`,
+      `MCP ${this.ownerModules ? 'cockpit-task' : 'work-commander'} credential=${credential} (path, not token; do not display file contents).`,
       `Objective: ${goal.objective}`, `Scope: ${goal.scope}`, `Acceptance: ${goal.acceptance}`, `Authorization: ${goal.authorization}`,
       input.message ? `Current instruction: ${input.message}` : '',
       'Read the current task if needed, accept this version with work_report, then own the full result. Report only meaningful progress to service; do not chat-notify caller.',
@@ -426,7 +433,7 @@ export class Work {
       // Cold resume reapplies native defaults. Prior connection/model checkpoints
       // cannot stand in for the configuration of a newly loaded native runtime.
       const steps = JSON.parse(this.operation(id).steps);
-      for (const key of ['resume', 'mcp', 'skill', 'model']) delete steps[key];
+      for (const key of ['resume', 'mcp', 'skill', 'model', 'module']) delete steps[key];
       this.store.run('UPDATE operations SET steps=? WHERE id=?', JSON.stringify(steps), id);
       await this.step(id, 'resume', async () => {
         await this.cockpit.call('session/reload', { sessionId }); return { acknowledged: true };
@@ -466,7 +473,7 @@ export class Work {
         const result = await this.cockpit.call(input.selection === 'fork' ? 'session/fork' : 'session/new',
           input.selection === 'fork' ? {
             sessionId: input.sourceSessionId, ...(input.toEventId ? { toEventId: input.toEventId } : {}),
-          } : { cwd: input.cwd });
+          } : { cwd: input.cwd, ...(this.ownerModules ? { modules: this.ownerModules } : {}) });
         if (!result.sessionId || typeof result.sessionId !== 'string') throw new EffectUnknown('Creation returned no valid session ID');
         return { sessionId: result.sessionId };
       });
@@ -479,15 +486,27 @@ export class Work {
       await this.prepare(id, task.owner, input);
       this.checkpoint(id, 'owner_credential');
       const credential = this.ensureOwnerCredential(task);
-      await this.step(id, 'mcp', async () => {
-        const result = await this.cockpit.call('mcp/session-toggle', { sessionId: task.owner, name: 'work-commander', on: true });
-        if (result.status && result.status !== 'connected') throw new EffectUnknown('MCP enablement not confirmed connected');
+      if (this.ownerModules) await this.step(id, 'module', async () => {
+        const result = await this.cockpit.call('session/modules/apply', {
+          sessionId: task.owner, selections: this.ownerModules, operationId: id,
+        });
+        if (result.modules?.phase !== 'applied' || result.modules.sessionId !== task.owner ||
+          canonical(result.modules.selections) !== canonical(this.ownerModules)) {
+          throw new EffectUnknown('Task owner module application was not confirmed; no prompt sent');
+        }
         return { acknowledged: true };
       });
-      await this.step(id, 'skill', async () => {
-        await this.cockpit.call('skills/session-toggle', { sessionId: task.owner, name: 'work-commander-owner', enabled: true });
-        return { acknowledged: true };
-      });
+      else {
+        await this.step(id, 'mcp', async () => {
+          const result = await this.cockpit.call('mcp/session-toggle', { sessionId: task.owner, name: 'work-commander', on: true });
+          if (result.status && result.status !== 'connected') throw new EffectUnknown('MCP enablement not confirmed connected');
+          return { acknowledged: true };
+        });
+        await this.step(id, 'skill', async () => {
+          await this.cockpit.call('skills/session-toggle', { sessionId: task.owner, name: 'work-commander-owner', enabled: true });
+          return { acknowledged: true };
+        });
+      }
       await this.step(id, 'prompt', async () => {
         const result = await this.cockpit.call('prompt', { sessionId: task.owner, text: this.prompt(task, input, credential), mode: 'enqueue' });
         return { accepted: true, queued: result.queued ?? null };

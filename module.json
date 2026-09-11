@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "task",
+  "version": "1.2.0",
+  "name": "Cockpit Task",
+  "description": "Explicit task records, authorized dispatch and owner reporting; no autonomous scheduling.",
+  "compatibility": { "cockpitApi": 1, "nodeMajor": 24, "platform": "linux", "arch": "x64" },
+  "configVersion": 1,
+  "roles": [
+    {
+      "id": "commander",
+      "name": "Task Commander",
+      "description": "Discuss and register work; explicitly authorize a complete goal for its owner.",
+      "instructions": "roles/commander.md",
+      "skills": ["skills/commander"],
+      "mcp": { "cockpit-task": { "entry": "src/mcp.js" } }
+    },
+    {
+      "id": "owner",
+      "name": "Task Owner",
+      "description": "Execute one bound, authorized goal and report its complete result.",
+      "instructions": "roles/owner.md",
+      "skills": ["skills/owner"],
+      "mcp": { "cockpit-task": { "entry": "src/mcp.js" } }
+    }
+  ]
+}

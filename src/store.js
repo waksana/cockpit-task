@@ -66,6 +66,10 @@ export class Store {
       CREATE TABLE IF NOT EXISTS session_locks (
         session_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS module_provisions (
+        request_id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+        credential_path TEXT, created INTEGER NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS events_task_seq ON events(task_id,seq);
       COMMIT;
     `);
