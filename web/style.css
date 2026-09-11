@@ -6,7 +6,7 @@ h2 { font-size: 19px; } h3 { font-size: 17px; margin: 14px 0 8px; } p { margin: 
 button, input { font: inherit; border-radius: 8px; border: 1px solid #40536a; padding: 9px 14px; background: #1b2a3b; color: inherit; }
 button { cursor: pointer; } button:hover { border-color: #62d5b4; } button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid #62d5b4; outline-offset: 3px; }
 button:disabled { opacity: .5; cursor: wait; } a { color: #76d9ff; overflow-wrap: anywhere; } code { overflow-wrap: anywhere; }
-#login { max-width: 520px; margin: 60px auto; padding: 28px; border: 1px solid #293442; border-radius: 16px; background: #141e29; } label, input { display: block; } input { width: 100%; margin: 8px 0 22px; }
+label, input { display: block; } input { width: 100%; margin: 8px 0 22px; }
 .intro { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; } #columns { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 20px; }
 #searchForm { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; } #search { flex: 1; min-width: 160px; width: auto; margin: 0; }
 .column { min-width: 0; } .column>h2 { color: #bfd0e1; padding-bottom: 14px; border-bottom: 1px solid #293442; }

@@ -207,10 +207,11 @@ test('HTTP rejects anonymous tasks, forged roles, hostile origin and unknown inp
   assert.equal((await inject('/api/read', {}, { authorization: `Bearer ${viewer}`, origin: 'https://evil.invalid' })).statusCode, 403);
   assert.equal((await inject('/api/read', { madeUp: true }, { authorization: `Bearer ${viewer}` })).statusCode, 400);
   assert.equal((await inject('/api/tools/work_dispatch', { selection: 'new', cwd: f.dir, workstream: 'x', goal, idempotencyKey: 'http-001' }, { authorization: `Bearer ${viewer}` })).statusCode, 403);
-  const login = await inject('/api/login', { token: viewer });
-  assert.equal(login.statusCode, 200); assert.match(login.headers['set-cookie'], /HttpOnly; SameSite=Strict/);
-  const cookie = login.headers['set-cookie'].split(';')[0];
-  assert.equal((await inject('/api/read', {}, { cookie })).statusCode, 200);
+  assert.equal((await inject('/api/login', { token: viewer })).statusCode, 404);
+  assert.equal((await inject('/api/logout', {})).statusCode, 404);
+  const cookie = `wc_view=${viewer}`;
+  assert.equal((await inject('/api/read', {}, { cookie })).statusCode, 401);
+  assert.equal((await inject('/api/read', {}, { authorization: `Bearer ${viewer}` })).statusCode, 200);
   assert.equal((await inject('/api/tools/work_read', {}, { cookie })).statusCode, 401);
 });
 test('dashboard has independent lane pagination and recent activity order', async t => {

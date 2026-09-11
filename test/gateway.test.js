@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
@@ -13,8 +13,7 @@ function fixture(t, options = {}) {
   const store = new Store(dir);
   const viewer = store.issue('viewer'), caller = store.issue('caller', 'fixture-caller');
   const cockpit = { call() { throw new Error('Gateway must not call Cockpit'); } };
-  const { app, work } = createApp({ store, cockpit, publicUrl: gatewayUrl, gatewayUrl,
-    gateManagementUrl: 'https://auth.example.com/_gate/manage', ...options });
+  const { app, work } = createApp({ store, cockpit, publicUrl: gatewayUrl, gatewayUrl, ...options });
   t.after(async () => { await app.close(); store.close(); rmSync(dir, { recursive: true }); });
   const inject = (url, { method = 'GET', token = viewer, ...extra } = {}) => app.inject({
     method, url, headers: { host: 'task.example.com', ...(token ? { authorization: `Bearer ${token}` } : {}) }, ...extra,
@@ -24,16 +23,14 @@ function fixture(t, options = {}) {
 
 test('gateway protects static and read endpoints, accepts only viewer and retains local auth', async t => {
   const f = fixture(t);
-  for (const url of ['/', '/app.js', '/style.css', '/api/session', '/api/read', '/api/events']) {
+  for (const url of ['/', '/app.js', '/style.css', '/api/read', '/api/events']) {
     const method = url === '/api/read' ? 'POST' : 'GET';
     assert.equal((await f.inject(url, { method, token: null })).statusCode, 401, url);
     assert.equal((await f.inject(url, { method, token: f.caller })).statusCode, 403, url);
   }
-  for (const url of ['/', '/app.js', '/style.css', '/api/session']) {
+  for (const url of ['/', '/app.js', '/style.css']) {
     assert.equal((await f.inject(url)).statusCode, 200, url);
   }
-  const session = (await f.inject('/api/session')).json();
-  assert.deepEqual(session, { mode: 'passkey', managementUrl: 'https://auth.example.com/_gate/manage' });
   const board = await f.inject('/api/read', { method: 'POST', payload: { view: 'board' } });
   assert.equal(board.statusCode, 200);
   assert.deepEqual(Object.keys(board.json().groups), ['backlog', 'working', 'blocked', 'decision', 'deferred', 'closed']);
@@ -42,17 +39,19 @@ test('gateway protects static and read endpoints, accepts only viewer and retain
     host: '127.0.0.1:8790', authorization: `Bearer ${f.caller}`, origin: 'http://127.0.0.1:8790',
   }, payload: {} });
   assert.equal(local.statusCode, 200);
-  const login = await f.app.inject({ method: 'POST', url: '/api/login',
-    headers: { host: 'localhost:8790' }, payload: { token: f.viewer } });
-  assert.equal(login.statusCode, 200);
-  assert.equal((await f.app.inject({ url: '/api/session', headers: {
-    host: 'localhost:8790', cookie: login.headers['set-cookie'].split(';')[0],
-  } })).json().mode, 'viewer');
+  for (const url of ['/api/login', '/api/logout', '/api/session']) {
+    const response = await f.app.inject({ method: url === '/api/session' ? 'GET' : 'POST', url,
+      headers: { host: 'localhost:8790' }, ...(url === '/api/login' ? { payload: { token: f.viewer } } : {}) });
+    assert.equal(response.statusCode, 404, url);
+    assert.equal(response.headers['set-cookie'], undefined);
+  }
+  assert.equal((await f.app.inject({ method: 'POST', url: '/api/read', payload: {},
+    headers: { host: 'localhost:8790', cookie: `wc_view=${f.viewer}` } })).statusCode, 401);
 });
 
 test('public host never exposes tools or admin, including with valid caller or forged proxy headers', async t => {
   const f = fixture(t);
-  for (const url of ['/api/tools/work_read', '/api/tools/work_record', '/admin/restart', '/api/login', '/api/logout',
+  for (const url of ['/api/tools/work_read', '/api/tools/work_record', '/admin/restart', '/api/login', '/api/logout', '/api/session',
     '/health', '/version', '/status', '/unknown', '/api/%72ead', '//api/read']) {
     for (const method of ['GET', 'POST', 'DELETE']) {
       assert.equal((await f.inject(url, { method, token: f.caller, payload: method === 'POST' ? {} : undefined })).statusCode, 404, `${method} ${url}`);
@@ -70,6 +69,13 @@ test('public host never exposes tools or admin, including with valid caller or f
   assert.equal((await f.inject('/', { headers: { host: 'evil.example', authorization: `Bearer ${f.viewer}` } })).statusCode, 403);
   f.store.run('UPDATE credentials SET revoked=1 WHERE digest=?', hash(f.viewer));
   assert.equal((await f.inject('/')).statusCode, 401);
+});
+
+test('browser is independent of gateway authentication and contains no credential UI', () => {
+  for (const file of ['app.js', 'index.html', 'style.css']) {
+    const source = readFileSync(new URL(`../web/${file}`, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /passkey|viewer|\/_gate\/|api\/(?:login|logout|session)|credentialFile|wc_view|id="(?:login|logout|token)"/i);
+  }
 });
 
 test('gateway stream delivers committed changes and closes for Gate reauthorization', async t => {

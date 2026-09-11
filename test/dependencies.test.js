@@ -161,8 +161,7 @@ test('same-caller endpoint permissions and read-only viewer/owner boundaries hol
   }
   const { app } = createApp({ store: f.store, cockpit: f.cockpit, port: 18811 });
   t.after(() => app.close());
-  const login = await app.inject({ method: 'POST', url: '/api/login', headers: { host: '127.0.0.1:18811' }, payload: { token: viewerToken } });
-  const cookie = login.headers['set-cookie'].split(';')[0];
+  const cookie = `wc_view=${viewerToken}`;
   const denied = await app.inject({ method: 'POST', url: '/api/tools/work_dependency',
     headers: { host: '127.0.0.1:18811', cookie }, payload: { action: 'remove', taskId: a, prerequisiteId: p, recordRevision: 2, idempotencyKey: 'viewer-write-attempt' } });
   assert.equal(denied.statusCode, 401);

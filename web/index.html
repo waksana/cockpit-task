@@ -5,10 +5,10 @@
   <title>Work Commander · 工作台</title><link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header><div><span class="eyebrow">WORK COMMANDER</span><h1>工作，不是聊天副本。</h1></div><div class="connection"><span id="connection">未连接</span><button id="logout" hidden>退出</button></div></header>
+  <header><div><span class="eyebrow">WORK COMMANDER</span><h1>工作，不是聊天副本。</h1></div><div class="connection"><span id="connection">未连接</span></div></header>
   <main>
-    <form id="login" hidden><h2>打开私人工作台</h2><p>使用本机签发的只读凭证。页面和 MCP 读取同一份任务数据。</p><label for="token">只读访问凭证</label><input id="token" type="password" required autocomplete="off"><button>进入工作台</button><p>或选择本机的只读凭证文件：</p><label for="credentialFile">凭证 JSON 文件</label><input id="credentialFile" type="file" accept="application/json,.json"></form>
     <p id="error" role="alert" hidden></p>
+    <a id="reopen" href="/" hidden>重新打开工作页</a>
     <section id="board" hidden aria-label="工作总览">
       <div class="intro"><p>统一工作记录 · 登记不等于开工，历史观察不等于实时状态</p><button id="refresh">刷新</button></div>
       <form id="searchForm"><label for="search">搜索工作及完成历史</label><input id="search" type="search" placeholder="标题、workstream、状态摘要或说明"><button>搜索</button></form>

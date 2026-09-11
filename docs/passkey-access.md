@@ -14,11 +14,11 @@ complete real device verification on Task. Gate registration, management and
 revocation remain on `https://auth.rbym47.com/_gate/manage`.
 
 `deploy/task.nginx.conf` allows only the page, its two static assets,
-`GET /api/session`, `POST /api/read` and `GET /api/events`. Every application
+`POST /api/read` and `GET /api/events`. Every application
 request requires `auth_request /_gate/check`. Unauthenticated pages/assets
 redirect to Gate; read APIs and SSE return JSON 401. Gate's own `/_gate/`
 ceremony paths use the existing Gate handler; `check` and `redirect` are
-internal-only. Unknown paths, tools, Task login/logout, health/version/status
+internal-only. Unknown paths, tools, removed Task login/logout/session endpoints, health/version/status
 and Task administration are never proxied.
 
 After successful Gate authorization nginx overwrites `Authorization` with a
@@ -39,9 +39,16 @@ SSE disables buffering and closes every 60 seconds at most, so reconnect must
 pass Gate authorization again. Gate expiry/revocation can therefore leave an
 already-open stream alive for up to 60 seconds; no unbounded authenticated
 stream survives revocation. A reconnect refreshes the board from the same
-database, including changes missed between connections. The page redirects
-back to Gate when its authentication expires. The Passkey management button
-replaces the local viewer logout button; Gate management can revoke sessions.
+database, including changes missed between connections.
+
+The business page does not know which authentication system is in front of it.
+There is no viewer login, credential input/import, logout, authentication-mode
+API, Gate URL or Passkey management control in Task. A generic API 401 closes
+the stream, clears the visible data and offers to reopen the same work page;
+only the gateway decides how that navigation is authenticated. Credential and
+session management belong to the gateway's separate management origin.
+The server-side viewer is a read-only capability, not a browser login.
+Local MCP/bearer clients remain compatible; old browser cookies are not accepted.
 
 ## Deployment
 
@@ -51,7 +58,6 @@ these nonsecret Task process environment values without changing other projects:
 ```text
 WORK_PUBLIC_URL=https://task.rbym47.com
 WORK_GATEWAY_URL=https://task.rbym47.com
-WORK_GATE_MANAGEMENT_URL=https://auth.rbym47.com/_gate/manage
 ```
 
 The public URL is also used for work-detail and final-notification links.
@@ -59,7 +65,9 @@ Generated detail links use `?task=<id>` so the requested task survives Gate's
 server-side login return path; the application restores its hash navigation
 after login. Existing hash links remain usable inside an authenticated page.
 Local HTTP origins remain supported; foreign origins are rejected. Leaving
-gateway configuration unset retains the existing local credential workflow.
+gateway configuration unset retains local bearer access, not a browser login.
+Remove any obsolete `WORK_GATE_MANAGEMENT_URL` environment setting; Task does
+not consume or expose it.
 
 Add only `https://task.rbym47.com` / `task.rbym47.com` to the existing Gate
 origin/host allowlists, retaining its RP ID, database and all existing entries.

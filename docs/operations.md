@@ -70,13 +70,13 @@ node src/admin.js issue caller ACTUAL_CALLER_SESSION_ID
 node src/admin.js issue viewer
 ```
 
-命令输出 credential 文件路径，不输出 token。将 caller 路径交给对应讨论 session，工具 `credential` 传路径；不要将 viewer 当 caller，不让 owner 用 caller 凭证。页面登录选择 viewer JSON 文件即可，也可粘贴其中的 token（仅本机使用，不发到聊天）。文件在浏览器本地解析，不存聊天或 localStorage。退出清 cookie；永久失效：
+命令输出 credential 文件路径，不输出 token。将 caller 路径交给对应讨论 session，工具 `credential` 传路径；不要将 viewer 当 caller，不让 owner 用 caller 凭证。viewer 仅用于服务端只读访问（例如网关到 Task），不交给浏览器。工作页已移除凭证输入、文件导入、登录/logout/session API 和旧 wc_view cookie 鉴权，不管理任何前置认证。永久撤销服务端凭证：
 
 ```sh
 node src/admin.js revoke /absolute/path/to/credential.json
 ```
 
-远程查看：本机 `ssh -L 8790:127.0.0.1:8790 honglai@SERVER`，浏览器打开 `http://127.0.0.1:8790/`，凭证仍必需。不把端口直接代理到匿名公网，不传 token 到第三方。
+远程查看使用 [HTTPS 工作页](passkey-access.md) 的受保护入口。SSH 端口转发仍可供带 bearer 的本机工具使用，但不再提供浏览器凭证登录。不要把端口直接代理到匿名公网，也不把 token 交给浏览器或第三方。
 
 CLI 隔离客户端也可用 `--additional-mcp-config @FILE` 和显式 skill 目录接入；不要为生产真实会话另连一套 runtime。真实会话创建/fork/恢复/投递仍通过 Cockpit adapter。
 

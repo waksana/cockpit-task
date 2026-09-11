@@ -132,8 +132,8 @@ for (const kind of ['dispatch', 'notification']) {
     for (const path of ['/', '/app.js', '/style.css', '/health', '/version', '/status']) {
       assert.equal((await f.request(path)).statusCode, 200);
     }
-    assert.equal((await f.request('/api/login', { token: f.store.issue('viewer') })).statusCode, 503);
-    assert.equal((await f.request('/api/logout', {})).statusCode, 503);
+    assert.equal((await f.request('/api/login', { token: f.store.issue('viewer') })).statusCode, 404);
+    assert.equal((await f.request('/api/logout', {})).statusCode, 404);
     await tick(); await tick();
     assert.equal(exited, 0);
     f.cockpit.gate.release();

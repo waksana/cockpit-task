@@ -13,24 +13,22 @@ import { timingSafeEqual } from 'node:crypto';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127.0.0.1:${port}`, cockpitWeb,
-  gatewayUrl, gateManagementUrl, gatewayStreamMs = 60000,
+  gatewayUrl, gatewayStreamMs = 60000,
   lifecycle = new Lifecycle(), runtime = captureRuntime(), adminToken = process.env.WORK_ADMIN_TOKEN } = {}) {
   const gateway = gatewayUrl ? new URL(gatewayUrl) : null;
   if (gateway && (gateway.protocol !== 'https:' || gateway.origin !== gatewayUrl ||
     gateway.username || gateway.password || gateway.port)) throw new Error('gatewayUrl must be a canonical HTTPS origin');
   if (!Number.isInteger(gatewayStreamMs) || gatewayStreamMs < 1 || gatewayStreamMs > 60000) throw new Error('Gateway streams must reauthorize within 60 seconds');
-  if (gateManagementUrl && (!gateway || new URL(gateManagementUrl).protocol !== 'https:')) throw new Error('Gate management requires an HTTPS URL and gateway');
   const app = Fastify({ logger: false, bodyLimit: 65536, requestTimeout: 240000, forceCloseConnections: true });
   const work = new Work(store, cockpit, { publicUrl, cockpitWeb, lifecycle });
   const origin = new URL(publicUrl).origin;
   const hosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, new URL(publicUrl).host]);
   if (gateway) hosts.add(gateway.host);
   const origins = new Set([origin, `http://127.0.0.1:${port}`, `http://localhost:${port}`, ...(gateway ? [gateway.origin] : [])]);
-  const gatewayReads = new Set(['/', '/app.js', '/style.css', '/api/session', '/api/events']);
+  const gatewayReads = new Set(['/', '/app.js', '/style.css', '/api/events']);
   const viaGateway = req => gateway && req.headers.host === gateway.host;
-  function auth(req, browser = false) {
-    let token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null;
-    if (!token && browser) token = req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith('wc_view='))?.slice(8);
+  function auth(req) {
+    const token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null;
     return store.authenticate(token);
   }
   app.addHook('onRequest', async (req, reply) => {
@@ -40,7 +38,7 @@ export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127
       const path = req.raw.url.split('?')[0];
       fail(!((['GET', 'HEAD'].includes(req.method) && gatewayReads.has(path)) ||
         (req.method === 'POST' && path === '/api/read')), 'READ_ONLY_GATEWAY', 'Only dashboard reads are exposed', 404);
-      // Nginx authorizes the Gate session, then replaces all client credentials with a private viewer bearer.
+      // The trusted proxy replaces client credentials with its private read-only bearer.
       fail(auth(req).role !== 'viewer', 'FORBIDDEN', 'Gateway requires a read-only viewer credential', 403);
     }
     reply.headers({
@@ -79,32 +77,14 @@ export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127
   for (const [route, file, type] of [['/', 'index.html', 'text/html'], ['/app.js', 'app.js', 'text/javascript'], ['/style.css', 'style.css', 'text/css']]) {
     app.get(route, async (req, reply) => reply.type(type).send(readFileSync(join(root, 'web', file))));
   }
-  app.get('/api/session', async req => {
-    fail(auth(req, true).role !== 'viewer', 'FORBIDDEN', 'Dashboard requires viewer credential', 403);
-    return { mode: viaGateway(req) ? 'passkey' : 'viewer',
-      managementUrl: viaGateway(req) ? gateManagementUrl ?? null : null };
-  });
-  app.post('/api/login', async (req, reply) => {
-    lifecycle.assertAccepting();
-    fail(!req.body || Object.keys(req.body).some(k => k !== 'token'), 'INVALID_INPUT', 'Supply viewer token only', 400);
-    const principal = store.authenticate(req.body.token);
-    fail(principal.role !== 'viewer', 'FORBIDDEN', 'Browser login requires read-only viewer credential', 403);
-    reply.header('set-cookie', `wc_view=${req.body.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800`);
-    return { ok: true };
-  });
-  app.post('/api/logout', async (req, reply) => {
-    lifecycle.assertAccepting();
-    reply.header('set-cookie', 'wc_view=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
-    return { ok: true };
-  });
   app.post('/api/tools/:name', async req => {
     const principal = auth(req);
     if (req.params.name !== 'work_read') lifecycle.assertAccepting();
     return work.execute(principal, req.params.name, req.body);
   });
-  app.post('/api/read', async req => work.execute(auth(req, true), 'work_read', req.body));
+  app.post('/api/read', async req => work.execute(auth(req), 'work_read', req.body));
   app.get('/api/events', async (req, reply) => {
-    const principal = auth(req, true);
+    const principal = auth(req);
     fail(principal.role !== 'viewer', 'FORBIDDEN', 'Dashboard requires viewer credential', 403);
     reply.hijack();
     reply.raw.writeHead(200, {
@@ -121,7 +101,7 @@ export function createApp({ store, cockpit, port = 8790, publicUrl = `http://127
       if (!active || active.revoked) { reply.raw.end(); return; }
       reply.raw.write(': heartbeat\n\n');
     }, 25000);
-    // A Gate revocation/expiry is checked by nginx on reconnect, even on a continuously active stream.
+    // Reconnect through the proxy periodically, even on a continuously active stream.
     const reauthorize = viaGateway(req) ? setTimeout(() => reply.raw.end(), gatewayStreamMs) : null;
     const close = () => { clearInterval(timer); clearTimeout(reauthorize); work.listeners.delete(changed); };
     reply.raw.on('close', close);
@@ -146,7 +126,7 @@ async function main() {
     });
   } });
   const { app } = createApp({ store, cockpit, port, publicUrl: process.env.WORK_PUBLIC_URL,
-    gatewayUrl: process.env.WORK_GATEWAY_URL, gateManagementUrl: process.env.WORK_GATE_MANAGEMENT_URL,
+    gatewayUrl: process.env.WORK_GATEWAY_URL,
     cockpitWeb: process.env.COCKPIT_WEB_URL, lifecycle, runtime });
   const stop = () => lifecycle.requestRestart();
   process.on('SIGTERM', stop); process.on('SIGINT', stop);

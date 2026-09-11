@@ -78,10 +78,10 @@ test('nginx template authenticates every read, overwrites client identity and ne
     catch (e) { if (e.code !== 'ECONNREFUSED' || attempt === 30) throw e; await delay(50); }
   }
   for (const path of ['/', '/app.js', '/style.css']) assert.equal((await read(path)).status, 302, path);
-  for (const path of ['/api/read', '/api/session', '/api/events']) {
+  for (const path of ['/api/read', '/api/events']) {
     const options = path === '/api/read' ? { method: 'POST', body: {} } : {};
     const response = await read(path, options);
-    assert.equal(response.status, 401, path); assert.equal(JSON.parse(response.text).error, 'PASSKEY_REQUIRED');
+    assert.equal(response.status, 401, path); assert.equal(JSON.parse(response.text).error, 'UNAUTHORIZED');
   }
   const forged = { authorization: `Bearer ${caller}`, cookie: `wc_view=${viewer}`,
     'x-forwarded-host': '127.0.0.1:8790', 'x-work-role': 'caller' };
@@ -89,11 +89,11 @@ test('nginx template authenticates every read, overwrites client identity and ne
   const board = await read('/api/read', { method: 'POST', authenticated: true,
     headers: { ...forged, cookie: `fixture-gate=valid; wc_view=${caller}` }, body: { view: 'board' } });
   assert.equal(board.status, 200); assert.ok(JSON.parse(board.text).groups);
-  for (const path of ['/', '/app.js', '/style.css', '/api/session']) {
+  for (const path of ['/', '/app.js', '/style.css']) {
     const response = await read(path, { authenticated: true });
     assert.equal(response.status, 200, path); assert.ok(!response.text.includes(viewer));
   }
-  for (const path of ['/api/tools/work_read', '/api/tools/work_dispatch', '/api/login', '/api/logout', '/admin/restart', '/health', '/status', '/version']) {
+  for (const path of ['/api/tools/work_read', '/api/tools/work_dispatch', '/api/login', '/api/logout', '/api/session', '/admin/restart', '/health', '/status', '/version']) {
     for (const authenticated of [false, true]) assert.equal((await read(path, { method: 'POST', authenticated, body: {} })).status, 404, path);
   }
   assert.equal((await read('/api/read', { authenticated: true })).status, 403);

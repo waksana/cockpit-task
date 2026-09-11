@@ -103,7 +103,7 @@ fork 仅使用 Cockpit 正式原生 fork：源须已加载且空闲，拒绝不�
 
 ## 身份与隐私
 
-服务只监听 loopback；API bearer 鉴权，页面使用仅 viewer 的 HttpOnly/SameSite=Strict cookie。Host/Origin 校验，无 CORS，严格 CSP，不渲染任务 HTML，不加载外部资源。只读入口不会匿名公开任务。远程用 SSH 本地端口转发，不新增公网域名。
+服务只监听 loopback；API 使用 bearer 鉴权。工作页不管理登录、cookie、凭证或前置认证系统；浏览器通过受保护的 HTTPS 网关访问，网关在服务端映射只读身份，不授予 caller 权限。旧浏览器登录/session API 与 wc_view cookie 鉴权已移除，本机 MCP 和 bearer 角色范围保留。Host/Origin 校验，无 CORS，严格 CSP，不渲染任务 HTML，不加载外部资源。只读入口不会匿名公开任务；具体网关部署见 [HTTPS 工作页](passkey-access.md)。
 
 管理员本机命令签发 caller 绑定已知 session；服务新建 owner 后签发 task+session 绑定能力，存 0600 文件，派单只含路径；MCP 只接受固定 credentials 根内的规范路径。哈希凭证、角色、归属三者由服务验证。viewer 无写权限，owner 无派单/改目标权限，caller 无 owner 代报权限。
 
