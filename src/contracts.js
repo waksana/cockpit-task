@@ -10,6 +10,8 @@ export const goal = z.object({
 }).strict();
 const mutation = { idempotencyKey: key };
 const bound = { taskId: id, goalVersion: version };
+const instructionSource = z.string().trim().min(1).max(2000)
+  .describe('User instruction source, e.g. date and request in this owner session. Required for owner edits; a recorded statement, not chat verification.').optional();
 export const schemas = {
   work_dispatch: z.object({
     ...mutation,
@@ -73,11 +75,13 @@ export const schemas = {
     workstream: id.optional(),
     disposition: z.enum(['open', 'deferred', 'abandoned', 'archived']).optional(),
     reason: z.string().trim().min(1).max(2000).optional(),
+    source: instructionSource,
     sources: z.array(z.string().min(1).max(2048)).max(20).optional(),
   }).strict().superRefine((v, ctx) => {
     const fail = message => ctx.addIssue({ code: 'custom', message });
     if (v.action === 'create') {
       if (!v.title || v.taskId || v.recordRevision) fail('create requires title only; no existing task/revision');
+      if (v.source !== undefined) fail('source records an update instruction; use sources for initial record references');
     } else if (!v.taskId || !v.recordRevision) fail('update requires taskId and recordRevision');
     if (v.action === 'update' && !['title', 'notes', 'workstream', 'disposition', 'sources'].some(k => v[k] !== undefined)) fail('update requires an explicit field change');
     if (v.disposition && v.disposition !== 'open' && !v.reason) fail('deferring/abandoning/archiving requires a reason; does not stop an agent');
@@ -114,6 +118,7 @@ export const schemas = {
   work_amend: z.object({
     ...mutation, ...bound, goal,
     reason: z.string().trim().min(1).max(2000),
+    source: instructionSource,
   }).strict(),
   work_recover: z.object({
     ...mutation, operationId: id,
@@ -128,11 +133,11 @@ export const descriptions = {
   work_dispatch: 'Explicitly execute a complete authorized goal: new/fork may start an existing backlog taskId+recordRevision without changing identity; continue requires original owner/version; adopt explicitly binds an imported legacy task to its preserved original owner. Never register-only; never automatic retry or filesystem isolation. Default Astra.',
   work_read: 'Unified work/backlog/history query, zero Cockpit calls. Defaults to 10 open records; includeClosed searches history, sources pages immutable legacy records, taskId+dependencies pages prerequisites. Dependency readiness means recorded conditions only, not execution authorization. board has independent lanes; no native session polling.',
   work_dependency: 'Caller-only add/remove an explicit prerequisite between two tasks belonging to this caller. Uses dependent task recordRevision and idempotencyKey. add binds prerequisiteGoalVersion (default: current authorized version; no goal stays unconfirmed). Only current-version delivered satisfies it; later amendments require explicit remove/add. Query with work_read taskId+dependencies. No dispatch, pause, status changes or notifications.',
-  work_record: 'Caller-only lightweight create/update: create needs just title and idempotency key, no goal/model/cwd/session. Update uses recordRevision (not goalVersion). Metadata never changes execution authorization. Deferring/abandoning records cannot stop or close an active owner. Zero Cockpit calls.',
+  work_record: 'Caller creates/updates records; bound owner may update only its own task with reason and user instruction source. Update uses recordRevision, not goalVersion; identity/workstream stay fixed for bound tasks. Metadata never reopens or authorizes execution. Disposition cannot stop an active owner. Zero Cockpit calls.',
   work_observe: 'Caller-only register a sourced legacy receipt/assessment without pretending to be owner or creating native accepted/delivered events. Requires recordRevision, observedAt and source. Cannot overwrite an adopted current execution. Zero Cockpit calls, notifications or owner wakeups.',
   work_import: 'Caller-only preview/apply a locally staged, hash-bound task-record manifest. Apply requires exact planHash; preserves immutable sources, legacy owner references and local edits. Never binds executing owners, sends historical receipts or calls Cockpit. Use admin migration-stage to stage source files.',
   work_report: 'Owner-only: accept current goal version, or report meaningful progress/blocker/decision/result. Persists to dashboard without waking caller. Ask real decisions in your own session. Result report is NOT delivery.',
   work_deliver: 'Owner-only final outcome of the WHOLE current authorized goal. Persists result and attempts exactly one directed caller notification through service. Never send an additional manual final notification.',
-  work_amend: 'Caller-only explicit change of goal/authorization, increments version and invalidates old acceptance. Does not send or reopen work automatically; use explicit continue with the returned version.',
+  work_amend: 'Caller or bound owner explicitly changes the same task goal/authorization, including a terminal goal, preserving history and identity. Owner requires reason and source of a new user instruction in its own session; never auto-reopen. Increments goalVersion and clears acceptance. Owner accepts the returned version directly via work_report, without self-dispatch/prompt; caller may explicitly continue. Zero Cockpit calls.',
   work_recover: 'Caller-only explicit recovery of failed operation. Unknown effects require evidence-backed applied/not_applied resolution; never guess. Reuses created owner and completed steps; never silently creates a replacement.',
 };

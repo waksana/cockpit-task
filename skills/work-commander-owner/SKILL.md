@@ -24,6 +24,16 @@ owner 负责完整结果并遵守目标项目的工程/运行规范（Git 服务
 
 待办/导入不是授权：goalVersion=0、legacy ownerRef 不表示服务派工；须显式派单和绑定 owner 凭证。recordRevision 元数据变化不使已承接的 goalVersion 失效。
 
+## 本会话直接修改与续办
+
+用户在本 owner 会话明确提出同一任务的新要求时，可用**本人原 owner 凭证**直接 `work_amend`：带 taskId、当前 goalVersion、完整 goal（objective/scope/acceptance/authorization）、reason、source、稳定 idempotencyKey。source 简要记录本会话用户指令的时间和内容来源，不是聊天认证或证明系统，不为此读取整段聊天。不得无新授权自行扩大目标或复活工作。
+
+已 delivered/failed/cancelled 也可据新指令建立后继 goalVersion；旧目标、结果事件和成果保留。取得返回的新版本后直接 `work_report kind=accepted`，在原会话继续，无需 caller 中转/continue、给自己派单或 prompt，也不新建 task/session、不重签凭证。旧承接与旧回执不适用于新版本；caller 同样可改，STALE_GOAL 时先读最新完整目标与授权，不拿旧快照覆盖。
+
+只改标题、notes、sources、disposition 时用 `work_record action=update`，带 taskId、recordRevision、reason、source 和幂等键。纯元数据不改变 goalVersion/承接，不重开终态、不授权执行。非 open 记录须按用户指令先显式改为 open 再 amend；仅改 open 仍不授权开工。元数据不能暂停/关闭活跃执行；在途及 failed/unknown 操作不能用 amend 绕过，仍按既有 caller recovery 流程处理。
+
+只可编辑本人绑定任务，taskId/workstream/caller/owner 不变；派单、关系编辑、恢复仍无 owner 权限。不获取 caller/admin 凭证，不自动续派，独立新目标仍由 caller 明确另派 owner。
+
 需要前置背景时按需读本 task 的 conditions 或 `work_read taskId/view=dependencies`，不遍历其它任务。ready 只指直接记录条件满足，不是授权或原生运行就绪；failed/cancelled 不是满足，未绑定正式目标或前置 amend 需 caller 核对。关系编辑不改变当前执行、暂停或决策，不能凭 ready 自动开工/续派；新关系也不会撤销已有承接。owner 不能增删关系、冒充 caller 或获取其凭证，仍只按真实目标报告进展与结果。
 
 旧通道在途目标继续原派单的最终回复义务，无需加载旧 work-owner；不因入口退役或记录迁入而补历史回执、取用 caller 凭证、新建 owner 或重开任务。caller 用 `work_observe` 登记有来源的旧回执；不能把旧观察冒充本服务 accepted/delivered。

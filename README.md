@@ -40,4 +40,6 @@
 
 一句话用 `work_record` 登记待办，零会话副作用；补齐授权后通过 `work_dispatch` 在**同 taskId**开工。同目标继续原 owner。元数据用 recordRevision，执行目标/授权用 goalVersion；只有后者变化才 `work_amend`。owner 报告/交付仍用 `work_report`、`work_deliver`。默认 `work_read` 返回 10 个未结束简表，完成历史按需查，不查询 Cockpit。
 
+**Task 1.2.8：owner 本任务修改与续办。** 用户在绑定 owner 会话直接给出同任务新要求时，owner 可用原凭证、完整 goal、reason/source 调用 `work_amend`，包括在已交付后创建后继版本，再直接 accepted 新版本继续；无需 caller 中转、自派消息或新 session。`work_record update` 也允许绑定 owner，但元数据不重开/授权执行。旧结果、身份、版本并发和在途保护保留；没有新授权不得自动复活。接口边界见[契约](docs/contract.md)，源码版本不表示安装环境已升级。
+
 **统一记录**：用户批准的旧任务保留原始来源后迁入，历史 owner/caller 引用与真实执行绑定分离。迁入不派工、不唤醒 owner、不发旧回执；切换后的 Markdown 仅留入口，不再双写状态。旧回执由讨论方 `work_observe` 带来源登记，不能冒充 owner。单用户本地部署不隔离恶意同用户 agent；现有 Cockpit 宽读取和未知副作用仍如实暴露。

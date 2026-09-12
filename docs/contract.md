@@ -38,7 +38,7 @@ schema 与 skill 分工互补：schema 提供可校验的表达结构、引用�
 
 | 工具 | 权限 | 关键输入 / 效果 |
 | --- | --- | --- |
-| work_record | caller | create 只需 title；update 用 taskId/recordRevision 修改标题、说明、来源、意向。零 Cockpit；不能停止或关闭活跃执行。 |
+| work_record | caller；绑定 owner 仅 update 本任务 | create 只需 title；update 用 taskId/recordRevision 修改标题、说明、来源、意向。owner 必须带 reason/source。零 Cockpit，不重开/授权；不能停止或关闭活跃执行。 |
 | work_dependency | 两端同属的 caller | add/remove 用后续 taskId、前置 prerequisiteId、后续任务 recordRevision；add 可选前置目标版本和短说明，默认绑定当前正式版本。零派工/通知；read 的 dependencies 视图分页查询。 |
 | work_observe | 管理 legacy 的 caller | 带来源登记旧回执，默认只补历史。确认适用当前授权范围才 updateCurrent=true+reason；不能覆盖已 adopt 的执行。零 Cockpit/通知。 |
 | work_import | caller | preview/apply 本地私有 staging 中的 manifestId；apply 要匹配 planHash。原始来源、记录变化和原 owner 引用保留，零派单副作用。 |
@@ -46,18 +46,32 @@ schema 与 skill 分工互补：schema 提供可校验的表达结构、引用�
 | work_read | 作用域内 caller/owner；viewer 全部只读 | 默认 10 简表；board 返回四栏各 10 项，group+before 分栏续页；taskId+detail 获取目标和成果；events/operations 用 before 游标，最多 50。零 Cockpit 读取。 |
 | work_report | 绑定 owner | taskId/goalVersion/kind/summary/artifacts；accepted、progress、blocked、needs_decision、result。无 caller 聊天通知。 |
 | work_deliver | 绑定 owner | 同版本完整结果，delivered/failed/cancelled；成功交付必须有结果入口。先持久结果，再唯一尝试通知绑定 caller。 |
-| work_amend | 绑定 caller | 当前 goalVersion、完整 goal、reason；递增目标/授权版本，清承接和当前成果，旧事件保留；不自动发消息。 |
+| work_amend | 绑定 caller 或 owner | 当前 goalVersion、完整 goal、reason；owner 还必须提供本会话用户新指令 source。递增目标/授权版本，清承接和当前成果，保留旧目标/结果/事件；owner 可直接 accepted 新版本，无 caller continue 或自发消息。 |
 | work_recover | 绑定 caller | operationId；unknown 必须提供 resolution: applied/not_applied + evidence；确认创建成功还需真实 sessionId。只继续原操作和原 owner。 |
 
 goal 的 objective/scope/acceptance/authorization 都必填。服务不将调查扩成实施，不自动判断“两项目标是否同一”，也不能验证成果真实达到验收；这些仍是用户/agent 的责任。
 
-上述完整 goal 仅在**执行派单**时必填。new/fork 带 taskId+recordRevision 可在同一待办上首次开工；adopt 带这两个字段和完整新授权，只绑定导入记录的原 owner 引用。纯登记不强填 goal，参见 [记录语义](backlog.md)。
+上述完整 goal 在**首次执行派单和 amend** 时必填。new/fork 带 taskId+recordRevision 可在同一待办上首次开工；adopt 带这两个字段和完整新授权，只绑定导入记录的原 owner 引用。纯登记不强填 goal，参见 [记录语义](backlog.md)。
 
 ## 状态与版本
 
 `recorded → dispatched → active / blocked / needs_decision / result_reported → delivered / failed / cancelled`。
 
 未开工是独立的 `backlog`，历史导入是 `legacy`，两者 goalVersion=0、无 acceptedVersion、无执行绑定。记录 disposition 的 open/deferred/abandoned/archived 不冒充执行状态；active 任务不能由记录编辑关闭。recordRevision 与 goalVersion 分离，显式依赖增删只递增后续任务的 recordRevision。
+
+### Owner 直接修改与后继版本（1.2.8）
+
+绑定 owner 只可编辑本人 task+session，使用既有凭据，不重签身份或扩大到其它任务。`work_amend` 的完整新目标代表用户对同一任务的新要求；`reason` 说明变化，`source` 是本 owner 会话用户指令的简短来源（1–2000 字符，如时间和请求）。owner 缺少任一项返回 `USER_INSTRUCTION_REQUIRED`；caller 原调用兼容，source 可选。来源是调用方声明，不是自然语言授权证明，服务不扫描聊天，也不引入逐步审批。
+
+显式 amend 可从 delivered/failed/cancelled 建立后继版本，也可调整在执行的同目标授权。原 taskId/workstream/caller/owner/credential 不变。状态回到 recorded、acceptedGoalVersion 清空；owner 必须用返回的新 goalVersion 再 accepted 才能报告或交付，**无需 caller continue、self-dispatch/prompt 或新会话**。caller 仍可按旧流程 amend 后显式 continue。无新用户授权不得自动 amend/复活；不同独立目标仍须另行明确派单。
+
+每次 amend 与元数据编辑在事件中记录实际凭据角色/session、原因及提供的 source；amend 同时将这些信息保存在新 versions 行。旧 versions、终态事件、产物和通知 operation 不改写；当前 artifacts 清空不等于删除旧结果，events 可分页查询。每个后继版本独立 accepted/deliver 并由服务唯一通知；旧幂等重放不重发、不完成新版本。
+
+`work_record update` 的 owner 输入也需要 reason/source（`source` 是本次指令来源，`sources` 是任务元数据引用列表）。它只递增 recordRevision，保留 goalVersion、承接、状态和当前产物，不授予执行授权。执行绑定的 workstream 不可改名，身份/状态字段不接受输入。owner 无 create/dispatch/dependency/import/observe/recover 权限，viewer/admin 不新增业务写权限。
+
+amend 拒绝任何 active operation，包括 failed/unknown 尚未恢复的通知或派单；owner 元数据编辑也拒绝在途操作。非 open disposition 返回 `RECORD_NOT_OPEN`，须按新指令显式改 open 再 amend，改 open 本身仍不执行。活跃执行不能用 disposition 停止/关闭。pending 操作保留既有 caller recovery 权限，不通过新版本掩盖未知结果。
+
+caller/owner 共用事务和版本检查：同目标版本竞争只有一方成功，另一方 STALE_GOAL；同记录修订竞争为 STALE_RECORD。两版本域独立更新，不覆盖对方字段。依赖不自动跟随后继版本，旧完成仍可追溯但不再满足新目标条件，必须由 caller 显式核对关系。没有自动重派或通知补发。
 
 ## 显式前置条件
 
@@ -105,7 +119,7 @@ fork 仅使用 Cockpit 正式原生 fork：源须已加载且空闲，拒绝不�
 
 服务只监听 loopback；API 使用 bearer 鉴权。工作页不管理登录、cookie、凭证或前置认证系统；浏览器通过受保护的 HTTPS 网关访问，网关在服务端映射只读身份，不授予 caller 权限。旧浏览器登录/session API 与 wc_view cookie 鉴权已移除，本机 MCP 和 bearer 角色范围保留。Host/Origin 校验，无 CORS，严格 CSP，不渲染任务 HTML，不加载外部资源。只读入口不会匿名公开任务；具体网关部署见 [HTTPS 工作页](passkey-access.md)。
 
-管理员本机命令签发 caller 绑定已知 session；服务新建 owner 后签发 task+session 绑定能力，存 0600 文件，派单只含路径；MCP 只接受固定 credentials 根内的规范路径。哈希凭证、角色、归属三者由服务验证。viewer 无写权限，owner 无派单/改目标权限，caller 无 owner 代报权限。
+管理员本机命令签发 caller 绑定已知 session；服务新建 owner 后签发 task+session 绑定能力，存 0600 文件，派单只含路径；MCP 只接受配置的 credentials 根（含显式保留的旧路径根）内的规范路径。哈希凭证、角色、归属三者由服务验证。viewer 无写权限，owner 仅能修改本人绑定任务并报告/交付，无派单或重绑权限；caller 无 owner 代报权限。
 
 同一 OS 用户/allow-all agent 能读同用户文件，因此不是相互不信任 agent 的强隔离；分两个 MCP 不会解决这个边界。凭证路径不应传播，秘密内容不进源码、MCP config 或日志。完全不可信 agent 应在不同 OS 用户/容器运行并配独立秘密交付，不在此版本暗中承诺。
 

@@ -82,3 +82,29 @@ Future updates use the native drain endpoint instead of repeating that migration
 Already-connected external MCP processes may still run older code. A future
 startup path is not evidence that all clients have reconnected. Skill discovery
 refresh similarly cannot replace instructions already present in a model context.
+
+## Owner self-amend release 1.2.8
+
+This source change targets the independent **Task 1.2.8 module**, not a Cockpit
+core release. `package.json`, lockfile and `module.json` agree on 1.2.8. The
+immutable artifact must include the service, MCP schema, `roles/`, both managed
+skills and both legacy skill roots. Publishing source or passing CI does not
+change production permissions or already-loaded tool definitions.
+
+After separate deployment authorization for the exact integrated SHA, publish
+the signed Task 1.2.8 artifact through the existing module release path, then
+use the host's supported safe module update lifecycle to select that artifact.
+Keep the original data directory, credential roots/digests and native sessions.
+Drain pending service operations normally; never edit production task rows or
+reissue owner credentials as an upgrade shortcut.
+
+Existing owners may still pin 1.2.7. Their connected MCP cannot accept the new
+`source` field until it runs the updated package, and their old loaded skill
+cannot explain the new permission. Update the intended same-session Task role,
+MCP and skill through the supported idle-safe module lifecycle, not by editing
+immutable releases/global settings or sending a new goal prompt. A reload alone
+does not prove a pinned module version changed. Read back the actual Task
+`/version` identity and intended session's module/MCP version and discovered
+schema before claiming activation. The retained legacy credential paths remain
+valid under the existing configured root contract; there is no new identity
+issuance or database schema migration for self-amend.

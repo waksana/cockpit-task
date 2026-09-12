@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { rmSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { rmSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -75,6 +75,13 @@ test('real MCP stdio client discovers and invokes scoped tools against HTTP serv
   const dependencyTool = tools.tools.find(tool => tool.name === 'work_dependency');
   assert.deepEqual(dependencyTool.inputSchema.required.sort(),
     ['action', 'credential', 'idempotencyKey', 'prerequisiteId', 'recordRevision', 'taskId']);
+  for (const name of ['work_amend', 'work_record']) {
+    const tool = tools.tools.find(tool => tool.name === name);
+    assert.equal(tool.inputSchema.properties.source.type, 'string');
+    assert.match(tool.inputSchema.properties.source.description, /Required for owner edits/);
+    assert.match(tool.description, /bound owner/);
+    assert.equal(tool.inputSchema.additionalProperties, false);
+  }
   const result = await client.callTool({ name: 'work_read', arguments: { credential } });
   assert.deepEqual(JSON.parse(result.content[0].text), { items: [], nextBefore: null });
   const retained = await client.callTool({ name: 'work_read', arguments: { credential: retainedCredential } });
@@ -129,4 +136,57 @@ test('real MCP stdio client discovers and invokes scoped tools against HTTP serv
   const escaped = await client.callTool({ name: 'work_read', arguments: { credential: '/etc/passwd' } });
   assert.equal(escaped.isError, true);
   assert.equal(JSON.stringify(tools).includes('callerSessionId'), false);
+
+  const nativeCalls = [];
+  cockpit.meta = async sessionId => {
+    nativeCalls.push({ name: 'session/get', sessionId });
+    return { loaded: true, status: 'idle', currentModelId: 'gpt-6-astra' };
+  };
+  cockpit.call = async (name, body) => {
+    nativeCalls.push({ name, ...body });
+    return name === 'session/new' ? { sessionId: 'synthetic-owner' } : { ok: true, status: 'connected' };
+  };
+  const assigned = await client.callTool({ name: 'work_dispatch', arguments: {
+    credential, selection: 'new', cwd: directory, workstream: 'owner-reopen-fixture',
+    goal: dispatch.goal, idempotencyKey: 'mcp-owner-dispatch',
+  } });
+  assert.equal(assigned.isError, false);
+  const taskId = JSON.parse(assigned.content[0].text).task.taskId;
+  const ownerCredential = join(retainedDirectory, 'legacy-owner.json');
+  renameSync(store.task(taskId).credential_path, ownerCredential);
+  store.run('UPDATE tasks SET credential_path=? WHERE id=?', ownerCredential, taskId);
+  const ownerCall = (name, input) => client.callTool({ name, arguments: {
+    credential: ownerCredential, taskId, ...input,
+  } });
+  const deniedOwner = await oldClient.callTool({ name: 'work_read', arguments: { credential: ownerCredential, taskId } });
+  assert.equal(deniedOwner.isError, true);
+  const credentialsBefore = store.all('SELECT * FROM credentials');
+  assert.equal((await ownerCall('work_report', { goalVersion: 1, kind: 'accepted', summary: 'Accepted',
+    idempotencyKey: 'mcp-owner-accept-v1' })).isError, false);
+  assert.equal((await ownerCall('work_deliver', { goalVersion: 1, outcome: 'delivered', summary: 'Initial result',
+    artifacts: ['/fixture/mcp-v1'], idempotencyKey: 'mcp-owner-deliver-v1' })).isError, false);
+  const callsBefore = nativeCalls.length;
+  const provenance = { reason: 'Explicit same-goal follow-up', source: 'User in synthetic owner session requests continuation' };
+  const metadata = await ownerCall('work_record', { action: 'update', recordRevision: 1,
+    notes: 'Same retained owner credential', ...provenance, idempotencyKey: 'mcp-owner-edit' });
+  assert.equal(metadata.isError, false);
+  assert.equal(JSON.parse(metadata.content[0].text).task.status, 'delivered');
+  const amendment = { taskId, goalVersion: 1, goal: dispatch.goal, ...provenance, idempotencyKey: 'mcp-owner-amend' };
+  const amended = await ownerCall('work_amend', amendment);
+  assert.equal(amended.isError, false);
+  const sameHttp = await app.inject({ method: 'POST', url: '/api/tools/work_amend', payload: amendment,
+    headers: { host: '127.0.0.1:18791', authorization: `Bearer ${readCredential(ownerCredential)}` } });
+  assert.deepEqual(sameHttp.json(), JSON.parse(amended.content[0].text));
+  assert.equal(JSON.parse(amended.content[0].text).task.goalVersion, 2);
+  assert.equal((await ownerCall('work_report', { goalVersion: 2, kind: 'accepted', summary: 'Continue directly',
+    idempotencyKey: 'mcp-owner-accept-v2' })).isError, false);
+  assert.equal(nativeCalls.length, callsBefore);
+  assert.deepEqual(store.all('SELECT * FROM credentials'), credentialsBefore);
+  assert.equal(store.task(taskId).owner, 'synthetic-owner');
+  assert.equal(store.task(taskId).credential_path, ownerCredential);
+  assert.equal((await ownerCall('work_deliver', { goalVersion: 2, outcome: 'delivered', summary: 'Follow-up result',
+    artifacts: ['/fixture/mcp-v2'], idempotencyKey: 'mcp-owner-deliver-v2' })).isError, false);
+  assert.equal(nativeCalls.filter(call => call.name === 'session/new').length, 1);
+  assert.equal(nativeCalls.filter(call => call.name === 'prompt' && call.sessionId === 'synthetic-owner').length, 1);
+  assert.equal(nativeCalls.filter(call => call.name === 'prompt' && call.sessionId === 'fixture-caller').length, 2);
 });

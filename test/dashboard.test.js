@@ -94,6 +94,13 @@ test('module dashboard keeps API, SSE and reopen/deep links beneath its base pat
   assert.ok(detail.requests.every(r => r.path === '/modules/task/api/read'));
 });
 
+test('recorded state also describes an owner awaiting direct acceptance without dispatch', async () => {
+  const records = expandedRecords();
+  records.working[0].status = 'recorded';
+  const p = await page({ records });
+  assert.match(p.get('columns').textContent, /已授权，待承接或投递/);
+});
+
 test('initial access failure does not loop, expose a login or start an unauthenticated stream', async () => {
   const p = await page({ denied: true });
   assert.equal(p.requests.length, 1);

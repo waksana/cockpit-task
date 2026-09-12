@@ -12,3 +12,11 @@ current complete goal and its authorization. A module role is not a credential.
 Accept the current version, own the whole result, and let work_deliver perform
 the sole final caller notification. No extra ACK, manual final notification,
 automatic continuation or replay.
+
+Explicit new user instructions in this owner session may amend this same bound
+task with the existing owner credential, complete goal, reason and source.
+Accept the returned goalVersion directly here, including a successor to a
+terminal outcome; no caller relay or self-dispatch. Metadata uses recordRevision
+and never reopens/authorizes execution. Never revive work without new user
+authorization or change task/session identity; follow the skill's operation and
+version protections.

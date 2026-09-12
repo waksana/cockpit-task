@@ -1,6 +1,6 @@
 # Managed Cockpit Task module
 
-`module.json` is the schema-v1 official module artifact (package version 1.2.7).
+`module.json` is the schema-v1 official module artifact (package version 1.2.8).
 It declares explicit commander and owner roles with isolated role instruction and
 skill roots. Both use `cockpit-task` at `src/mcp.js`; existing `work-commander`
 MCP/skill installation paths remain available for legacy clients. Selecting a
@@ -10,8 +10,32 @@ inherit Assistant identity from cwd or a fork.
 Managed skills use unique discovery names `cockpit-task-commander` and
 `cockpit-task-owner` beneath `skills/commander/` and `skills/owner/`. Role
 instructions and managed goal prompts reference these module-only names, avoiding
-native name deduplication with global/project/bundled skills. The original
-`skills/work-commander` and `skills/work-commander-owner` files remain unchanged.
+native name deduplication with global/project/bundled skills. The legacy
+`skills/work-commander` and `skills/work-commander-owner` roots remain available;
+both generations carry the same task permission and authorization boundaries.
+
+### Owner changes in 1.2.8
+
+Bound owners may use the existing `work_amend` and `work_record update` tools
+on their own task with reason and user-instruction source. Amend creates the
+next goalVersion, including after a terminal outcome; the owner accepts it
+directly in the same session, without a caller relay or any Cockpit call.
+Metadata edits use recordRevision and do not reopen/authorize execution.
+Task/session/credential identity and historical outcomes stay intact. Pending
+operations and non-open record dispositions cannot be bypassed. Full semantics
+are in [the API contract](contract.md).
+
+The authority is the existing credential digest and task/session binding, not
+the skill name or installed version. No credential/database migration is needed
+for this change; the 1.2.7 retained-credential-root contract still applies.
+Canonical role content lives in this repository's `roles/` and role-specific
+`skills/` roots and ships in the module artifact. Installed releases and legacy
+global symlinks are distribution copies, not files to hot-edit. Upgrading only
+the service does not replace an already-connected MCP schema or the skill text
+in an owner's context. Existing sessions keep their pinned role release until
+explicitly updated through the normal safe module lifecycle. Do not rebind
+identity, self-prompt, force-close busy sessions or change global MCP defaults
+to activate this feature. See [delivery requirements](DELIVERY.md#owner-self-amend-release-128).
 
 Before sending an owner prompt, managed dispatch reads `session/modules/get`
 and checks the exact session, `applied` phase and sole Task owner selection.

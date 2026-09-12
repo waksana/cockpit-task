@@ -65,6 +65,24 @@ test('two historical cases preserve decision and delivered states, acceptance, a
   assert.equal((await f.read(ci)).items[0].reason, 'delivered');
 });
 
+test('owner successor goal invalidates old dependency satisfaction without editing the edge or waking downstream', async t => {
+  const f = fixture(t), prerequisite = await f.create('Prerequisite'), dependent = await f.create('Dependent');
+  await f.dispatch(prerequisite); await f.report(prerequisite, 'accepted'); await f.deliver(prerequisite);
+  await f.edit(dependent, prerequisite);
+  assert.equal((await f.read(dependent)).items[0].reason, 'delivered');
+  const edge = f.store.all('SELECT * FROM dependencies'), downstream = f.store.task(dependent);
+  const calls = f.cockpit.calls.length;
+  await f.execute('work_amend', { taskId: prerequisite, goalVersion: 1, goal,
+    reason: 'User requested follow-up', source: 'User in this owner session, explicit new instruction' }, f.owner(prerequisite));
+  assert.equal((await f.read(dependent)).conditions.needsConfirmation, 1);
+  assert.deepEqual(f.store.all('SELECT * FROM dependencies'), edge);
+  assert.deepEqual(f.store.task(dependent), downstream);
+  assert.equal(f.cockpit.calls.length, calls);
+  await f.report(prerequisite, 'accepted'); await f.deliver(prerequisite);
+  assert.equal((await f.read(dependent)).conditions.needsConfirmation, 1, 'New result cannot silently retarget an old edge');
+  assert.deepEqual(f.store.task(dependent), downstream);
+});
+
 test('self edges, duplicates, transitive cycles, missing references, stale revisions and idempotency', async t => {
   const f = fixture(t), a = await f.create('A'), b = await f.create('B'), c = await f.create('C');
   await assert.rejects(f.edit(a, a), { code: 'SELF_DEPENDENCY' });

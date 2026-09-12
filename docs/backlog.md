@@ -6,6 +6,8 @@
 
 需要开工时，在同 taskId 上 `work_dispatch new/fork`，给 recordRevision、完整 goal 和 cwd/真实 fork 来源；不再创建第二条任务。失败/重复沿原 operation 恢复。同目标后续仍 continue 原 owner；明确改变执行目标/授权才 amend。
 
+1.2.8 起绑定 owner 可按本会话用户新指令直接 amend 同一任务（完整 goal、当前 goalVersion、reason/source），包括终态后建立后继版本，再直接 accepted；不需 caller 绕行或自派消息。owner 也可用 reason/source 做本任务 record update，但不创建新记录、不改身份/workstream，也不因元数据修改重开执行。非 open 记录须先显式改 open，再 amend 新授权；旧结果保留。caller 原流程不变，双方共用版本并发检查。详见[权限与续办契约](contract.md#owner-直接修改与后继版本128)。
+
 ## 两种版本
 
 - **recordRevision**：元数据、显式依赖增删、导入观察和有来源的历史补充发生改变时更新，防旧编辑覆盖新记录。

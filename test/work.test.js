@@ -12,6 +12,8 @@ import { EffectUnknown } from '../src/cockpit.js';
 import { createApp } from '../src/server.js';
 
 const goal = { objective: 'Complete isolated fixture', scope: 'Fixture directory only', acceptance: 'Durable artifact and truthful outcome', authorization: 'Create fixture file; no external sends' };
+const ownerInstruction = { reason: 'User requested a follow-up to this same goal',
+  source: 'User in this owner session at 2026-09-12 15:56: amend this task and continue' };
 class FakeCockpit {
   calls = []; sessions = new Map(); modules = new Map(); failure; gate; loseEmptyOnApply = false;
   async call(name, body, mutation = true) {
@@ -406,6 +408,198 @@ test('owner credentials cannot report other task; payload identity rejected', as
     taskId: a.task.taskId, goalVersion: 1, kind: 'accepted', summary: 'spoof', idempotencyKey: 'spoof-003', owner: 'caller-fixture',
   }));
 });
+test('owner explicitly reopens each terminal outcome in place, with durable history and one notification per version', async t => {
+  for (const outcome of ['delivered', 'failed', 'cancelled']) {
+    const f = fixture(t), initial = await f.dispatch(), taskId = initial.task.taskId, owner = f.owner(taskId);
+    const execute = (name, input) => f.w.execute(owner, name, { taskId, ...input });
+    await execute('work_report', { goalVersion: 1, kind: 'accepted', summary: 'Accept', idempotencyKey: 'owner-accept-v1' });
+    const final = { goalVersion: 1, outcome, summary: 'Original outcome', artifacts: ['/fixture/v1'], idempotencyKey: 'owner-final-v1' };
+    await execute('work_deliver', final);
+    const original = f.s.task(taskId), credentials = f.s.all('SELECT * FROM credentials');
+    const history = f.s.all('SELECT * FROM events WHERE task_id=?', taskId);
+    const operations = f.s.all('SELECT * FROM operations WHERE task_id=?', taskId);
+    const versions = f.s.all('SELECT * FROM versions WHERE task_id=?', taskId);
+    const calls = f.c.calls.length;
+    const edit = { action: 'update', recordRevision: 1, title: 'Follow-up label', notes: 'Still not reopened',
+      sources: ['/fixture/request'], ...ownerInstruction, idempotencyKey: 'owner-metadata-v1' };
+    const metadata = await execute('work_record', edit);
+    assert.equal(metadata.task.goalVersion, 1);
+    assert.equal(metadata.task.status, outcome);
+    assert.equal(f.s.task(taskId).accepted_version, 1);
+    assert.equal(f.s.task(taskId).artifacts, original.artifacts);
+    assert.deepEqual(await execute('work_record', edit), metadata);
+    await assert.rejects(execute('work_report', { goalVersion: 1, kind: 'progress', summary: 'Too late',
+      idempotencyKey: 'owner-late-progress' }), { code: 'TERMINAL_GOAL' });
+    const amendment = { goalVersion: 1, goal: { ...goal, objective: 'Follow up on fixture' },
+      ...ownerInstruction, idempotencyKey: 'owner-amend-v2' };
+    await assert.rejects(execute('work_amend', { ...amendment, source: undefined }), { code: 'USER_INSTRUCTION_REQUIRED' });
+    const amended = await execute('work_amend', amendment);
+    assert.deepEqual(await execute('work_amend', amendment), amended);
+    await assert.rejects(execute('work_amend', { ...amendment, source: 'Different instruction' }),
+      { code: 'IDEMPOTENCY_CONFLICT' });
+    assert.equal(amended.task.goalVersion, 2);
+    assert.equal(amended.task.recordRevision, 2);
+    assert.equal(amended.task.title, 'Follow-up label');
+    assert.equal(amended.task.status, 'recorded');
+    assert.match(amended.task.summary, /owner must accept/);
+    assert.equal(f.s.task(taskId).accepted_version, null);
+    assert.equal(f.s.task(taskId).artifacts, '[]');
+    for (const field of ['id', 'workstream', 'caller', 'owner', 'credential_path']) {
+      assert.equal(f.s.task(taskId)[field], original[field], field);
+    }
+    assert.deepEqual(f.s.all('SELECT * FROM credentials'), credentials);
+    assert.deepEqual(f.s.all('SELECT * FROM events WHERE task_id=? AND seq<=?', taskId, history.at(-1).seq), history);
+    assert.deepEqual(f.s.all('SELECT * FROM operations WHERE task_id=?', taskId), operations);
+    assert.deepEqual(f.s.all('SELECT * FROM versions WHERE task_id=? AND version=1', taskId), versions);
+    const reopenedStore = new Store(f.dir);
+    try {
+      assert.equal(reopenedStore.task(taskId).version, 2);
+      assert.equal(reopenedStore.authenticate(readCredential(original.credential_path)).digest, owner.digest);
+      const storedReason = reopenedStore.get('SELECT reason FROM versions WHERE task_id=? AND version=2', taskId).reason;
+      assert.ok(storedReason.includes(ownerInstruction.source));
+      assert.ok(storedReason.includes(`Changed by: owner ${original.owner}`));
+    } finally { reopenedStore.close(); }
+    await assert.rejects(execute('work_amend', { ...amendment, idempotencyKey: 'owner-stale-amend' }), { code: 'STALE_GOAL' });
+    await assert.rejects(execute('work_deliver', { ...final, idempotencyKey: 'owner-stale-final' }), { code: 'STALE_GOAL' });
+    await assert.rejects(execute('work_report', { goalVersion: 2, kind: 'progress', summary: 'Not accepted',
+      idempotencyKey: 'owner-unaccepted-progress' }), { code: 'NOT_ACCEPTED' });
+    await execute('work_deliver', final); // Old-key replay cannot notify again or finish version 2.
+    assert.equal(f.s.task(taskId).status, 'recorded');
+    await execute('work_report', { goalVersion: 2, kind: 'accepted', summary: 'Accept new instruction', idempotencyKey: 'owner-accept-v2' });
+    await execute('work_report', { goalVersion: 2, kind: 'progress', summary: 'Continue here', idempotencyKey: 'owner-progress-v2' });
+    assert.equal(f.c.calls.length, calls, 'No Cockpit reads, dispatch, self-prompt or notification on amend/accept');
+    const nextFinal = { ...final, goalVersion: 2, outcome: 'delivered', artifacts: ['/fixture/v2'], idempotencyKey: 'owner-final-v2' };
+    await execute('work_deliver', nextFinal);
+    await execute('work_deliver', nextFinal);
+    const notifications = f.c.calls.filter(c => c.name === 'prompt' && c.body.sessionId === original.caller);
+    assert.equal(notifications.length, 2);
+    assert.match(notifications[0].body.text, /goalVersion=1;/);
+    assert.match(notifications[1].body.text, /goalVersion=2; final=delivered/);
+    assert.equal(f.c.calls.filter(c => c.name === 'session/new').length, 1);
+    assert.equal(f.s.get('SELECT count(*) n FROM tasks').n, 1);
+    const events = await execute('work_read', { view: 'events', limit: 50 });
+    assert.deepEqual(events.items.find(e => e.goalVersion === 1 && e.kind === outcome).artifacts, ['/fixture/v1']);
+    assert.deepEqual(events.items.find(e => e.goalVersion === 2 && e.kind === 'delivered').artifacts, ['/fixture/v2']);
+  }
+});
+
+test('HTTP owner edits enforce task and session binding, instruction provenance and strict identity fields', async t => {
+  const f = fixture(t), a = await f.dispatch(), b = await f.dispatch({ workstream: 'other', idempotencyKey: 'other-dispatch' });
+  const taskId = a.task.taskId, token = readCredential(f.s.task(taskId).credential_path);
+  const { app } = createApp({ store: f.s, cockpit: f.c });
+  t.after(() => app.close());
+  const request = (name, payload, bearer = token) => app.inject({ method: 'POST', url: `/api/tools/${name}`, payload,
+    headers: { host: '127.0.0.1:8790', authorization: `Bearer ${bearer}` } });
+  const amend = { taskId, goalVersion: 1, goal, ...ownerInstruction, idempotencyKey: 'http-owner-amend' };
+  const edit = { taskId, action: 'update', recordRevision: 1, notes: 'Updated', ...ownerInstruction, idempotencyKey: 'http-owner-edit' };
+  const credentials = [
+    readCredential(f.s.task(b.task.taskId).credential_path),
+    f.s.issue('owner', a.task.ownerSessionId, b.task.taskId),
+    f.s.issue('owner', 'unbound-session', taskId),
+    f.s.issue('viewer'), f.s.issue('admin'), f.s.issue('caller', 'unrelated-caller'),
+  ];
+  const before = f.s.all('SELECT * FROM tasks'), events = f.s.all('SELECT * FROM events');
+  const mutations = f.s.get('SELECT count(*) n FROM mutations').n, calls = f.c.calls.length;
+  for (const [name, input] of [['work_amend', amend], ['work_record', edit]]) {
+    for (const credential of credentials) assert.equal((await request(name, input, credential)).statusCode, 403);
+    assert.equal((await request(name, { ...input, taskId: b.task.taskId })).statusCode, 403);
+    for (const field of ['owner', 'caller', 'ownerSessionId', 'callerSessionId', 'credential_path', 'status', 'accepted_version']) {
+      assert.equal((await request(name, { ...input, [field]: 'forbidden' })).statusCode, 400, field);
+    }
+    for (const source of [undefined, '', ' ', 'x'.repeat(2001)]) {
+      assert.equal((await request(name, { ...input, source })).statusCode, 400);
+    }
+  }
+  assert.equal((await request('work_record', { ...edit, reason: undefined })).json().error, 'USER_INSTRUCTION_REQUIRED');
+  assert.equal((await request('work_record', { ...edit, workstream: 'replacement' })).json().error, 'STABLE_WORKSTREAM');
+  assert.equal((await request('work_record', { action: 'create', title: 'Unauthorized task', idempotencyKey: 'owner-no-create' })).statusCode, 403);
+  assert.equal((await request('work_dispatch', { selection: 'continue', taskId, goalVersion: 1,
+    message: 'Self-dispatch forbidden', idempotencyKey: 'owner-no-dispatch' })).statusCode, 403);
+  assert.equal((await request('work_recover', { operationId: a.operation.operationId, idempotencyKey: 'owner-no-recover' })).statusCode, 403);
+  assert.equal((await request('work_dependency', { action: 'add', taskId, prerequisiteId: b.task.taskId,
+    recordRevision: 1, idempotencyKey: 'owner-no-dependency' })).statusCode, 403);
+  assert.deepEqual(f.s.all('SELECT * FROM tasks'), before);
+  assert.deepEqual(f.s.all('SELECT * FROM events'), events);
+  assert.equal(f.s.get('SELECT count(*) n FROM mutations').n, mutations);
+  assert.equal((await request('work_record', edit)).statusCode, 200);
+  assert.equal((await request('work_amend', amend)).statusCode, 200);
+  assert.equal(f.c.calls.length, calls);
+});
+
+test('caller-owner concurrency preserves both version domains and rejects stale competing writes', async t => {
+  for (const ownerFirst of [true, false]) {
+    const f = fixture(t), { task } = await f.dispatch(), taskId = task.taskId, owner = f.owner(taskId);
+    const callerStore = new Store(f.dir), callerWork = new Work(callerStore, f.c);
+    t.after(() => callerStore.close());
+    const principals = ownerFirst ? [owner, f.caller] : [f.caller, owner];
+    const execute = (principal, name, input) => (principal.role === 'caller' ? callerWork : f.w)
+      .execute(principal, name, { taskId, ...ownerInstruction, ...input });
+    await f.w.execute(owner, 'work_report', { taskId, goalVersion: 1, kind: 'accepted', summary: 'Accepted', idempotencyKey: 'race-accept' });
+    const edits = await Promise.allSettled(principals.map((p, i) => execute(p, 'work_record', {
+      action: 'update', recordRevision: 1, notes: `writer-${i}`, idempotencyKey: `race-edit-${i}`,
+    })));
+    assert.deepEqual(edits.map(r => r.status), ['fulfilled', 'rejected']);
+    assert.equal(edits[1].reason.code, 'STALE_RECORD');
+    assert.equal(f.s.task(taskId).notes, 'writer-0');
+    assert.equal(f.s.task(taskId).version, 1);
+    assert.equal(f.s.task(taskId).accepted_version, 1);
+    const amended = await Promise.allSettled(principals.map((p, i) => execute(p, 'work_amend', {
+      goalVersion: 1, goal: { ...goal, objective: `writer-${i}` }, idempotencyKey: `race-amend-${i}`,
+    })));
+    assert.deepEqual(amended.map(r => r.status), ['fulfilled', 'rejected']);
+    assert.equal(amended[1].reason.code, 'STALE_GOAL');
+    await Promise.all([
+      execute(principals[0], 'work_amend', { goalVersion: 2, goal, idempotencyKey: 'race-independent-amend' }),
+      execute(principals[1], 'work_record', { action: 'update', recordRevision: 2,
+        notes: 'Latest metadata', idempotencyKey: 'race-independent-edit' }),
+    ]);
+    assert.equal(f.s.task(taskId).version, 3);
+    assert.equal(f.s.task(taskId).record_revision, 3);
+    assert.equal(f.s.task(taskId).notes, 'Latest metadata');
+    assert.equal(f.s.task(taskId).accepted_version, null);
+  }
+});
+
+test('owner amendment cannot bypass running, failed or unknown operations, or a deferred record', async t => {
+  for (const state of ['running', 'failed', 'unknown']) {
+    const f = fixture(t), { task } = await f.dispatch(), taskId = task.taskId, owner = f.owner(taskId);
+    await f.w.execute(owner, 'work_report', { taskId, goalVersion: 1, kind: 'accepted', summary: 'Accepted', idempotencyKey: 'pending-accept' });
+    const gate = Promise.withResolvers();
+    if (state === 'running') f.c.gate = { name: 'prompt', promise: gate.promise };
+    else f.c.failure = state === 'unknown' ? { name: 'prompt', error: new EffectUnknown('Unknown notification') } :
+      { name: 'session/get', error: new WorkError('SESSION_NOT_FOUND', 'Missing caller', 404) };
+    const delivery = f.w.execute(owner, 'work_deliver', { taskId, goalVersion: 1, outcome: 'delivered',
+      summary: 'Done', artifacts: ['/fixture/result'], idempotencyKey: 'pending-final' });
+    if (state === 'running') await new Promise(resolve => setImmediate(resolve));
+    else await delivery;
+    const operationId = f.s.task(taskId).active_op;
+    assert.equal(f.s.get('SELECT status FROM operations WHERE id=?', operationId).status, state);
+    const amend = { taskId, goalVersion: 1, goal, ...ownerInstruction, idempotencyKey: 'pending-amend' };
+    const edit = { taskId, action: 'update', recordRevision: 1, notes: 'Cannot bypass', ...ownerInstruction, idempotencyKey: 'pending-edit' };
+    try {
+      await assert.rejects(f.w.execute(owner, 'work_amend', amend), { code: 'OPERATION_PENDING' });
+      await assert.rejects(f.w.execute(owner, 'work_record', edit), { code: 'OPERATION_PENDING' });
+      await assert.rejects(f.w.execute(f.caller, 'work_amend', amend), { code: 'OPERATION_PENDING' });
+      assert.equal(f.s.task(taskId).version, 1);
+      assert.equal(f.s.task(taskId).active_op, operationId);
+    } finally { gate.resolve(); await delivery; }
+  }
+  const f = fixture(t), { task } = await f.dispatch(), taskId = task.taskId, owner = f.owner(taskId);
+  const edit = { taskId, action: 'update', recordRevision: 1, disposition: 'deferred', ...ownerInstruction, idempotencyKey: 'pause-record' };
+  await assert.rejects(f.w.execute(owner, 'work_record', edit), { code: 'EXECUTION_PROTECTED' });
+  await f.w.execute(owner, 'work_report', { taskId, goalVersion: 1, kind: 'accepted', summary: 'Accepted', idempotencyKey: 'pause-accept' });
+  await f.w.execute(owner, 'work_deliver', { taskId, goalVersion: 1, outcome: 'cancelled', summary: 'Paused by user', idempotencyKey: 'pause-final' });
+  await f.w.execute(owner, 'work_record', edit);
+  const amend = { taskId, goalVersion: 1, goal, ...ownerInstruction, idempotencyKey: 'pause-amend' };
+  await assert.rejects(f.w.execute(owner, 'work_amend', amend), { code: 'RECORD_NOT_OPEN' });
+  await assert.rejects(f.w.execute(f.caller, 'work_amend', amend), { code: 'RECORD_NOT_OPEN' });
+  await f.w.execute(owner, 'work_record', { ...edit, recordRevision: 2, disposition: 'open', idempotencyKey: 'explicit-open' });
+  assert.equal(f.s.task(taskId).status, 'cancelled');
+  assert.equal(f.s.task(taskId).version, 1);
+  await f.w.execute(owner, 'work_amend', amend);
+  assert.equal(f.s.task(taskId).version, 2);
+});
+
 test('goal amendment prevents old stage/final receipt from completing new authorization', async t => {
   const f = fixture(t), a = await f.dispatch(), id = a.task.taskId, owner = f.owner(id);
   await f.w.execute(owner, 'work_report', { taskId: id, goalVersion: 1, kind: 'accepted', summary: 'research', idempotencyKey: 'accept-001' });

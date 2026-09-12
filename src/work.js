@@ -172,7 +172,9 @@ export class Work {
     fail(!Object.hasOwn(schemas, name), 'UNKNOWN_TOOL', 'Unknown work operation', 404);
     const input = schemas[name].parse(raw);
     if (name === 'work_read') return this.read(principal, input);
-    const expectedRole = ['work_report', 'work_deliver'].includes(name) ? 'owner' : 'caller';
+    const ownerEdit = principal.role === 'owner' &&
+      (name === 'work_amend' || (name === 'work_record' && input.action === 'update'));
+    const expectedRole = ownerEdit || ['work_report', 'work_deliver'].includes(name) ? 'owner' : 'caller';
     this.authorize(principal, expectedRole);
     const requestHash = hash(canonical({ name, input }));
     let run = false;
@@ -195,7 +197,7 @@ export class Work {
       else {
         const task = this.store.task(input.taskId);
         this.authorize(principal, expectedRole, task); this.current(task, input.goalVersion);
-        if (name === 'work_amend') response = this.amend(task, input);
+        if (name === 'work_amend') response = this.amend(principal, task, input);
         else if (name === 'work_report') response = this.report(task, input);
         else { response = this.deliver(task, input); run = true; }
       }
@@ -226,6 +228,11 @@ export class Work {
   recordCurrent(task, revision) {
     fail(task.record_revision !== revision, 'STALE_RECORD', `Current recordRevision is ${task.record_revision}; reread before editing`);
   }
+  changeReason(principal, input, fallback) {
+    fail(principal.role === 'owner' && (!input.reason || !input.source),
+      'USER_INSTRUCTION_REQUIRED', 'Owner edits require a reason and source of the user instruction in this owner session', 400);
+    return `${input.reason ?? fallback}\nChanged by: ${principal.role} ${principal.session_id}${input.source ? `\nSource: ${input.source}` : ''}`;
+  }
   record(principal, input) {
     if (input.action === 'create') {
       const id = uid(), workstream = input.workstream ?? `backlog-${id}`;
@@ -238,8 +245,10 @@ export class Work {
       this.store.event(task, 'record_created', summary);
       return { task: this.summary(task), nativeCalls: 0 };
     }
-    const task = this.store.task(input.taskId); this.authorize(principal, 'caller', task);
+    const task = this.store.task(input.taskId); this.authorize(principal, principal.role, task);
     this.recordCurrent(task, input.recordRevision);
+    const reason = this.changeReason(principal, input, 'Record metadata updated; execution authorization unchanged');
+    if (principal.role === 'owner') fail(task.active_op, 'OPERATION_PENDING', `Resolve ${task.active_op} before editing the record`);
     const legacy = this.store.get('SELECT * FROM legacy_records WHERE task_id=?', task.id);
     if (input.disposition && input.disposition !== task.disposition) {
       fail(task.active_op || (task.version > 0 && !terminal.has(task.status)), 'EXECUTION_PROTECTED', 'Record disposition cannot stop, defer or close an execution');
@@ -256,7 +265,7 @@ export class Work {
       JSON.stringify(input.sources ?? JSON.parse(task.sources)), now(), task.id);
     if (task.status === 'backlog') this.store.run('UPDATE tasks SET summary=? WHERE id=?',
       input.reason ?? input.title ?? task.summary, task.id);
-    this.store.event(task, 'record_edited', input.reason ?? 'Record metadata updated; execution authorization unchanged');
+    this.store.event(task, 'record_edited', reason);
     return { task: this.summary(this.store.task(task.id)), nativeCalls: 0 };
   }
   observe(principal, input) {
@@ -323,15 +332,17 @@ export class Work {
     if (input.sourceSessionId) this.lock(input.sourceSessionId, response.operationId);
     return response;
   }
-  amend(task, input) {
+  amend(principal, task, input) {
     fail(task.version === 0, 'NO_EXECUTION_GOAL', 'Register/edit the record, then explicitly dispatch a complete goal');
     fail(task.active_op, 'OPERATION_PENDING', `Resolve ${task.active_op} before changing the goal`);
+    fail(task.disposition !== 'open', 'RECORD_NOT_OPEN', 'Explicitly reopen the record before changing execution authorization');
+    const reason = this.changeReason(principal, input);
     const next = task.version + 1;
     this.store.run('INSERT INTO versions(task_id,version,goal,reason,created) VALUES(?,?,?,?,?)',
-      task.id, next, JSON.stringify(input.goal), input.reason, now());
+      task.id, next, JSON.stringify(input.goal), reason, now());
     this.store.run(`UPDATE tasks SET version=?,accepted_version=NULL,status='recorded',summary=?,artifacts='[]',updated=? WHERE id=?`,
-      next, `Goal changed; explicit dispatch required: ${input.reason}`, now(), task.id);
-    const updated = this.store.task(task.id); this.store.event(updated, 'amended', input.reason);
+      next, `Goal changed; ${principal.role === 'owner' ? 'owner must accept the new version' : 'explicit continue required'}: ${input.reason}`, now(), task.id);
+    const updated = this.store.task(task.id); this.store.event(updated, 'amended', reason);
     return { task: this.summary(updated) };
   }
   report(task, input) {

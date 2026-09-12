@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "task",
-  "version": "1.2.7",
+  "version": "1.2.8",
   "name": "Cockpit Task",
   "description": "Explicit task records, authorized dispatch and owner reporting; no autonomous scheduling.",
   "compatibility": { "cockpitApi": 1, "nodeMajor": 24, "platform": "linux", "arch": "x64" },

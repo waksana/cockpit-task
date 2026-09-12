@@ -18,10 +18,10 @@ description: "统一管理待办、任务和历史记录的讨论入口。一句
 - 只想记一下：`work_record` action=create，只需 title、idempotencyKey；不用 goal、cwd、模型或技术 slug，不创建 session。action=update 用 taskId、recordRevision；disposition 为 open/deferred/abandoned/archived，非 open 必须有 reason。记录操作零 Cockpit 调用，不授权开工，也不停止活跃 owner 或撤销副作用。
 - 明确前置：`work_dependency` action=add/remove，taskId 是后续、prerequisiteId 是前置，带后续 recordRevision、幂等键；两端须归本 caller。add 默认绑定前置当前正式 goalVersion，可选 prerequisiteGoalVersion/note。无正式目标或后来 amend 均需确认，只有指定当前版本完整 delivered 才满足；重新绑定要显式 remove/add，不伪造 legacy 完成。`work_read` 的 conditions 只给直接条件数量，taskId/view=dependencies 按需展开。ready 不等于授权或运行就绪，关系增删不派工、不改执行/决策状态、不重开历史完成。
 - 现在做：`work_dispatch` selection=new/fork，已有待办带**原 taskId、recordRevision**，没有记录则带 workstream；完整 goal 为 objective/scope/acceptance/authorization。new 带绝对 cwd，fork 带 sourceSessionId（可选 toEventId，不带 cwd）。默认 GPT-6 Astra，不静默降级。
-- 同目标继续：传 selection=continue、taskId、goalVersion、message，不新建 session。目标/授权变化先 `work_amend`，得到新版本后显式 continue；修订本身不投递、不自动开工。
+- 同目标继续：传 selection=continue、taskId、goalVersion、message，不新建 session。目标/授权变化先 `work_amend`，得到新版本后需投递才显式 continue；修订本身不发消息。用户在原 owner 会话直接给出新要求时，绑定 owner 可用原凭证、完整 goal、reason/source 直接 amend（包括已结束目标的后继版本），在原会话 accepted 新版本后继续，不必 caller 中转或重复派单。owner 也可用 recordRevision 修改本任务元数据，但不因此重开/授权执行；非 open 记录须先显式改 open 才能 amend。
 - 旧工作后续执行：按需读 detail/sources，明确新授权，再 selection=adopt，带 taskId、recordRevision、完整 goal，绑定原历史 owner，不另建第二个 owner。历史多目标引用不等于正式绑定；冲突直接问用户，不放宽单目标规则。
 - 按需 `work_read`：默认未结束简表，query 搜索、workstream 精确定位、includeClosed=true 查历史；detail/sources/events/operations 按需展开分页。服务记录不是原生实时状态，投递受理不是 owner 承接或交付。
-- 每次逻辑变更用稳定 idempotencyKey；冲突或超时先读取，重试仅同 key/同输入。未知副作用不换 key/session 再派；通过 operations 查步骤，核实证据后才 `work_recover`，无法核实直接问用户，不猜 not_applied。服务内部防冲突不排除外部竞态，不打断用户聊天或强切忙会话模型。
+- 每次逻辑变更用稳定 idempotencyKey；caller/owner 并发共用版本检查，STALE_GOAL/STALE_RECORD 或超时先读取，重试仅同 key/同输入，不覆盖较新授权。未知副作用不换 key/session 再派；通过 operations 查步骤，核实证据后才 `work_recover`，无法核实直接问用户，不猜 not_applied。服务内部防冲突不排除外部竞态，不打断用户聊天或强切忙会话模型。
 
 ## 唯一账本与回复
 

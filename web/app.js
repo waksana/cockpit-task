@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 const basePath = document.querySelector('meta[name="task-base-path"]')?.content ?? '';
-const labels = { backlog: '未开工', legacy: '历史记录', recorded: '已授权，待投递', dispatched: '已投递，待承接', active: '进行中', blocked: '受阻', needs_decision: '需要用户决定', result_reported: '成果已报告，未交付', delivered: '已交付', failed: '未完成', cancelled: '已取消' };
+const labels = { backlog: '未开工', legacy: '历史记录', recorded: '已授权，待承接或投递', dispatched: '已投递，待承接', active: '进行中', blocked: '受阻', needs_decision: '需要用户决定', result_reported: '成果已报告，未交付', delivered: '已交付', failed: '未完成', cancelled: '已取消' };
 const observedLabels = { backlog: '未开工', working: '执行中（记录）', blocked: '受阻（记录）', decision: '待决定（记录）', deferred: '暂缓 / 待发布', done: '已结束（记录）', cancelled: '已取消（记录）', unknown: '历史状态待确认' };
 const groups = [
   ['正在做', 'working', '最近记录在前'], ['待办', 'backlog', '按登记顺序'],
