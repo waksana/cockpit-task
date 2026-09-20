@@ -1,5 +1,11 @@
 # Task Board implementation contract
 
+Queue workflow update: the packaged [Owner Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff)
+now guides explicit pending-message preservation, cleanup and a single summary
+followed by a Task updated reference. It supersedes the advancement-helper
+recommendation below. The existing host implementation is described for historical
+accuracy; this Skill-only change does not remove that tool or add event-card rendering.
+
 This document closes the technical choices left by the design drafts. The user
 has authorized continuous implementation and delivery of both Task and the
 required host changes; only material unresolved product decisions require a pause.

@@ -4,6 +4,12 @@
 
 讨论跟踪：[cockpit-task#1](https://github.com/waksana/cockpit-task/issues/1)
 
+**后续决定（2026-09-20，覆盖下文旧队列方案）：** 重要更新的队列处理写入
+[Owner Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff)，
+不再推荐自动推进 MCP。Owner 先读取并保留 pending 内容，再按已保存 ID 清理，
+随后总结，最后附 Task updated 引用一次发送；普通更新仍然静默。
+本次只调整 Skill 与文档，不代表已移除宿主旧 helper 或完成新的事件卡片渲染。
+
 本文保留用户对 Task 的产品讨论及最终决策，不是逐字段实现规格。
 当前模块使用说明见 [Task Board](task-board.md)，具体实现边界见
 [实现契约](task-implementation.md)。早期段落里的“尚未确定”描述当时讨论状态；
@@ -33,7 +39,7 @@
 
 **角色指令合并：** 本体按确定顺序、标明模块与角色来源汇总原始指令，使用 SDK systemMessage 的 append 模式追加到主 agent 的 system prompt，不覆盖基础指令、不用模型摘要改写；Skill 正文仍按原生机制加载。
 
-**队列推进最新决定：** 其他 session / subagent 消息保留。本体增加通用 MCP，逐轮中断并让原生接续，始终追到运行期间最新的队尾；后续队列耗尽时停止中断，保留最后轮次驱动 session 继续执行，不要求 idle。建议 Owner 先将 Task ID 入队一次再调用；新消息若在期间到达，也纳入推进，不保证最后一条仍是 Task ID。不是删除或复制重发消息，也不在操作完成后继续监视。此前“直到 idle 再发 Task ID”的方案被此决定替代，现用 `cockpit_advance_queue`。
+**队列推进历史决定（已被页首后续决定替代）：** 其他 session / subagent 消息保留。本体增加通用 MCP，逐轮中断并让原生接续，始终追到运行期间最新的队尾；后续队列耗尽时停止中断，保留最后轮次驱动 session 继续执行，不要求 idle。建议 Owner 先将 Task ID 入队一次再调用；新消息若在期间到达，也纳入推进，不保证最后一条仍是 Task ID。不是删除或复制重发消息，也不在操作完成后继续监视。此前“直到 idle 再发 Task ID”的方案被此决定替代，当时采用 `cockpit_advance_queue`。
 
 **强制对齐的触发条件：** 上述循环是例外处理：只有 Owner 真正判断这次更新非常重要、不能等待正常同步点时才明确发起。普通更新只改 Task；未 ACK、revision 变化或工具提醒不会自动触发中断。是否重要由 Owner 判断，不由 Task 模块规则、helper 或后台循环判断。
 

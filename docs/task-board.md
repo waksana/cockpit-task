@@ -68,12 +68,18 @@ Ordinary requirement changes only edit Task. Executor reads/ACKs at startup,
 checkpoints, before consequential actions, before delivery and after resuming.
 Progress, blockers and completion never produce messages to the Owner.
 
-For an exceptionally important update, Owner may explicitly enqueue the Task
-reference once and invoke the host's cockpit_advance_queue operation. It preserves
-messages, advances toward the dynamic newest queue tail and leaves the last turn
-running. It is not Task's own tool or an automatic response to revision changes.
-It has start/get/cancel and no business timeout. Cancellation stops further
-interruptions, not the target session, and cannot retract an issued interrupt.
+For an exceptionally important update, Owner follows the Skill's
+[exceptional update handoff](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff):
+read and preserve pending messages, clear the preserved items by ID, then
+summarize them and append `Task updated: [Task](task:<uuid>)` in one message.
+The recommendation covers all pending sources, not only Task messages. New
+arrivals, incomplete content and already-started work need explicit handling.
+If necessary, interrupt the main turn once; do not use Stop to blindly discard
+unread arrivals or silently cancel subagents. Confirm native readiness before
+handoff, and distinguish sending acceptance from current-revision ACK.
+This is Owner Skill guidance, not an automatic queue advancement mechanism.
+It replaces the earlier recommendation to use `cockpit_advance_queue`; this
+Skill change does not remove that previously implemented host tool.
 
 Missing capability rejects assignment; it does not install a role or repair an
 existing session. Uncertain creation or dispatch is never automatically replayed.
