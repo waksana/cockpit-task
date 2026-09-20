@@ -113,6 +113,47 @@ test('a confirmed not-sent assignment can resume explicitly without rebinding', 
   } finally { f.close(); }
 });
 
+test('failed-operation reads retain their Task and check its current definition after restart', async () => {
+  const f = fixture();
+  let replacement;
+  try {
+    const task = await f.create();
+    await f.write('task_assign', { task_id: task.id, executor: 'executor', revision: 1, write_context: task.write_context });
+    const bound = f.store.task(task.id);
+    const failed = await f.service.execute('task_report', {
+      request_id: 'report-before-ack', actor_session_id: 'executor', task_id: task.id,
+      revision: 1, write_context: bound.write_context, status: 'in_progress',
+    });
+    assert.equal(failed.error.code, 'ACK_REQUIRED');
+    assert.equal(failed.result, null);
+    const read = { view: 'operation', request_id: 'report-before-ack', actor_session_id: 'owner' };
+    const operation = await f.service.execute('task_read', read);
+    assert.equal(operation.error, null);
+    assert.equal(operation.result.task_id, task.id);
+    assert.equal(operation.result.result, null);
+    assert.equal(operation.result.error.code, 'ACK_REQUIRED');
+    assert.equal(operation.definition_check.status, 'checked');
+    assert.equal(operation.definition_check.tasks[0].task_id, task.id);
+    assert.equal(operation.definition_check.tasks[0].needs_ack, true);
+
+    await f.write('task_ack', { task_id: task.id, revision: 1, write_context: bound.write_context }, 'executor');
+    const acknowledged = await f.service.execute('task_read', read);
+    assert.equal(acknowledged.result.error.code, 'ACK_REQUIRED');
+    assert.equal(acknowledged.definition_check.tasks[0].needs_ack, false);
+    await f.write('task_edit', {
+      task_id: task.id, revision: 1, write_context: bound.write_context,
+      description: 'New complete requirements', reason: 'Scope clarified',
+    });
+    f.service.close();
+    replacement = new TaskService(new TaskStore(f.directory), {});
+    const restored = await replacement.execute('task_read', read);
+    assert.deepEqual(restored.result, operation.result);
+    assert.equal(restored.definition_check.tasks[0].revision, 2);
+    assert.equal(restored.definition_check.tasks[0].needs_ack, true);
+    assert.deepEqual(f.reports, []);
+  } finally { replacement?.close(); f.close(); }
+});
+
 test('business validation failures and unrelated reads still check the acting Executor Task', async () => {
   const f = fixture();
   try {
