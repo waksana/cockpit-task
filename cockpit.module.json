@@ -7,7 +7,7 @@
   "frontend": {
     "entry": "web/task-board/index.js",
     "styles": ["web/task-board/style.css"],
-    "assets": ["web/task-board/index.js", "web/task-board/style.css"]
+    "assets": ["web/task-board/index.js", "web/task-board/style.css", "src/task-board/reference.js"]
   },
   "roles": [
     {

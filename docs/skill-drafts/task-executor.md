@@ -29,7 +29,13 @@ of a second unfinished Task or turn this Task into a task tree.
 
 ## Start from the Task
 
-An assignment message carries only a Task reference. Use
+An assignment message carries exactly one
+`[Task assigned to you](task:<uuid>?event=assigned)` reference, sent by `task_assign`.
+Do not duplicate it. Owner's explicit important-update notice uses
+`[Task updated](task:<uuid>?event=updated)` and asks you to read/ACK the latest
+revision before continuing. These labels explain why the message was sent even
+without UI rendering; an ordinary `[Task](task:<uuid>)` and old messages still work.
+Pass just the UUID as `task_id`, not the full URI or query. Use
 `task_read(view=execution)` to read its complete current description and work
 references, and verify your assignment, status and revision. This is your default
 Task view. Read activity, changelog or outcomes separately only when needed;
@@ -63,6 +69,9 @@ Task is the source of requirements, not an Owner message queue. Do not request
 queued follow-up instructions. After an explicit interruption and Task-reference
 restart, reread the current Task and reconcile your work before continuing;
 do not resume solely from the previous turn's assumptions.
+An updated notice likewise requires a fresh read, reconciliation and latest-revision
+ACK before continuing. Any preserved-message summary is context, not a replacement
+Task definition. Notices are Owner's decision, never automatic after `task_edit`.
 
 Clarify genuine decisions directly with the user in your session. Record changes
 to the work agreement with `task_edit`, providing the complete new description
@@ -108,11 +117,18 @@ reactivate an ended Task. Do not take another unfinished Task concurrently.
 Stop rejected writes after cancellation or loss of valid execution state. Keep the original
 request ID on same-input retries and inspect exact saved/rejected effects.
 
-For user-facing Task display, use only the module's specified ID-reference
-syntax `[Task](task:<UUID>)`, using the actual returned Task ID. For example,
+For ordinary user-facing Task display, use the generic reference
+syntax `[Task](task:<uuid>)`, using the actual returned Task ID. For example,
 `[Task](task:de33dc0a-2f93-4c5a-b14e-87111940d520)` is a synthetic syntax example,
 not an assigned Task. Do not invent card markup or copy the mutable task definition
 into a dispatch message.
+
+Only lowercase `assigned` and `updated` are accepted event values. The event is
+immutable message/reference metadata, not a Task type, status, command or scheduler.
+The card reads current Task data and renders its reason from the explicit URL
+event, not the label or status. Generic references have no event header; unknown
+events or malformed queries stay unclaimed. This adds no tools or Task fields.
+Never use relative `task/<id>` paths, which can be treated as files.
 
 Follow applicable external coding or research skills for work methods. They are
 not bundled with Task; this role skill handles recording their relevant progress

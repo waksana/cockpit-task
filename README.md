@@ -4,6 +4,11 @@ Task Board 是 Cockpit 模块：用共同的持久化 Task 记录协作，通过
 角色组合 System Prompt、Skill 和 HTTP MCP。Task 引用直接在聊天中显示卡片，详情按需读取；
 不保存聊天、不自动监工或调度、不自动发送进度或完成通知。
 
+通用引用为 `[Task](task:<uuid>)`；首次指派由 `task_assign` 仅发送一次
+`[Task assigned to you](task:<uuid>?event=assigned)`。Owner 明确决定的重要更新
+使用 `[Task updated](task:<uuid>?event=updated)`，并要求读取、ACK 最新版本。
+event 只说明这条消息的原因，不是 Task 状态；卡片仍读取当前数据，普通编辑不发通知。
+
 一个 Executor 完整负责一个独立 Task，可在内部使用 subagents。要求直接修改 Task，
 Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的版本。没有子任务树、
 改派或续办；Coding / Research 的具体工作方法不属于 Task 模块。

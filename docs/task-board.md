@@ -67,8 +67,18 @@ relabel the work as current. done requires a new outcome in that report.
 ## Collaboration
 
 Create the Task, explicitly create or select an Executor, then assign. Dispatch
-contains only `[Task](task:<uuid>)`. Its card reads current data from the module;
-it does not snapshot the Task into chat. Details and history are loaded on demand.
+contains exactly one `[Task assigned to you](task:<uuid>?event=assigned)` reference,
+sent by `task_assign`; Owner must not duplicate that first dispatch. Its label
+explains why it was sent even without UI rendering. The card reads current data
+from the module, not a snapshot in chat. Details and history are loaded on demand.
+
+Use `[Task](task:<uuid>)` for an ordinary reference. Task IDs passed to tools are
+just the UUID, not the full URI or its query. Only lowercase `assigned` and
+`updated` are accepted event values. The event is immutable message/reference
+metadata, not a Task type, status, command or event bus. The renderer uses the
+explicit URL event, never the label or current Task status; generic and old
+references remain compatible without an event header. Unknown events or malformed
+queries are left unclaimed, not silently treated as generic Task references.
 
 Ordinary requirement changes only edit Task. Executor reads/ACKs at startup,
 checkpoints, before consequential actions, before delivery and after resuming.
@@ -77,13 +87,23 @@ Progress, blockers and completion never produce messages to the Owner.
 For an exceptionally important update, Owner follows the Skill's
 [exceptional update handoff](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff):
 read and preserve pending messages, clear the preserved items by ID, then
-summarize them and append `Task updated: [Task](task:<uuid>)` in one message.
+summarize them and append the following update notice in that same single message:
+
+```text
+[Task updated](task:<uuid>?event=updated)
+Read the current Task and acknowledge its latest revision before continuing.
+```
+
+This replaces the former text-prefix notice. Do not copy the Task description.
 The recommendation covers all pending sources, not only Task messages. New
 arrivals, incomplete content and already-started work need explicit handling.
 If necessary, interrupt the main turn once; do not use Stop to blindly discard
 unread arrivals or silently cancel subagents. Confirm native readiness before
 handoff, and distinguish sending acceptance from current-revision ACK.
 This is Owner Skill guidance, not an automatic queue advancement mechanism.
+`task_edit` never automatically sends this notice. Message events add no MCP tools,
+Task schema fields or host changes; capability checks and ordinary busy state are
+unchanged.
 It replaces the retired `cockpit_advance_queue` helper. The host retains single
 interrupt, per-item queue removal, native-state reads and sending; it does not
 maintain an advancement loop or its operation receipts.
@@ -92,6 +112,16 @@ Missing capability rejects assignment; it does not install a role or repair an
 existing session. Uncertain creation or dispatch is never automatically replayed.
 Task cancellation does not cancel native work, and editing a terminal definition
 does not reopen execution.
+
+### File reference compatibility
+
+The verified cockpit-file main commit `e58761b5831de2065aac09d4ae17efd829153b3c`
+and v0.1.7 reject non-file schemes through `isLocalFileReference` in both capture
+and rendering. `task:` references, including event queries, do not collide with
+File references. Do not use relative `task/<id>` paths: File treats relative paths
+as file candidates. The host already passes raw link target and label; no new
+host protocol is needed. This is source compatibility, not a claim that File was
+modified or deployed.
 
 ## Module API and packaging
 

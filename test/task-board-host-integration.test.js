@@ -52,7 +52,9 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
   const bridgeCalls = [];
   const nativeMessages = [];
   const nativeTaskReads = new Map();
+  const nativeTaskAcks = new Map();
   const nativeTaskReports = new Map();
+  const expectedDefinitions = new Map();
   const isolatedSessionIds = new Set();
   const reports = [];
   let invalidations = 0;
@@ -124,17 +126,20 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
           }).join('\n');
         };
         const latestUser = message.messages.findLast(item => item.role === 'user');
-        const taskReference = latestUser && /\[Task\]\(task:([0-9a-f-]{36})\)/u.exec(contentText(latestUser.content));
+        const taskReference = latestUser && /\[(Task assigned to you|Task updated)\]\(task:([0-9a-f-]{36})\?event=(assigned|updated)\)/u.exec(contentText(latestUser.content));
         let toolCall;
         if (taskReference) {
-          const taskId = taskReference[1];
+          const taskId = taskReference[2];
+          const event = taskReference[3];
+          assert.equal(taskReference[1], event === 'assigned' ? 'Task assigned to you' : 'Task updated');
+          const eventKey = `${event}:${taskId}`;
           const actor = /Native session ID: ([0-9a-f-]{36})/u.exec(JSON.stringify(message.messages));
           assert.ok(actor, 'Role System Prompt must supply the actual actor session ID');
           const call = (name, action, input) => {
             const tools = message.tools.filter(tool => tool.type === 'function' && tool.function.name.endsWith(name));
             assert.equal(tools.length, 1, `Executor must have exactly one native ${name} tool`);
             return {
-              id: `synthetic-${action}-${taskId}`, type: 'function',
+              id: `synthetic-${event}-${action}-${taskId}`, type: 'function',
               function: {
                 name: tools[0].function.name,
                 arguments: JSON.stringify({ task_id: taskId, actor_session_id: actor[1], ...input }),
@@ -142,7 +147,7 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
             };
           };
           const replyFor = action => message.messages.findLast(item =>
-            item.role === 'tool' && item.tool_call_id === `synthetic-${action}-${taskId}`);
+            item.role === 'tool' && item.tool_call_id === `synthetic-${event}-${action}-${taskId}`);
           const envelopeFor = reply => {
             const envelope = JSON.parse(contentText(reply.content));
             assert.equal(envelope.error, null, 'Native MCP business call must succeed');
@@ -155,22 +160,22 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
           } else {
             const execution = envelopeFor(readReply).result;
             assert.equal(execution.id, taskId);
-            assert.equal(execution.description, 'Synthetic complete requirements. No external work.',
+            assert.equal(execution.description, expectedDefinitions.get(taskId),
               'Native tool execution must return the stored definition, not only advertise a tool');
-            nativeTaskReads.set(taskId, execution);
+            nativeTaskReads.set(eventKey, execution);
             const input = { revision: execution.revision, write_context: execution.write_context };
             const ackReply = replyFor('ack');
             if (!ackReply) {
-              toolCall = call('task_ack', 'ack', { ...input, request_id: `native-ack-${taskId}` });
+              toolCall = call('task_ack', 'ack', { ...input, request_id: `native-ack-${event}-${taskId}` });
             } else {
-              envelopeFor(ackReply);
+              nativeTaskAcks.set(eventKey, envelopeFor(ackReply));
               const reportReply = replyFor('report');
-              if (!reportReply) {
+              if (event === 'assigned' && !reportReply) {
                 toolCall = call('task_report', 'report', {
                   ...input, request_id: `native-report-${taskId}`, status: 'in_progress',
                   activity: { text: 'Native Executor began the assigned Task.' },
                 });
-              } else {
+              } else if (reportReply) {
                 nativeTaskReports.set(taskId, envelopeFor(reportReply));
               }
             }
@@ -262,6 +267,10 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
     const apiBase = bootstrap.modules[0].apiBase;
     const headers = { 'X-Cockpit-Module-Digest': installed.digest };
     assert.equal((await app.inject(bootstrap.modules[0].entry)).statusCode, 200);
+    const sharedReferenceUrl = new URL('../../src/task-board/reference.js', `${origin}${bootstrap.modules[0].entry}`);
+    const sharedReference = await app.inject(sharedReferenceUrl.pathname);
+    assert.equal(sharedReference.statusCode, 200, 'The shared browser reference parser must be a declared packaged asset');
+    assert.ok(sharedReference.body.includes('export const TASK_EVENTS'));
     const readPayload = { view: 'list' };
     for (const digest of [undefined, '', '0'.repeat(64)]) {
       const rejected = await app.inject({
@@ -380,6 +389,7 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
       title: 'Synthetic packaged integration', description: 'Synthetic complete requirements. No external work.',
     });
     const taskId = created.result.task_id;
+    expectedDefinitions.set(taskId, 'Synthetic complete requirements. No external work.');
     const initial = (await tool('task_read', { view: 'execution', task_id: taskId })).result;
     const assignInput = {
       request_id: 'integration-task-assign', actor_session_id: ownerId, task_id: taskId,
@@ -400,10 +410,11 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
       for (const name of executorTools) assert.ok(offered.includes(name), `Missing Executor tool ${name}`);
       for (const name of ['task_create', 'task_session_create', 'task_assign']) assert.ok(!offered.includes(name), `Unexpected Executor tool ${name}`);
     }
-    const reference = `[Task](task:${taskId})`;
+    const reference = `[Task assigned to you](task:${taskId}?event=assigned)`;
     assert.deepEqual(nativeMessages.filter(message => message.sessionId === executorId), [{ sessionId: executorId, content: reference }]);
     assert.equal(nativeTaskReads.size, 1, 'The native Executor must execute the advertised Task MCP tool');
-    assert.ok(nativeTaskReads.has(taskId));
+    assert.ok(nativeTaskReads.has(`assigned:${taskId}`));
+    assert.ok(nativeTaskAcks.has(`assigned:${taskId}`));
     assert.equal(nativeTaskReports.size, 1, 'The native Executor must ACK and report through its actual MCP tools');
     assert.ok(nativeTaskReports.has(taskId));
     const nativeStarted = (await tool('task_read', { view: 'execution', task_id: taskId })).result;
@@ -470,6 +481,21 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
     assert.equal(native.json().available, true);
     assert.ok(invalidations >= 5);
 
+    stage = 'delivering an explicit updated notice without automatically sending on edit';
+    expectedDefinitions.set(taskId, description);
+    const notice = `Synthetic preserved pending context.\n\n[Task updated](task:${taskId}?event=updated)\nRead the current Task and acknowledge its latest revision before continuing.`;
+    await engine.prompt(executorId, notice, 'enqueue');
+    await waitFor(async () => nativeTaskAcks.has(`updated:${taskId}`) && await engine.busyCount() === 0,
+      'explicit updated notice and native fresh read/ACK');
+    assert.deepEqual(providerErrors, []);
+    assert.equal(nativeTaskReads.get(`updated:${taskId}`).revision, 2);
+    assert.equal(nativeTaskReads.get(`assigned:${taskId}`).revision, 1,
+      'A later definition cannot relabel the earlier assigned event');
+    assert.deepEqual(nativeMessages.filter(message => message.sessionId === executorId), [
+      { sessionId: executorId, content: reference }, { sessionId: executorId, content: notice },
+    ]);
+    const afterNoticeModels = requests.length;
+
     stage = 'checking actual role cold resume and unloaded native observation';
     await engine.unload(executorId);
     assert.equal((await engine.roleReadiness(executorId, [executor])).loaded, false);
@@ -479,7 +505,7 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
     assert.equal((await engine.roleReadiness(executorId, [executor])).loaded, false, 'Observation cannot load the Executor');
     await engine.load(executorId);
     assert.equal((await engine.roleReadiness(executorId, [executor])).ready, true);
-    assert.equal(requests.length, modelCount, 'Cold resume must not send a startup prompt');
+    assert.equal(requests.length, afterNoticeModels, 'Cold resume must not send a startup prompt');
 
     stage = 'cold-restarting the packaged module and reading persisted state';
     await mcp.close();
@@ -500,7 +526,7 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
     assert.equal(persistedActivity.json().result.items[0].text, latest.activity.text);
     assert.ok(reports.every(({ error }) => error.code === 'MODULE_VERSION_MISMATCH'), reports.map(({ error }) => String(error)).join('\n'));
     assert.deepEqual(providerErrors, []);
-    t.diagnostic('Verified real artifact install/activation, digest guards, official HTTP MCP, native Owner/Executor/union roles, once-only dispatch, actual native Task read/ACK/report tool execution, no edit messages, cold resume and persistent module restart.');
+    t.diagnostic('Verified real artifact install/activation, shared browser parser asset, digest guards, official HTTP MCP, native roles, assigned and explicit updated notices, actual native Task read/ACK/report, no automatic edit messages, cold resume and persistence.');
   } catch (error) {
     failed = true;
     t.diagnostic(`Integration failed while ${stage}.`);

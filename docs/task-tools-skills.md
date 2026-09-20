@@ -20,11 +20,21 @@
 工具取并集、相同资源去重，两份角色 Skill 按委派和执行行为配合。
 这不是运行中追加角色，也不放宽单 session 同时最多承接一项未结束 Task。
 
-**其他来源队列的处理（最新决定）：** 不要求 Executor 永远没有 queue。重要更新需要接管时，建议 Owner 先读取并保留所有可获取的 pending 内容，再按已保存的消息 ID 清理队列；包含其他 session / subagent 的消息。随后总结这些内容，保留来源、未解决请求和资料，最后附上 `Task updated: [Task](task:<UUID>)`，合成一条消息发送。未能读取或保留的内容不能盲删；展示文本不是附件的无损备份。清理中新增或已开始执行的消息由 Owner 另行判断，不能假装快照锁定了队列。
+**其他来源队列的处理（最新决定）：** 不要求 Executor 永远没有 queue。重要更新需要接管时，建议 Owner 先读取并保留所有可获取的 pending 内容，再按已保存的消息 ID 清理队列；包含其他 session / subagent 的消息。随后总结这些内容，保留来源、未解决请求和资料，最后附上 `[Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新 revision 的要求，合成一条消息发送，替代旧的文本前缀模板。未能读取或保留的内容不能盲删；展示文本不是附件的无损备份。清理中新增或已开始执行的消息由 Owner 另行判断，不能假装快照锁定了队列。
 
 必要时使用保留队列的单次主轮次中断，不用 Stop 作为清理捷径，不自动反复中断或取消 subagent。发送前核对实际原生状态、Task 仍未结束且 Executor 未变；已停止的回执或 idle 标签不等于可以立即接续。发送和清理不是原子操作，排队或未知回执不能盲重发，实际对齐以当前 revision 的 ACK 为准。完整流程和消息模板见[正式 Owner Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff)。
 
 上述强制对齐仅在 Owner 判断更新非常重要、不能等待正常同步时明确触发。普通修订仍只更新 Task；不能因未 ACK 提醒、revision 变化或每次 task_edit 而自动运行中断循环。工具只执行明确操作，不替 Owner 判定重要性。
+
+**消息事件：** 通用 `[Task](task:<uuid>)` 保持不变；`task_assign` 的完整首次消息
+仅为一次 `[Task assigned to you](task:<uuid>?event=assigned)`，Owner 不重复发送。
+两种事件标签都无需 UI 渲染即可说明消息原因。仅接受小写 `assigned` / `updated`；
+Task 工具的 ID 仍为纯 UUID，不带 URI 或 query。event 是该条消息固定的引用元数据，
+不是 Task 类型/状态、命令、事件总线或调度器，不新增工具或 Task 字段。
+卡片按 URL 显式 event 展示原因，不从标签或当前状态推断；Task 数据仍重新读取当前记录，
+通用及历史引用无事件标题。未知 event 或畸形 query 不认领，不退化为通用 Task。
+不使用可能被 File 捕获的相对 `task/<id>` 路径；既有宿主 raw target/label 接口已足够，
+无需宿主改动，能力检查与普通忙碌状态保持原契约。
 
 ## 1. 不得改变的模型
 
@@ -48,7 +58,7 @@ Owner 修改定义不自动添加 Executor activity；Executor 报告进度不�
 | 读取 | Owner / Executor | Task ID 或有界筛选；按角色默认视图或显式读取类型 | Owner 看概览，Executor 看完整执行定义；历史、成果与操作结果按需读取，不隐式 ack，不加载聊天或唤醒 session |
 | 登记 | Owner | title、description、可选资料 | 创建未分配的 todo；不创建 session 或发送消息 |
 | 创建执行 session | Owner | 工作目录、所选工作技能等创建选项 | Task MCP 通过宿主创建并配置执行能力；不登记、关联 Task 或发消息 |
-| 明确指派 | Owner | Task ID、Owner 已创建或选定的 Executor session ID | 确保目标具备执行能力，更新 Task 的执行归属，再发送只含 Task ID 的引用；不新建或自动选择 session，不代表已承接 |
+| 明确指派 | Owner | Task ID、Owner 已创建或选定的 Executor session ID | 确保目标具备执行能力，更新 Task 的执行归属，再发送一次 assigned 引用；不新建或自动选择 session，不代表已承接 |
 | 修订定义 | Owner / 当前 Executor | Task ID、所读 revision、完整新 description、原因 | 原子更新 description、revision 和 changelog；Executor 本人成功修订同时 ack |
 | 确认定义 | 当前 Executor | Task ID、已读 revision | 只更新 acknowledged_revision；首次和后续 ACK 都不改变 status，不生成 activity |
 | 报告执行 | 当前 Executor | Task ID、所依据 revision、活动内容、必要的状态或成果 | 追加执行 activity；完成时保存 outcome 并进入 done；不改定义或发消息 |
@@ -62,7 +72,7 @@ Owner 修改定义不自动添加 Executor activity；Executor 报告进度不�
 
 1. 确保 Owner 提供的目标 session 具备执行能力。
 2. 更新 Task，将该 session 设为 Executor。
-3. 以非排队方式发送只含 Task ID 的约定引用；忙碌或不能安全启动则明确失败，不放入 queue。
+3. 以非排队方式发送一次 `[Task assigned to you](task:<uuid>?event=assigned)`；忙碌或不能安全启动则明确失败，不放入 queue。
 
 **ACK 与执行状态分开：** 用户明确两者是不同操作，不合并。Executor ACK 只记录对某版 description 的确认；即使首次 ACK，也不能自动把 todo 改为 in_progress。`task_report` 显式接受 activity、status、outcome 的任意非空组合；done 必须同次提交新 outcome，不隐式 ACK。
 
@@ -227,13 +237,13 @@ Executor 接到提醒后的行为：
 
 ## 4. Role skills
 
-以下为两份已实现角色技能的协作摘要。Owner 注入 read/create/session_create/assign/edit/cancel；Executor 注入 read/edit/ack/report/cancel（工具均带 `task_` 前缀），多角色取并集。Task 引用为 `[Task](task:<UUID>)`，不能把 `<UUID>` 占位符作为实际 ID。角色资源具备可打包实现，不表示已安装进任何生产 session。
+以下为两份已实现角色技能的协作摘要。Owner 注入 read/create/session_create/assign/edit/cancel；Executor 注入 read/edit/ack/report/cancel（工具均带 `task_` 前缀），多角色取并集。通用 Task 引用为 `[Task](task:<uuid>)`，派单/重要更新使用上文的 assigned/updated 引用，不能把 `<uuid>` 占位符作为实际 ID。角色资源具备可打包实现，不表示已安装进任何生产 session。
 
 ### Task Owner
 
 1. 与用户澄清工作，将完整当前要求写入 Task 的 description；资料和成果通过 Task 中的引用关联。
 2. 可先登记，再明确派单。每项独立工作由一个 Executor 完整负责，不创建父子 Task。
-3. 新建执行 session 时调用 Task MCP 的创建入口，由它创建并配置执行能力；也可明确选择已有 session。登记 Task 与创建 session 相互独立，两者就绪后调用指派工具，由工具确认当前能力、更新归属并发送 Task ID，不再手工重复发送。消息不附带任务说明或凭据。
+3. 新建执行 session 时调用 Task MCP 的创建入口，由它创建并配置执行能力；也可明确选择已有 session。登记 Task 与创建 session 相互独立，两者就绪后调用指派工具，由工具确认当前能力、更新归属并发送一次 assigned 引用，不再手工重复发送。消息不附带任务说明或凭据。
 4. 主动按需读取自己的 Task，以状态、执行者、最新活动、确认差异和成果可用性为概览；需要修订时再读取完整定义，需要细节时再读取对应历史或成果。不要求 Executor 反向汇报，不自动轮询。
 5. 普通修订只提交完整新 description 和原因。Owner 判断更新非常重要、不能等待时，才按 Skill 保存并清理 pending 内容，归并摘要，最后附 Task updated 引用一次发送。需要中断时只做单次主轮次中断，原生阻塞及新消息由 Owner 明确处理，不自动推进。
 6. 信任 Executor 完整交付；不添加统一的 Owner 验收门槛。取消必须明确，不能把记录变更当作 session 已停止；不续办或改派。

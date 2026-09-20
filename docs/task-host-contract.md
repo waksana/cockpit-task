@@ -70,7 +70,8 @@ Owner 调用 task_session_create
 
 能力就绪至少区分：创建是否成功、角色指导是否按选定资源装配、
 skill 是否可用、工具是否真实可调用。不把“目录可发现”当成 skill 正文已进入上下文，
-也不能用额外启动 prompt 弥补角色装配，否则破坏首次消息只含 Task ID 的要求。
+也不能用额外启动 prompt 弥补角色装配；首次消息仅为 assigned Task 引用，
+不复制说明或角色 System Prompt，也不另发第二条启动消息。
 角色 System Prompt 与 skill 的加载配合要在隔离场景证明，不把自然语言遵从性说成程序保证。
 
 用户已确认：**同一模块也可以同时选择多个角色**，不同模块同样可组合。
@@ -519,9 +520,24 @@ helper 不能写成忙循环：需观察原生状态/轮次变化，区分尚未
 
 ### Task 卡片
 
-现有 Markdown renderer 接收已解析的单个 link / image，保留原始 target 和消息来源。
-可采用只含 Task ID 的约定链接，Task 模块据此请求自己的后端并渲染。
-当前语法为 `[Task](task:<uuid>)`，两份正式 Skill 已使用此格式。
+现有 Markdown renderer 接收已解析的单个 link / image，保留原始 target、label
+和消息来源。Task 模块据此请求自己的后端并渲染，不需要新宿主协议。
+通用引用仍为 `[Task](task:<uuid>)`；首次指派为
+`[Task assigned to you](task:<uuid>?event=assigned)`，Owner 显式重要更新为
+`[Task updated](task:<uuid>?event=updated)`。两份正式 Skill 与此对齐。
+
+event 仅接受小写 assigned / updated，是消息/引用的固定原因，不是 Task
+类型、状态、命令或事件总线。标签无需 UI 也能向模型解释原因，但 renderer 必须
+读取 URL 显式 event，不从 label 或当前 Task status 推断。Task ID 仍仅为 UUID。
+通用及历史引用没有事件标题，保持兼容；未知事件或畸形 query 不认领，
+不能静默降级成通用 Task。该模块本地扩展不改变能力检查、普通 busy 状态或队列行为，
+不恢复自动推进 helper，不增加 MCP 工具或 Task schema 字段。
+
+File 兼容性已按 cockpit-file main
+`e58761b5831de2065aac09d4ae17efd829153b3c` 和 v0.1.7 核实：
+capture 与 renderer 都经 `isLocalFileReference` 拒绝非文件 scheme，
+因此 `task:` 包括 event query 不会冲突。不使用相对 `task/<id>` 路径，
+它会成为文件候选。这里只确认源码兼容性，不声明已修改或部署 File 模块。
 
 现有 renderer 要求合法的 inline phrasing 内容；可做紧凑引用卡片，
 详细内容可通过 portal 打开。不能在段落里硬塞非法 block DOM，
@@ -530,6 +546,8 @@ helper 不能写成忙循环：需观察原生状态/轮次变化，区分尚未
 
 Task 记录变化可用现有模块事件提示可见卡片重新读取。事件不是持久回放；
 重连需要重新读当前 Task。卡片展示读取时的当前记录，不冒充历史消息快照。
+这类缓存失效事件与 URL 的消息原因是两回事：刷新数据不会把 assigned 改成
+updated，也不会让普通引用获得事件标题；`task_edit` 不自动发通知。
 
 ### 原生活动与任务报告
 

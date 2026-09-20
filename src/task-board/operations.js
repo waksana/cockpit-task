@@ -124,7 +124,7 @@ export async function assignExecutor({ input, inspect, bind, recheck, send, save
   save({ result: { operation: { ...operation } }, error: null });
   let result;
   try {
-    result = await send(input.executor, taskReference(input.task_id));
+    result = await send(input.executor, taskReference(input.task_id, 'assigned'));
   } catch (error) {
     return finish('unconfirmed', errorDetail(error, 'OPERATION_UNCONFIRMED'));
   }

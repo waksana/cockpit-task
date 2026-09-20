@@ -95,7 +95,7 @@ test('module HTTP and host bridge preserve registration, creation, assignment an
     const assigned = await f.write('task_assign', { task_id: id, revision: 1, executor: 'executor', write_context: execution.write_context });
     assert.equal(assigned.body.result.operation.message, 'accepted');
     assert.deepEqual(f.calls.filter(call => call.name === 'prompt'), [{
-      name: 'prompt', body: { sessionId: 'executor', text: `[Task](task:${id})`, mode: 'enqueue' },
+      name: 'prompt', body: { sessionId: 'executor', text: `[Task assigned to you](task:${id}?event=assigned)`, mode: 'enqueue' },
     }]);
     f.meta = { ...f.meta, loaded: false, status: 'unloaded' };
     const before = f.calls.length;

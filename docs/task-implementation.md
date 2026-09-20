@@ -4,7 +4,8 @@ The packaged [Owner Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-
 guides explicit pending-message preservation, cleanup and a single summary
 followed by a Task updated reference. The host advancement helper is retired;
 capability checks remain explicit and on demand. This simplification does not
-add readiness badges or event-card rendering.
+add readiness badges. The subsequent Task message-event extension below is
+module-local and needs no further host changes.
 
 This document closes the technical choices left by the design drafts. The user
 has authorized continuous implementation and delivery of both Task and the
@@ -81,7 +82,8 @@ through task_read(view=operation). Definition checks are not stored in receipts.
 
 task_assign first validates an unassigned todo and existing Executor capability
 and current native readiness, binds the Task transactionally, then checks the
-Task/version and native state again before sending one ID reference to start
+Task/version and native state again before sending exactly one
+`[Task assigned to you](task:<uuid>?event=assigned)` reference to start
 execution while idle. The adapter calls host `prompt` with `mode:"enqueue"`:
 after the idle/empty-queue checks this starts normally without interrupting a turn.
 It deliberately does not use native `immediate`, which could interrupt work that
@@ -102,9 +104,38 @@ explicit, not performed by Task assignment.
 
 ## Read boundaries and reference
 
-The module uses the standard Markdown link `[Task](task:<id>)`. Task IDs are UUIDs.
-This is also the entire dispatch message: no duplicated title or description.
-Only this scheme and valid ID are claimed by the Markdown renderer.
+The generic Markdown link remains `[Task](task:<uuid>)`. Task IDs are bare UUIDs;
+the scheme and query are not part of `task_id`. Message reasons use these forms:
+
+| Purpose | Reference |
+| --- | --- |
+| Ordinary reference, including old messages | `[Task](task:<uuid>)` |
+| Entire automatic first dispatch from `task_assign` | `[Task assigned to you](task:<uuid>?event=assigned)` |
+| Owner's explicit important-update notice | `[Task updated](task:<uuid>?event=updated)` |
+
+Only lowercase `assigned` and `updated` are accepted event values. Claim only
+valid Task-scheme UUID references and the supported query forms. Unknown events
+and malformed queries stay unclaimed; never strip a bad query and reinterpret it
+as a generic Task reference. Labels explain the message to the model without UI,
+but rendering must use the explicit URL event, not infer it from label or status.
+Generic references have no event header. Historical generic messages remain valid.
+
+The event reason belongs immutably to that message/reference while card data is
+read fresh. It is not a Task entity type/status, a command, or an event bus or
+scheduler. No Task schema fields or MCP tools are added. `task_assign` owns its
+single first dispatch; Owner must not send a duplicate. `task_edit` never sends
+an automatic notification. Only Owner decides whether an important update needs
+the Skill's explicit handoff: one preserved-context summary followed by the
+updated reference and an instruction to read/ACK the latest revision. Neither
+message copies the description; the updated notice replaces the old text prefix.
+
+The existing host renderer passes raw target and label, so no host protocol
+change is required. Verified cockpit-file main
+`e58761b5831de2065aac09d4ae17efd829153b3c` and v0.1.7 use
+`isLocalFileReference` to reject non-file schemes in both capture and rendering.
+`task:` with an event query does not collide. Never substitute relative
+`task/<id>` paths, which can be treated as files. This verification does not claim
+that File has been modified or deployed.
 
 Read views follow task-mcp-contract.md. Default list page is 20, maximum 50;
 histories use opaque keyset cursors tied to view/filter/Task. List defaults to
@@ -143,7 +174,7 @@ revision/ACK. An accessible detail dialog loads current definition and independe
 paged histories on demand. The card reads current data, not the historical state
 when the reference was sent. Host events invalidate visible reads; reconnect refetches.
 Native session state, if available through the public API, is labelled separately.
-No chat scanning, fabricated live progress, independent dashboard or notifications.
+No chat scanning, fabricated live progress, independent dashboard or automatic notifications.
 
 ## Packaging and integration
 
