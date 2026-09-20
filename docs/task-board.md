@@ -7,15 +7,21 @@ operator action; building or merging this repository does not install or activat
 
 The companion host change is [waksana/cockpit#68](https://github.com/waksana/cockpit/pull/68),
 merged at [`3eddcf1abe671d0e3b54bda5a951cc6b0d1ed5a6`](https://github.com/waksana/cockpit/commit/3eddcf1abe671d0e3b54bda5a951cc6b0d1ed5a6).
-Use a host build containing that change. The existing 0.2.6 release label alone
-does not establish compatibility with these additive capabilities.
+The follow-up simplification is [waksana/cockpit#69](https://github.com/waksana/cockpit/pull/69):
+capability checks are on demand, without automatic queue advancement or projected
+readiness. Use a host build containing both changes. The existing 0.2.6 release
+label alone does not establish compatibility with these capabilities.
 
 ## Roles and records
 
 Choose Task Owner, Task Executor, or both when creating a Cockpit session. The host
-assembles the selected role instructions, Skills and HTTP MCP configuration.
+assembles the selected role System Prompts, Skills and HTTP MCP configuration.
 Role selections are shown in the session list and retained for cold resume.
 Role labels describe configuration, not proof that a disconnected MCP is ready.
+Capability readiness is checked explicitly on demand, including during Executor
+creation and assignment. It is not projected into session lists, snapshots or
+ordinary details, and there are no readiness badges or background checks.
+Native busy state, pending messages and subagents are checked separately.
 
 Owner clarifies, creates and assigns independent Tasks, then reads their progress.
 One Executor delivers the entire Task, using internal subagents if needed. An
@@ -78,8 +84,9 @@ If necessary, interrupt the main turn once; do not use Stop to blindly discard
 unread arrivals or silently cancel subagents. Confirm native readiness before
 handoff, and distinguish sending acceptance from current-revision ACK.
 This is Owner Skill guidance, not an automatic queue advancement mechanism.
-It replaces the earlier recommendation to use `cockpit_advance_queue`; this
-Skill change does not remove that previously implemented host tool.
+It replaces the retired `cockpit_advance_queue` helper. The host retains single
+interrupt, per-item queue removal, native-state reads and sending; it does not
+maintain an advancement loop or its operation receipts.
 
 Missing capability rejects assignment; it does not install a role or repair an
 existing session. Uncertain creation or dispatch is never automatically replayed.

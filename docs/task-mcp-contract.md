@@ -40,7 +40,7 @@ Executor 默认工具集合不包含创建 Task 或为自己追加 Owner。本�
 - 首次指派同样使用非排队启动。目标忙碌或不能安全接收时明确返回未发送，指派工具不擅自中断。
 - 不通过后台巡查、定时发送或 Task 自建消息队列触发该行为，不宣称是原子排他保证。
 
-这是 Owner Skill 的例外流程，不是新的 Task 工具或自动队列机制。完整边界与模板见[正式 Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff)。先前已实现的 `cockpit_advance_queue` 不再用于该流程；宿主实现历史保留在[宿主契约](task-host-contract.md)。本次 Skill 变更不等于已移除宿主工具。
+这是 Owner Skill 的例外流程，不是新的 Task 工具或自动队列机制。完整边界与模板见[正式 Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff)。先前的 `cockpit_advance_queue` 已退出当前宿主契约；实现历史保留在[宿主契约](task-host-contract.md)。保留既有单次中断、按 ID 删除 pending、原生状态读取和消息发送。
 
 只有 Owner 判断“本次更新非常重要，不能等待正常同步”后才介入。task_edit、definition_check 和 ACK 差异都不自动触发队列清理、中断或消息发送。
 
@@ -115,6 +115,8 @@ UI 可以不提供 actor，不伪造 human session ID；定向读取仍检查该
 这是已实现的独立入口。Owner 决定新建以及所需工作环境；Task MCP 通过宿主公开能力创建真实 Executor session、装配 Task Executor 所需指导和工具，并确认能力就绪。不能要求 Owner 自己拼装 MCP、skills 和系统指令，或用自报“能力已就绪”代替程序确认。
 
 完整输入：`actor_session_id, request_id, cwd`。不接受 `work_skills`、任意角色或宿主配置透传。Task 只负责自身 Executor 协作能力；Coding / Research 的内容、安装和维护不属于本模块。模块调用 `context.host.call("session/new",{cwd,roles:[{moduleId:"task-board",roleId:"executor"}]})`，再用 `roles/readiness` 与 `session/get` 检查能力及原生状态。
+
+`roles/readiness` 仅在明确请求时读取当下的 Skill、MCP 和工具能力；常规 session 列表、快照、详情不附带该结果，也不持续维护就绪状态或展示 badge。`session/get` 的运行、pending、subagent 等信息是另一类检查，不能把能力可用当作当前可立即接单。
 
 正常在 `result.operation` 返回真实 `session_id` 与明确的创建、能力准备结果。创建成功但能力未就绪时保留真实 session ID 和失败步骤，不宣称可派单；创建结果未知时也不自动再建一个。原操作结果可通过 `task_read(view=operation)` 查询，pending 重放返回 `OPERATION_UNCONFIRMED`，不再次调用宿主。
 

@@ -249,6 +249,11 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
     isolatedSessionIds.add(unionId);
     assert.equal((await engine.roleReadiness(ownerId, [owner])).ready, true);
     assert.equal((await engine.roleReadiness(unionId, [owner, executor])).ready, true);
+    const ownerMeta = await engine.getMeta(ownerId);
+    assert.ok(ownerMeta);
+    assert.deepEqual(ownerMeta.roles.map(role => role.roleId), ['owner']);
+    assert.equal(Object.hasOwn(ownerMeta, 'roleReadiness'), false,
+      'Ordinary session metadata must not project capability readiness');
     assert.equal(requests.length, 0, 'Role creation must not send a startup prompt');
 
     const verifyAssembly = async (sessionId, selected, expectedTools, expectedSkills) => {

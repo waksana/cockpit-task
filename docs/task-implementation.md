@@ -1,10 +1,10 @@
 # Task Board implementation contract
 
-Queue workflow update: the packaged [Owner Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff)
-now guides explicit pending-message preservation, cleanup and a single summary
-followed by a Task updated reference. It supersedes the advancement-helper
-recommendation below. The existing host implementation is described for historical
-accuracy; this Skill-only change does not remove that tool or add event-card rendering.
+The packaged [Owner Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff)
+guides explicit pending-message preservation, cleanup and a single summary
+followed by a Task updated reference. The host advancement helper is retired;
+capability checks remain explicit and on demand. This simplification does not
+add readiness badges or event-card rendering.
 
 This document closes the technical choices left by the design drafts. The user
 has authorized continuous implementation and delivery of both Task and the
@@ -148,7 +148,7 @@ No chat scanning, fabricated live progress, independent dashboard or notificatio
 ## Packaging and integration
 
 Task ships its own HTTP MCP implementation, backend entry, frontend assets,
-role instructions and two packaged SKILL.md resources. Runtime dependencies must
+role System Prompts and two packaged SKILL.md resources. Runtime dependencies must
 be included in the module artifact; installation never runs dependency resolution.
 Use the existing Node test runner and package manager, without adding test frameworks.
 
@@ -158,8 +158,10 @@ contracts (camelCase is the host API, unlike Task tool snake_case):
 - `session/new({cwd,roles:[{moduleId:"task-board",roleId:"executor"}]})`
   returns `{sessionId}`.
 - `session/get({sessionId})` returns `{meta}`; unknown sessions have `meta:null`.
+  Selected roles remain metadata, but capability readiness is not projected here.
 - `roles/readiness({sessionId,roles?})` returns
-  `{sessionId,loaded,ready,roles,reasons}`.
+  `{sessionId,loaded,ready,roles,reasons}` for this explicit check. It never loads
+  an unloaded session and is not a persistent status or proof of execution.
 - `prompt({sessionId,text,mode:"enqueue"})` returns `{ok,queued?}`.
 
 Role injection is exactly Owner `task_read/task_create/task_session_create/
@@ -167,12 +169,15 @@ task_assign/task_edit/task_cancel` and Executor `task_read/task_edit/task_ack/
 task_report/task_cancel`. Combined roles take the union. Coding/Research work
 skills are not part of this module or the `task_session_create` input.
 
-The implemented host MCP `cockpit_advance_queue` accepts
-`{action:"start"|"get"|"cancel",session_id,operation_id?}`. It preserves the native
-queue while advancing to its dynamically latest tail; it is not a ninth Task
-business tool. Use it only after an explicit important-update decision, not as
-an edit side effect. Ordinary prompt enqueue and queue advancement are separate
-explicit operations, not a new Task queue.
+The adapter calls `roles/readiness` explicitly during creation and before
+assignment, then separately checks current native processing, pending messages,
+decisions and background work through `session/get`. Ordinary native observations
+call only `session/get`; neither observation nor Task reads collect capability
+state. There is no readiness projection/cache in the ordinary session lifecycle.
+
+The host does not provide `session/advance-queue` or `cockpit_advance_queue`.
+Existing single interrupt, pending-item removal and prompt operations remain
+independent public operations; no automatic advancement or new Task queue is added.
 
 The host contract is implemented separately in the isolated host worktree. The
 module explicitly rejects a host lacking required role/session capabilities.
