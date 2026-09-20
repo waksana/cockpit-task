@@ -7,7 +7,7 @@ description: "Clarify, register, assign and follow independent Tasks as their Ow
 
 Design-origin companion aligned with the implemented role. The packaged runtime
 resource is `skills/task-owner/task-owner/SKILL.md`; this historical directory is not an
-installation claim. Review/PR/merge delivery remains pending.
+installation claim.
 Tool contracts: [Task MCP](../task-mcp-contract.md).
 
 Owner tools are exactly `task_read`, `task_create`, `task_session_create`,
@@ -102,49 +102,27 @@ Your edit does not ACK on the Executor's behalf or send a prompt.
 Ordinary changes only update Task; do not enqueue follow-up requirements or
 routine reminders. Do not build a separate deferred message channel.
 
-The interruption loop below is exceptional: use it only when you judge a Task
-update important enough that waiting for the Executor's normal synchronization
-point is unacceptable. Ordinary edits only update Task. A pending ACK or revision
-change alone is not a reason to run the loop. Do not automatically invoke it after
-each edit or install a watcher; the helper requires the same explicit decision.
+For an exceptionally important update, the Owner handles pending messages using
+the packaged Skill's [exceptional update handoff](../../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff).
+This supersedes the earlier `cockpit_advance_queue` workflow; there is no automatic
+advancement loop, watcher or notification after ordinary edits.
 
-When considering this intervention, inspect authorized native status and recent activity.
-Distinguish native facts from reported Task activity; unknown stays unknown.
-Decide explicitly whether to interrupt and realign. A saved edit cannot stop an
-external operation already in progress. The latest agreed workflow is:
+Save the updated Task first. Read and preserve all exposed pending content before
+clearing it by saved message ID, including messages from other sessions or
+subagents. Do not confuse display text with a lossless copy of attachments.
+Re-read after cleanup; concurrent arrivals and already-started messages require
+explicit handling, not blind deletion or replay. If needed, interrupt the main
+turn once with the preserving operation, not Stop as a queue-cleanup shortcut.
+Do not silently cancel background work or equate an idle label with readiness.
 
-1. Save the complete updated requirements in Task.
-2. Explicitly send only the Task reference once to the native queue using
-   `cockpit_send_prompt(mode="enqueue")`. This is an exceptional realignment
-   step, not the default behavior after an edit.
-3. Start `cockpit_advance_queue({action:"start",session_id})` and retain
-   the returned operation ID. Use the same tool with `action:"get"` or
-   `action:"cancel"`, session_id and operation_id for querying/cancellation;
-   a start receipt is not completion. It preserves
-   messages, interrupts preceding main turns, and lets native processing advance
-   until there are no subsequent queued messages at its completion checkpoint.
-4. Read the operation's actual result as needed; do not use rapid polling.
-   If the start response is lost, query the target's current/recent operation
-   before deciding what to do. Do not automatically start another operation.
-5. Leave the final resumed turn running. Success does not require idle or
-   completion of the message's requested work. Do not send Task ID again.
-
-The helper follows the dynamically latest queue tail, including messages arriving
-during the operation. Task ID is not pinned as its stopping target and may no
-longer be the final driving message. It stops observing after returning.
-
-The implemented host tool is `cockpit_advance_queue`, with `start`, `get` and
-`cancel` actions and input `{action,session_id,operation_id?}`. It is not `queue.clear`
-or `cockpit_cancel_turn`. Never remove, copy or resend queued messages.
-Unknown outcomes require inspection, not automatic retries. A timeout must not
-be described as "Task ID was not sent": the reference may already have been
-queued or processed. The advance operation has no business timeout: continuous
-arrivals can keep it running until explicitly cancelled. Cancelling advancement
-stops further interrupts, not the target session or its queue; an interrupt already
-issued may still settle. Transport failures are not proof of cancellation.
-Do not silently cancel background work to force completion.
-Preserving messages does not promise their work is completed; intermediate turns
-may themselves be interrupted. This is not an atomic exclusion guarantee.
+Summarize the preserved messages with their sources, unresolved requests and
+useful references. Confirm Task is still active and assigned to the Executor,
+then send one message containing that summary followed by
+`Task updated: [Task](task:<UUID>)` and a request to read/ACK the latest revision.
+The summary is context, not a competing requirements document. Do not resend the
+individual messages or repeat the Task reference in a second message. Unknown or
+queued sending outcomes need inspection, not retries. Cleanup and sending are not
+atomic; recorded current-revision ACK, not acceptance, confirms alignment.
 
 Use `task_cancel` only for explicit cancellation. Cancellation is not proof of
 native session cancellation. Do not reopen ended Tasks or replace their Executor.

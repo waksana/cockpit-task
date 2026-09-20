@@ -30,21 +30,19 @@ Executor 默认工具集合不包含创建 Task 或为自己追加 Owner。本�
 `task_session_create` 仍只创建 Executor，不隐式选中两种角色；创建时多选不等于运行中追加角色，
 也不改变单 session 最多一项未结束执行 Task 的规则。
 
-### 普通更新不发消息，重要更新可明确推进队列
+### 普通更新不发消息，重要更新由 Owner 处理队列
 
 用户明确：普通要求更新只写 Task，不发送追加指令、提醒或待执行 cue。Owner 真正判断本次更新非常重要、不能等待正常同步时，可明确触发强制对齐。
 
-- 最新方案允许 Owner 先把 Task ID 引用加入原生队尾一次，再调用本体的通用队列推进 MCP。
-- 工具保留已有消息并逐轮中断、由原生接续；用户选择始终追到运行期间的最新队尾，不固定最初目标。
-- 后续队列耗尽时停止中断，保留最后接续的轮次继续执行；不以 session idle 为成功条件，不保证最后一条仍是 Task ID。
+- Owner 按 Skill 先读取并保留 pending 内容，再按已保存的消息 ID 清理，包括其他 session / subagent 的消息；不能盲删未知内容或并发新消息。
+- 随后总结保留的上下文，最后附上 Task updated 引用，合为一条消息发送；不复制完整 description。
+- 必要时单次中断主轮次，不循环推进或静默取消后台工作；发送前查看真实原生状态，接受回执不等于已读取或 ACK。
 - 首次指派同样使用非排队启动。目标忙碌或不能安全接收时明确返回未发送，指派工具不擅自中断。
 - 不通过后台巡查、定时发送或 Task 自建消息队列触发该行为，不宣称是原子排他保证。
 
-这是对之前“不使用 queue”的澄清和例外：普通更新不积累消息，强制对齐允许明确入队 Task ID 后主动推进。其他 session / subagent 的消息保留，不删除、不复制重发，不改宿主全局队列设置。
+这是 Owner Skill 的例外流程，不是新的 Task 工具或自动队列机制。完整边界与模板见[正式 Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff)。先前已实现的 `cockpit_advance_queue` 不再用于该流程；宿主实现历史保留在[宿主契约](task-host-contract.md)。本次 Skill 变更不等于已移除宿主工具。
 
-宿主已实现 `cockpit_advance_queue({action:"start"|"get"|"cancel",session_id,operation_id?})`，使用返回的操作 ID 查询或取消，不设业务超时。原生 API 调查与决策来源见 [宿主契约](task-host-contract.md#最新决定推进到动态最新消息并保留其执行)。它归属本体，不增加 Task 业务工具数量；开始回执不是推进完成或工作完成。
-
-这套循环仅由 Owner 判断“本次更新非常重要，不能等待正常同步”后明确触发，不是每次更新的默认流程。task_edit、definition_check 和 ACK 差异都不自动触发；helper 不内置重要性判断或后台监控。
+只有 Owner 判断“本次更新非常重要，不能等待正常同步”后才介入。task_edit、definition_check 和 ACK 差异都不自动触发队列清理、中断或消息发送。
 
 ## 2. 共用输入约定
 
@@ -127,7 +125,7 @@ UI 可以不提供 actor，不伪造 human session ID；定向读取仍检查该
 输入：共用变更字段，加 `revision, executor, resume_request_id?`。`executor` 为 Owner 已创建或选好的真实 session ID。不提供 mode / reassign 参数；resume_request_id 仅恢复已证实未发送的操作，不续办 Task。
 
 - 仅用于尚未分配的 todo；已有 Executor 不可替换。
-- 同一目标的重复指派不作为重新唤醒命令；原 request_id 重放原结果，不重复发送。重要更新的队列推进是独立显式动作，不借指派工具追加 cue。
+- 同一目标的重复指派不作为重新唤醒命令；原 request_id 重放原结果，不重复发送。重要更新的队列处理是独立显式动作，不借指派工具追加 cue。
 - done / cancelled 均不可通过指派恢复。
 - 目标不可承担第二项未结束 Task。程序不因冲突而取消其现有任务或另建 session。
 
@@ -292,7 +290,7 @@ Executor:
 
 每次写入都带 actor_session_id 和新的明确 request_id；已有 Task 写入还带读取返回的 write_context，create/session_create 不带。相同操作重试保留相同输入和 request_id。Skill 读取也提交自己的 actor_session_id；每次响应都处理 definition_check。
 
-重要更新的显式宿主流程为先 `cockpit_send_prompt({session_id,text:"[Task](task:<UUID>)",mode:"enqueue"})`，再 `cockpit_advance_queue({action:"start",session_id})`。保留返回的 operation_id，以 `action:"get"` 查询或 `action:"cancel"` 停止继续推进；不删除队列，也不把取消推进当作停止 session。
+重要更新由 Owner 按正式 Skill 保存并清理 pending 内容，再用 `cockpit_send_prompt` 一次发送摘要和 `Task updated: [Task](task:<UUID>)`。必要时使用保留队列的单次中断；不用清全部队列的 Stop 作为清理捷径，不重复发送未知结果的消息，不把接续回执当作当前 revision 的 ACK。
 
 ## 6. 实现边界与历史依据
 
@@ -302,8 +300,8 @@ Executor:
 Task HTTP API 一起挂载到本体；两者复用同一业务操作层。模块提供 MCP 配置供
 宿主角色装配使用，不要求本体为这八个业务工具另建注册或协议实现。
 
-模块采用官方 stateful Streamable HTTP MCP，使后续 POST 的取消通知能关联原调用。它与 HTTP API 共用业务服务，不启动独立 daemon。前端 / MCP 新建共用角色选择与装配；本体队列推进组合原生保留队列的能力，不宣称专门原子控制接口。
+模块采用官方 stateful Streamable HTTP MCP，使后续 POST 的取消通知能关联原调用。它与 HTTP API 共用业务服务，不启动独立 daemon。前端 / MCP 新建共用角色选择与装配；重要更新的队列处理仅由 Skill 指导 Owner，不宣称专门原子控制接口。
 
-原生调查来源见 [宿主接入契约](task-host-contract.md)：immediate 可插入执行中的 turn，两种中断路径有不同的队列副作用。这些研究解释为何首次指派不抢占，以及重要更新推进必须保留队列；不能把早期“接口尚缺失”的历史描述当作当前实现状态。
+原生调查来源见 [宿主接入契约](task-host-contract.md)：immediate 可插入执行中的 turn，两种中断路径有不同的队列副作用。这些研究解释为何首次指派不抢占，以及清队列前必须保留内容并明确处理并发；不能把早期“接口尚缺失”的历史描述当作当前实现状态。
 
 技术收口见 [实现契约](task-implementation.md)：独立 `task-board.sqlite`、分代 write_context、逐版 ACK、原子本地回执、显式未发送操作恢复、有界读取和标准 Task 链接。操作恢复不等于任务续办或改派；仍保留真实外部副作用结果。

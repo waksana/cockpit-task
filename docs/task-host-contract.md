@@ -1,5 +1,10 @@
 # Task 最小宿主接入设计
 
+**后续队列决定：** 以下保留旧 helper 的调研和实现历史。当前 Task 协作改由
+[Owner Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff)
+指导读取并保留 pending 内容、清理已保存项，再一次发送摘要和 Task updated 引用；
+不再推荐调用自动推进 helper。本次 Skill 修改未移除宿主已实现的工具。
+
 状态：设计和实现已收口，隔离集成与独立审阅完成；配套宿主变更见
 [waksana/cockpit#68](https://github.com/waksana/cockpit/pull/68)，不表示已部署
 
