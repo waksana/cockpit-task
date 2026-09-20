@@ -131,8 +131,10 @@ export class TaskStore {
   operation(requestId) {
     const row = this.db.prepare('SELECT * FROM operations WHERE request_id=?').get(requestId);
     if (!row) fail('OPERATION_NOT_FOUND', 'Operation does not exist', 404);
+    const input = JSON.parse(row.input);
     return {
       request_id: row.request_id, tool: row.tool, status: row.status,
+      ...(typeof input.task_id === 'string' ? { task_id: input.task_id } : {}),
       result: row.result ? JSON.parse(row.result) : null, error: row.error ? JSON.parse(row.error) : null,
       created_at: row.created_at, updated_at: row.updated_at,
     };
