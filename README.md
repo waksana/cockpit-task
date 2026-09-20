@@ -1,7 +1,7 @@
 # Task Board
 
 Task Board 是 Cockpit 模块：用共同的持久化 Task 记录协作，通过 Owner / Executor
-角色组合短指令、Skill 和 HTTP MCP。Task 引用直接在聊天中显示卡片，详情按需读取；
+角色组合 System Prompt、Skill 和 HTTP MCP。Task 引用直接在聊天中显示卡片，详情按需读取；
 不保存聊天、不自动监工或调度、不自动发送进度或完成通知。
 
 一个 Executor 完整负责一个独立 Task，可在内部使用 subagents。要求直接修改 Task，

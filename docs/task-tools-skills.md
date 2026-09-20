@@ -265,6 +265,6 @@ Coding Work、Research Work 不包含在 Task 模块内，本仓库不维护其�
 
 已确认 activity 只能引用本人确认过的版本；旧版补记不是任意填写 revision 的通道。ACK 与执行状态仍严格分开。
 
-通用角色注册、前端 / MCP 创建选择、能力装配已实现，不新增逐 Task 鉴权。旧版队列推进 MCP 已在宿主实现，但本次 Skill 改用 Owner 主动处理，不再推荐调用；这次文档及 Skill 修改不代表宿主工具已经移除。分代 write_context、逐版确认、持久化回执、`resume_request_id` 的未发送操作恢复和引用卡片已在后续技术收口中实现，详见 [实现契约](task-implementation.md)。恢复操作不是恢复终态 Task，未知发送不能据此重试。
+通用角色注册、前端 / MCP 创建选择、能力装配已实现，不新增逐 Task 鉴权。旧版队列推进 MCP 已退出当前宿主契约，改由 Owner 按 Skill 使用既有单次操作。能力检查仅按需调用，供创建后确认、指派前检查等明确操作使用；不投影到常规 session 列表、快照或详情，不做 badge。角色标签仅表示所选角色。分代 write_context、逐版确认、持久化回执、`resume_request_id` 的未发送操作恢复和引用卡片已实现，详见 [实现契约](task-implementation.md)。恢复操作不是恢复终态 Task，未知发送不能据此重试。
 
 保留节点 2→3→4 的讨论文档作为决策与原生 API 调查来源，但不再要求已授权的实现停在逐节点等待。开发实现不等于发布、合并或生产部署，不因已有原生 API 就直接改变真实 session 的 skills 或 MCP。

@@ -1,9 +1,11 @@
 # Task 最小宿主接入设计
 
-**后续队列决定：** 以下保留旧 helper 的调研和实现历史。当前 Task 协作改由
+**当前精简契约：** 以下保留旧 helper 的调研和实现历史。当前 Task 协作改由
 [Owner Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff)
 指导读取并保留 pending 内容、清理已保存项，再一次发送摘要和 Task updated 引用；
-不再推荐调用自动推进 helper。本次 Skill 修改未移除宿主已实现的工具。
+宿主移除自动推进 helper，保留单次中断、按 ID 删除 pending、原生状态读取和发送。
+`roles/readiness` 与对应 MCP、模块桥接仍可显式调用；常规 session 列表、
+快照和详情不包含就绪投影，不做 badge 或持续采集。能力可用和能立即接单分开检查。
 
 状态：设计和实现已收口，隔离集成与独立审阅完成；配套宿主变更见
 [waksana/cockpit#68](https://github.com/waksana/cockpit/pull/68)，不表示已部署
@@ -48,8 +50,8 @@ description revision、ACK 或成果。模块公开接口不足，不意味着�
 
 ### 通用角色选择与创建时装配
 
-模块声明自己的角色标识、角色指令、skill 资源与 MCP 配置及工具选择。
-宿主提供发现、显式选择、创建时装配及真实就绪结果，不硬编码 Task 角色名。
+模块声明自己的角色标识、角色 System Prompt、skill 资源与 MCP 配置及工具选择。
+宿主提供发现、显式选择、创建时装配及独立的按需能力检查，不硬编码 Task 角色名。
 用户明确：前端新建与 MCP 新建都能选角色，共用同一套创建契约，
 不是仅为 Task 的 task_session_create 增加私有入口。未选择角色不隐式追加角色。
 Task 仅声明 `task-owner`、`task-executor`；Coding / Research 的定义、安装、
@@ -61,14 +63,15 @@ Task 仅声明 `task-owner`、`task-executor`；Coding / Research 的定义、�
 Owner 调用 task_session_create
   → Task 请求宿主的通用角色化 session 创建
   → 宿主创建真实 session、绑定身份、装配角色指导和工具
-  → 返回真实 ID 与各项就绪结果
+  → 宿主返回真实 ID
+  → Task 显式调用 roles/readiness 和 session/get，返回能力与原生状态
   → 不发送初始化消息、不绑定 Task
 ```
 
 能力就绪至少区分：创建是否成功、角色指导是否按选定资源装配、
 skill 是否可用、工具是否真实可调用。不把“目录可发现”当成 skill 正文已进入上下文，
 也不能用额外启动 prompt 弥补角色装配，否则破坏首次消息只含 Task ID 的要求。
-角色短指令与 skill 的加载配合要在隔离场景证明，不把自然语言遵从性说成程序保证。
+角色 System Prompt 与 skill 的加载配合要在隔离场景证明，不把自然语言遵从性说成程序保证。
 
 用户已确认：**同一模块也可以同时选择多个角色**，不同模块同样可组合。
 Task Owner / Executor 可以在创建时一起选择；`task_session_create`
@@ -80,7 +83,7 @@ Task Owner / Executor 可以在创建时一起选择；`task_session_create`
   所选工具取并集，相同模块中的同一个工具仅注册一次。
 - 同一来源的同一 skill 资源去重；同名但不同来源/内容的 skill 明确冲突。
   不按角色选择顺序静默覆盖工具实现、技能或已有 MCP 配置。
-- 保留宿主原有指令，角色短指令以标明来源的片段追加；创建时采用明确、
+- 保留宿主原有指令，角色 System Prompt 以标明来源的片段追加；创建时采用明确、
   可复现的顺序并保存，冷恢复使用同一顺序。不得声称自动识别所有自然语言矛盾。
 - 两份 Task skill 按当前行为分工：委派时使用 Owner 流程，执行所承接 Task 时
   使用 Executor 流程。已有 Owner 工具不使当前 Task 变为任务树，
@@ -123,7 +126,8 @@ create/resume 参数转发代码及 GitHub 官方文档核对。结论是：
   → 用户或 agent 在本体创建 session 时选择角色
   → 本体合并所选角色，生成原生 session 配置
   → SDK 创建 session，装载 Skill 目录并连接 HTTP MCP
-  → 返回真实 session ID 和各项就绪结果
+  → 返回真实 session ID
+  → 需要确认能力的调用方显式请求 roles/readiness；普通创建不自动采集
 ```
 
 安装模块只使它的角色可选，不把该模块的所有 Skill / MCP 全局启用。
@@ -137,7 +141,7 @@ create/resume 参数转发代码及 GitHub 官方文档核对。结论是：
 | 保证 Skill 可用 | `enableSkills`、`disabledSkills`；`session.rpc.skills.list()` 返回 enabled / path | 保证所选技能未被实际配置禁用；只作用于本 session，不修改全局设置或无关技能 |
 | 连接模块 HTTP MCP | `mcpServers[name] = {type: "http", url, headers?, tools?}` | 使用模块提供的配置，解析挂载地址及必要请求头，注入该 session |
 | 按角色提供工具 | 每个 MCP 配置的 `tools` 列表 | Owner / Executor 选择不同列表，多角色取并集；`undefined` 或 `["*"]` 是全部，`[]` 是无工具，不能混淆 |
-| 短角色指令 | `systemMessage: {mode: "append", content}` | 追加角色身份、适用 Skill 名称和同步原则，不覆盖基础指令、不发送初始化 prompt |
+| 角色 System Prompt | `systemMessage: {mode: "append", content}` | 追加角色身份、适用 Skill 名称和同步原则，不覆盖基础指令、不发送初始化 prompt |
 | 冷恢复 | `ResumeSessionConfig` 同样继承上述配置；client 恢复路径转发对应字段 | 本体保存角色选择并在冷恢复时重新解析和传入，不能依赖连接或目录自然留存 |
 
 例如，Task 的一个 HTTP MCP 可以实现全部八个工具，角色配置决定 agent 获得的
@@ -158,7 +162,7 @@ create/resume 参数转发代码及 GitHub 官方文档核对。结论是：
 不能证明正文已经加载。SDK 的 `CustomAgentConfig.skills` 提供提前加载正文，
 但当前 `DefaultAgentConfig` 只有 excludedTools，没有相同的 skills 字段；
 不能把 custom agent 的能力错写成主 session 的配置。
-本期沿用“短角色指令 + 可用 Skill”的装配，不为此把多角色 session 改造成
+本期沿用“角色 System Prompt + 可用 Skill”的装配，不为此把多角色 session 改造成
 单个自定义 agent，也不谎称选择角色就确定执行了 Skill 中每一步。
 
 Skill 目录应按所选角色提供可发现的父目录，不把整个模块的技能根目录
@@ -166,7 +170,8 @@ Skill 目录应按所选角色提供可发现的父目录，不把整个模块�
 可在包内为各角色分别放置技能根目录；实际目录形状按原生发现结果确认，
 不向全局或项目技能目录复制文件。工作技能继续使用已有独立来源。
 
-创建后的就绪读取分别检查 Skill 的名称/路径/enabled、MCP 的连接状态及工具存在。
+显式请求的就绪读取分别检查 Skill 的名称/路径/enabled、MCP 的连接状态及工具存在。
+它不挂在 session 列表、快照、详情或角色标签上，也不为检查加载未加载的 session。
 `session.rpc.mcp.listTools()` 是服务器真实 tools/list，不等于 agent 过滤后的工具集；
 不能据此单独证明角色筛选生效。SDK `tools` 配置语义有公开依据，
 仍须在隔离集成中覆盖单角色和多角色的实际可用集合，不调用真实 Task 写操作做探测。
@@ -259,7 +264,7 @@ HTTP MCP 是挂载在宿主 HTTP 服务内的模块入口，不额外启动独�
 | --- | --- | --- |
 | HTTP 挂载 | 普通 Task routes 和模块实现的 HTTP MCP handler | 沿模块命名空间路由，保留协议所需 headers、响应流及取消信号，管理生命周期和现有访问防护 |
 | MCP 配置声明 | 模块 MCP 入口相对位置、原生连接所需配置及角色使用的工具选择 | 解析当前安装的实际地址/版本，在创建和冷恢复时注入原生 session；不硬编码 Task 工具 |
-| 角色声明 | role ID、名称/说明、短指令、skill 资源及 MCP 配置引用 | Web / MCP 发现与选择共用；资源来自模块包，不接受创建调用任意覆盖 prompt / 文件路径 |
+| 角色声明 | role ID、名称/说明、角色 System Prompt、skill 资源及 MCP 配置引用 | Web / MCP 发现与选择共用；资源来自模块包，不接受创建调用任意覆盖 prompt / 文件路径 |
 | 模块宿主访问 | 与既有公开协议对应的创建、能力读取、必要原生状态读取和发送 | 校验契约并执行，不暴露 Engine、SDK handle、store 或凭据文件 |
 
 本体使用模块声明的 MCP 配置，而不是把所有模块业务工具并入本体 MCP。
@@ -346,8 +351,8 @@ Task 当前依赖声明为 SDK ^1.27.1，本次实验使用宿主已安装的 1.
 ### 现有原生基线
 
 宿主现有工具可执行单次 `session/interrupt`、状态读取和消息发送。
-用户先前选择由 Owner 组合使用，随后提出将队列推进循环封装为本体 MCP。
-最新行为见下一节，替代早期“循环直到 idle 再发送”的流程。
+用户先前提出过队列推进 MCP，随后决定移除。当前由 Owner 按 Skill 组合单次操作；
+下一节仅保留已退出当前契约的历史设计，不是现行操作说明。
 
 SDK 1.0.13 的 `SendMode` 说明：`immediate` 会在已有 turn 中 interject；
 公开队列结果也包含 `steeringMessages`。正在执行时的 immediate cue
@@ -369,7 +374,7 @@ SDK 1.0.13 的 `SendMode` 说明：`immediate` 会在已有 turn 中 interject�
 已有队列、未停止后台工作或待决问题不能被默默清除、绕过或当成空闲。
 “不用 Owner queue”保留为明确的协作与调用规范，不升级为本期原生调度器改造。
 
-### 最新决定：推进到动态最新消息并保留其执行
+### 历史设计（已移除）：推进到动态最新消息并保留其执行
 
 用户进一步明确“不用 queue”是 Owner 遵循 Task 协作规范时不主动积累提示，
 不是要求 Executor 永远没有任何 queue。其他 session、subagent 等来源的消息
@@ -550,15 +555,15 @@ Task 模块和宿主通用能力已分别在隔离 worktree 实现。开发集�
 工具随角色注入，有工具即可操作其他 Task。不增加通用 caller 鉴权。
 只复用已具备 Executor 能力的 session，指派不补齐能力；
 本体记录创建时所选角色，MCP session 列表和详情带出该记录，不冒充实时就绪。
-用户新增本体的通用队列推进 MCP 方向：动态追最新队尾，保留最后接续轮次执行；
-它不是原子 idle-only 控制接口，也不属于 Task 的八个业务工具。
+原先的通用队列推进 MCP 已移除。Owner 组合既有单次操作，不新增调度器；
+能力检查仅按需调用，普通 session 状态读取不进行角色就绪检查。
 模块声明和公开桥接已落盘：`session/new`、`session/get`、`roles/readiness`、
 `prompt`，通过 `context.host.call(name, body)` 调用，输入/结果沿用公共 intent，
 不暴露 SDK handle、Engine 或内部 store。角色资源在创建与冷恢复时一致装配。
 用户已要求把宿主更改纳入本 session 的交付计划，见
 [分阶段执行计划](task-design.md#16-分阶段执行计划)：
 节点 5H 明列 H1 模块角色/MCP 承载、H2 创建/恢复、H3 列表角色、
-H4 队列推进；节点 6 完成真实集成，节点 7 覆盖两个仓库的独立审阅与保护合并。
+H4 当时为队列推进，现已移除；节点 6 完成真实集成，节点 7 覆盖两个仓库的独立审阅与保护合并。
 宿主实现使用另建的独立工作区，不修改现有宿主 checkout；本次不授权部署。
 不启动宿主 #63 的全面接口统一，不恢复旧模块运行时，
 不增加 Task 续办、改派、工作技能包或独立管理页面。

@@ -112,7 +112,7 @@ test('module HTTP and host bridge preserve registration, creation, assignment an
   } finally { f.close(); }
 });
 
-test('readiness requires current native idle evidence and never repairs or loads a session', async () => {
+test('on-demand capability checks remain separate from native idle evidence and never load a session', async () => {
   const f = fixture();
   try {
     const adapter = createHostAdapter(f.host);
@@ -126,12 +126,32 @@ test('readiness requires current native idle evidence and never repairs or loads
     ]) {
       const original = f.meta;
       f.meta = { ...original, ...patch };
-      assert.equal((await adapter.inspect('executor')).idle, false);
+      const inspected = await adapter.inspect('executor');
+      assert.equal(inspected.ready, true);
+      assert.equal(inspected.idle, false);
       f.meta = original;
     }
     f.capability = { sessionId: 'executor', loaded: true, ready: false, roles: [], reasons: ['Missing role Skill'] };
-    assert.equal((await adapter.inspect('executor')).ready, false);
+    const unavailable = await adapter.inspect('executor');
+    assert.equal(unavailable.ready, false);
+    assert.equal(unavailable.idle, true);
     assert.ok(f.calls.every(call => ['session/get', 'roles/readiness'].includes(call.name)));
+  } finally { f.close(); }
+});
+
+test('native observations do not collect capabilities and explicit checks do not reuse old readiness', async () => {
+  const f = fixture();
+  try {
+    const adapter = createHostAdapter(f.host);
+    await adapter.observe('executor');
+    assert.deepEqual(f.calls.map(call => call.name), ['session/get']);
+    assert.equal((await adapter.inspect('executor')).ready, true);
+    f.capability = { sessionId: 'executor', loaded: true, ready: false, roles: [], reasons: ['MCP disconnected'] };
+    assert.equal((await adapter.inspect('executor')).ready, false);
+    await adapter.observe('executor');
+    assert.deepEqual(f.calls.map(call => call.name), [
+      'session/get', 'roles/readiness', 'session/get', 'roles/readiness', 'session/get', 'session/get',
+    ]);
   } finally { f.close(); }
 });
 
