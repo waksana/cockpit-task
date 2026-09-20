@@ -1,6 +1,6 @@
 # Task Schema 与协作流程
 
-状态：产品语义已确认，核心与接入已完成开发实现；审阅、PR/合并及发布交付不在此声明为完成。
+状态：产品语义、实现及独立审阅已完成；交付状态见 [PR #3](https://github.com/waksana/cockpit-task/pull/3)，不代表生产部署。
 
 依据：[产品设计与最新决定](task-design.md)
 

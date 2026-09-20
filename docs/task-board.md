@@ -6,7 +6,7 @@ Web API v2, UI v1 and Node.js 24 or later. Installing a module is an explicit
 operator action; building or merging this repository does not install or activate it.
 
 The companion host change is [waksana/cockpit#68](https://github.com/waksana/cockpit/pull/68),
-implemented at [`3de3c3826fdeab9c4a9ecd665b52cfa5acb034f2`](https://github.com/waksana/cockpit/commit/3de3c3826fdeab9c4a9ecd665b52cfa5acb034f2).
+merged at [`3eddcf1abe671d0e3b54bda5a951cc6b0d1ed5a6`](https://github.com/waksana/cockpit/commit/3eddcf1abe671d0e3b54bda5a951cc6b0d1ed5a6).
 Use a host build containing that change. The existing 0.2.6 release label alone
 does not establish compatibility with these additive capabilities.
 

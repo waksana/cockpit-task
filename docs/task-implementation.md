@@ -5,8 +5,10 @@ has authorized continuous implementation and delivery of both Task and the
 required host changes; only material unresolved product decisions require a pause.
 
 Status: the Task core, module integration, role resources and required host
-capabilities are implemented in the development worktrees. Review, PR and merge
-delivery remain pending; this is not a publication or production-deployment claim.
+capabilities are implemented and independently reviewed. Delivery is tracked by
+[Task PR #3](https://github.com/waksana/cockpit-task/pull/3) and
+[waksana/cockpit#68](https://github.com/waksana/cockpit/pull/68);
+this is not a publication or production-deployment claim.
 Earlier node/draft wording in the design history records decision provenance,
 not a requirement to wait for another stage before implementing.
 

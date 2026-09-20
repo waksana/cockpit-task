@@ -1,6 +1,6 @@
 # Task MCP 与 Skills
 
-状态：角色协作规则及工具已完成开发实现；审阅、PR 与合并交付待完成，未声明发布/部署。保留节点讨论作为产品决策来源。
+状态：角色协作规则、工具及独立审阅已完成；交付记录见 [PR #3](https://github.com/waksana/cockpit-task/pull/3)，不代表发布/部署。保留节点讨论作为产品决策来源。
 
 依据：[产品设定](task-design.md)、[Task Schema](task-schema.md)
 
@@ -8,7 +8,7 @@
 
 本文定义 agent 如何使用 Task，并对应已实现的宿主角色装配；不直接修改旧版 skills。旧版 `cockpit-task-owner` 实际指导执行方，不能按名字映射到新版 Owner；旧版最终通知、凭据路径和固定 goal 表单不沿用。
 
-具体工具名称、角色范围、输入与效果见 [MCP 工具契约](task-mcp-contract.md)。本模块仅提供 Task Owner / Task Executor 两份角色技能；[Owner 设计说明](skill-drafts/task-owner.md)、[Executor 设计说明](skill-drafts/task-executor.md) 保留在原设计目录，实际打包资源为 `skills/task-owner/SKILL.md` 与 `skills/task-executor/SKILL.md`。未修改真实 session 或替换旧技能。Coding / Research 是外部工作技能，不在本模块内。
+具体工具名称、角色范围、输入与效果见 [MCP 工具契约](task-mcp-contract.md)。本模块仅提供 Task Owner / Task Executor 两份角色技能；[Owner 设计说明](skill-drafts/task-owner.md)、[Executor 设计说明](skill-drafts/task-executor.md) 保留在原设计目录，实际打包资源为 `skills/task-owner/task-owner/SKILL.md` 与 `skills/task-executor/task-executor/SKILL.md`。外层目录分别作为角色的原生技能发现根目录，内层是技能本身。未修改真实 session 或替换旧技能。Coding / Research 是外部工作技能，不在本模块内。
 
 **最新范围收缩：** 不做续办或改派；删除对应工具和参数。读取按 Owner / Executor 的不同关注点组织默认视图，其他正文和历史按需读取，不能把所有内容一次返回。
 

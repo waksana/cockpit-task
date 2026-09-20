@@ -6,7 +6,7 @@ description: "Read, acknowledge and completely execute one assigned Task, record
 # Task Executor
 
 Design-origin companion aligned with the implemented role. The packaged runtime
-resource is `skills/task-executor/SKILL.md`; this historical directory is not an
+resource is `skills/task-executor/task-executor/SKILL.md`; this historical directory is not an
 installation claim. Review/PR/merge delivery remains pending.
 Tool contracts: [Task MCP](../task-mcp-contract.md).
 

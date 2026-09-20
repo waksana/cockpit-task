@@ -1,6 +1,6 @@
 # Task MCP 工具契约
 
-状态：已按确认决定完成开发实现；审阅、PR 与合并交付尚待完成，未声明发布或部署。保留节点讨论作为决策来源，当前接口以本文及 `src/task-board/contracts.js` 为准。
+状态：实现及独立审阅已完成；交付记录见 [PR #3](https://github.com/waksana/cockpit-task/pull/3)，不代表发布或部署。保留节点讨论作为决策来源，当前接口以本文及 `src/task-board/contracts.js` 为准。
 
 依据：[Task Schema](task-schema.md)、[工具与技能设计](task-tools-skills.md)
 

@@ -6,7 +6,7 @@ description: "Clarify, register, assign and follow independent Tasks as their Ow
 # Task Owner
 
 Design-origin companion aligned with the implemented role. The packaged runtime
-resource is `skills/task-owner/SKILL.md`; this historical directory is not an
+resource is `skills/task-owner/task-owner/SKILL.md`; this historical directory is not an
 installation claim. Review/PR/merge delivery remains pending.
 Tool contracts: [Task MCP](../task-mcp-contract.md).
 
