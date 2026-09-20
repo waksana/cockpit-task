@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync, readdirSync } from 'node:fs';
+import { mkdirSync, rmSync, readdirSync, renameSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { TaskStore } from '../src/task-board/store.js';
@@ -52,6 +52,41 @@ test('independent durable database, initial definition and exact receipt replay'
   assert.deepEqual(f.create({ request_id }), first);
   rejects(() => f.create({ request_id, title: 'different' }), 'REQUEST_ID_CONFLICT');
   assert.equal(f.store.read({ view: 'list' }).items.length, 1);
+});
+
+test('offline data-root relocation preserves Task IDs, contexts, receipts and session bindings without row migration', t => {
+  const root = join(process.cwd(), '.task-board-tests', randomUUID());
+  const source = join(root, 'task-board');
+  const destination = join(root, 'cockpit-task');
+  let store = new TaskStore(source);
+  t.after(() => { store?.close(); rmSync(root, { recursive: true, force: true }); });
+  const createInput = {
+    request_id: randomUUID(), actor_session_id: 'original-owner', owner: 'original-owner',
+    title: 'Identity preservation', description: 'Keep user-authored task-board references unchanged.',
+  };
+  const created = store.executeLocal('task_create', createInput);
+  const assignInput = {
+    request_id: randomUUID(), actor_session_id: 'original-owner', task_id: created.task_id,
+    executor: 'original-executor', revision: created.revision, write_context: created.write_context,
+  };
+  store.reserveOperation('task_assign', assignInput);
+  const assigned = store.bindAssignment(assignInput);
+  const before = store.read({ view: 'execution', task_id: created.task_id });
+  const receipts = store.db.prepare('SELECT * FROM operations ORDER BY request_id').all();
+  store.close();
+  store = null;
+  renameSync(source, destination);
+  store = new TaskStore(destination);
+  assert.deepEqual(store.read({ view: 'execution', task_id: created.task_id }), before);
+  assert.deepEqual(store.db.prepare('SELECT * FROM operations ORDER BY request_id').all(), receipts);
+  assert.deepEqual(store.executeLocal('task_create', createInput), created);
+  const acknowledged = store.executeLocal('task_ack', {
+    request_id: randomUUID(), actor_session_id: 'original-executor',
+    task_id: created.task_id, revision: assigned.revision, write_context: assigned.write_context,
+  });
+  assert.equal(acknowledged.task_id, created.task_id);
+  assert.equal(acknowledged.executor, 'original-executor');
+  assert.ok(readdirSync(destination).includes('task-board.sqlite'));
 });
 
 test('strict bounded schemas reject unknown identity fields, malformed JSON and invalid report', () => {

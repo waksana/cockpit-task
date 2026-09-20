@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,13 +16,16 @@ function skillMetadata(source) {
   return { name: header[1], description };
 }
 
-test('every released skill has YAML-safe frontmatter, including both module roles and legacy roots', () => {
+test('only the two current Task role Skills are discoverable, with YAML-safe frontmatter', () => {
   const root = fileURLToPath(new URL('../', import.meta.url));
   const delivery = JSON.parse(readFileSync(join(root, 'service-delivery.json'), 'utf8'));
-  assert.ok(delivery.build.artifactPaths.includes('skills'));
+  assert.equal(delivery.build.artifactPaths.includes('skills'), false);
+  assert.equal(delivery.build.artifactPaths.some(path => path === 'docs' || path.startsWith('docs/legacy-skills')), false);
+  assert.ok(delivery.build.artifactPaths.includes('roles/commander.md'));
+  assert.ok(delivery.build.artifactPaths.includes('roles/owner.md'));
   const files = readdirSync(join(root, 'skills'), { recursive: true })
     .filter(path => basename(path) === 'SKILL.md');
-  assert.ok(files.length >= 4);
+  assert.equal(files.length, 2);
   const names = new Set();
   for (const path of files) {
     const metadata = skillMetadata(readFileSync(join(root, 'skills', path), 'utf8'));
@@ -29,9 +33,36 @@ test('every released skill has YAML-safe frontmatter, including both module role
     assert.ok(!names.has(metadata.name), `Duplicate skill name: ${metadata.name}`);
     names.add(metadata.name);
   }
-  for (const name of ['cockpit-task-commander', 'cockpit-task-owner', 'work-commander', 'work-commander-owner']) {
-    assert.ok(names.has(name), `Missing released skill: ${name}`);
+  assert.deepEqual([...names].sort(), ['cockpit-task-executor', 'cockpit-task-owner']);
+  const archives = readdirSync(join(root, 'docs/legacy-skills'));
+  assert.deepEqual(archives.sort(), ['cockpit-task-commander.md', 'cockpit-task-owner.md', 'work-commander-owner.md', 'work-commander.md']);
+  for (const path of archives) assert.ok(!readFileSync(join(root, 'docs/legacy-skills', path), 'utf8').startsWith('---'));
+  for (const path of ['src/work.js', 'roles/commander.md', 'roles/owner.md']) {
+    assert.doesNotMatch(readFileSync(join(root, path), 'utf8'), /legacy-skills|Use skill |skills\/session-toggle/);
   }
+  const installer = readFileSync(join(root, 'scripts/install.sh'), 'utf8');
+  assert.match(installer, /--exclude='docs\/legacy-skills'/);
+  assert.match(installer, /--exclude='skills'/);
+});
+
+test('legacy explicit registration installs only its MCP and preserves unrelated resources', t => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const home = mkdtempSync(join(root, '.legacy-registration-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const configRoot = join(home, '.copilot');
+  mkdirSync(configRoot);
+  const unrelated = { type: 'http', url: 'http://example.invalid/mcp', tools: ['read'] };
+  writeFileSync(join(configRoot, 'mcp-config.json'), JSON.stringify({ mcpServers: { unrelated } }));
+  const registration = spawnSync(process.execPath, [join(root, 'scripts/register.js'), root, '--confirm'], {
+    cwd: root, env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8',
+  });
+  assert.equal(registration.status, 0, registration.stderr);
+  const registered = JSON.parse(readFileSync(join(configRoot, 'mcp-config.json'), 'utf8'));
+  assert.deepEqual(registered.mcpServers.unrelated, unrelated);
+  assert.deepEqual(Object.keys(registered.mcpServers).sort(), ['unrelated', 'work-commander']);
+  assert.deepEqual(registered.mcpServers['work-commander'].args, [join(root, 'src/mcp.js')]);
+  assert.equal(existsSync(join(configRoot, 'skills')), false);
+  assert.match(registration.stdout, /retired Skills are not installed/);
 });
 
 test('unquoted mapping separators in either role description fail release validation', () => {

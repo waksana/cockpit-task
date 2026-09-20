@@ -23,12 +23,12 @@ async function removeIsolatedTree(root) {
   await rm(root, { recursive: true, force: true });
 }
 
-test('packaged Task Board integrates with real isolated host roles, native SDK and HTTP MCP', {
+test('packaged Task integrates with real isolated host roles, native SDK and HTTP MCP', {
   skip: !hostWorktree,
   timeout: 180_000,
 }, async t => {
   const hostSource = resolve(hostWorktree);
-  const archive = join(repository, 'dist', 'task-board-0.1.0.tgz');
+  const archive = join(repository, 'dist', 'cockpit-task-0.1.0.tgz');
   const originalEnv = { ...process.env };
   const originalCwd = process.cwd();
   const root = await mkdtemp(join(repository, '.task-board-host-integration-'));
@@ -246,7 +246,7 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
 
     stage = 'installing the real artifact and activating its backend';
     const installed = await installLocalModule(archive, { hostRoot: dirs.host, trustLocalCode: true, enable: true });
-    assert.equal(installed.manifest.id, 'task-board');
+    assert.equal(installed.manifest.id, 'cockpit-task');
     assert.equal(installed.manifest.version, '0.1.0');
     assert.ok(installed.root.startsWith(`${dirs.host}/modules/installed/`));
     const startModule = async () => {
@@ -263,7 +263,7 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
     const origin = await startModule();
     const bootstrap = moduleHost.bootstrap();
     assert.deepEqual(bootstrap.errors, []);
-    assert.deepEqual(bootstrap.active, [{ id: 'task-board', version: '0.1.0', digest: installed.digest }]);
+    assert.deepEqual(bootstrap.active, [{ id: 'cockpit-task', version: '0.1.0', digest: installed.digest }]);
     const apiBase = bootstrap.modules[0].apiBase;
     const headers = { 'X-Cockpit-Module-Digest': installed.digest };
     assert.equal((await app.inject(bootstrap.modules[0].entry)).statusCode, 200);
@@ -280,7 +280,7 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
       assert.equal(rejected.statusCode, 409, rejected.body);
       assert.equal(rejected.json().code, 'MODULE_VERSION_MISMATCH');
     }
-    assert.equal((await app.inject({ method: 'POST', url: '/_modules/task-board/api/read', headers, payload: readPayload })).statusCode, 404);
+    assert.equal((await app.inject({ method: 'POST', url: '/_modules/cockpit-task/api/read', headers, payload: readPayload })).statusCode, 404);
     assert.equal((await app.inject({
       method: 'POST', url: `${apiBase.replace(installed.digest, '1'.repeat(64))}/read`, headers, payload: readPayload,
     })).statusCode, 404);
@@ -309,9 +309,9 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
 
     stage = 'starting the actual native runtime with packaged ModuleRoles';
     const roles = new ModuleRoles(dirs.host, origin, () =>
-      moduleHost.bootstrap().active.some(module => module.id === 'task-board') ? [installed] : []);
-    const owner = { moduleId: 'task-board', roleId: 'owner' };
-    const executor = { moduleId: 'task-board', roleId: 'executor' };
+      moduleHost.bootstrap().active.some(module => module.id === 'cockpit-task') ? [installed] : []);
+    const owner = { moduleId: 'cockpit-task', roleId: 'owner' };
+    const executor = { moduleId: 'cockpit-task', roleId: 'executor' };
     assert.deepEqual(roles.list().map(role => role.roleId).sort(), ['executor', 'owner']);
     engine.setRoleProvider(roles);
     unsubscribe = engine.onNativeEvent(({ sessionId, event }) => {
@@ -333,25 +333,31 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
 
     const verifyAssembly = async (sessionId, selected, expectedTools, expectedSkills) => {
       const assembly = await roles.assemble(sessionId, selected);
-      assert.deepEqual(Object.keys(assembly.config.mcpServers), ['module_task-board__task']);
-      const server = assembly.config.mcpServers['module_task-board__task'];
+      assert.deepEqual(Object.keys(assembly.config.mcpServers), ['cockpit-task']);
+      const server = assembly.config.mcpServers['cockpit-task'];
       assert.equal(server.url, `${origin}${apiBase}/mcp`);
       assert.deepEqual(server.headers, headers);
       assert.deepEqual(server.tools, [...expectedTools].sort());
       assert.deepEqual(assembly.skills.map(skill => skill.name).sort(), [...expectedSkills].sort());
       for (const role of selected) {
-        assert.ok(assembly.config.systemMessage.content.includes(`Module task-board / role ${role.roleId}`));
+        assert.ok(assembly.config.systemMessage.content.includes(`Module cockpit-task / role ${role.roleId}`));
         const source = await readFile(join(installed.root, `roles/task-${role.roleId}.md`), 'utf8');
         assert.ok(assembly.config.systemMessage.content.includes(source));
       }
       assert.ok(assembly.config.systemMessage.content.includes(`Native session ID: ${sessionId}`));
       const nativeSkills = await engine.getPanel(sessionId, 'skills');
-      assert.deepEqual(nativeSkills.filter(skill => skill.label.startsWith('task-')).map(skill => skill.label).sort(), [...expectedSkills].sort());
-      for (const skill of nativeSkills.filter(skill => skill.label.startsWith('task-'))) assert.equal(skill.enabled, true);
+      assert.deepEqual(nativeSkills.filter(skill => skill.label.startsWith('cockpit-task-')).map(skill => skill.label).sort(), [...expectedSkills].sort());
+      for (const skill of nativeSkills.filter(skill => skill.label.startsWith('cockpit-task-'))) assert.equal(skill.enabled, true);
+      assert.equal(nativeSkills.some(skill => ['task-owner', 'task-executor', 'work-commander', 'work-commander-owner', 'cockpit-task-commander'].includes(skill.label)), false);
+      const nativeMcp = await engine.getPanel(sessionId, 'mcpServers');
+      assert.equal(nativeMcp.filter(server => server.label === 'cockpit-task').length, 1,
+        'Exactly one declared Task MCP server must be present, including after cold resume');
+      assert.equal(nativeMcp.some(server => /^(?:module_(?:task-board|cockpit-task)__|task$|work-commander$)/.test(server.label)), false,
+        'No generated or legacy Task MCP server may accompany the declared server');
       return assembly;
     };
-    await verifyAssembly(ownerId, [owner], ownerTools, ['task-owner']);
-    await verifyAssembly(unionId, [owner, executor], allTools, ['task-executor', 'task-owner']);
+    await verifyAssembly(ownerId, [owner], ownerTools, ['cockpit-task-owner']);
+    await verifyAssembly(unionId, [owner, executor], allTools, ['cockpit-task-executor', 'cockpit-task-owner']);
     const promptAndInspect = async (sessionId, text, expectedTools, unexpectedTools) => {
       const before = requests.length;
       await engine.prompt(sessionId, text);
@@ -360,12 +366,14 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
       const captured = requests.slice(before);
       assert.ok(JSON.stringify(captured).includes(`Native session ID: ${sessionId}`));
       for (const role of roles.read(sessionId)) {
-        assert.ok(JSON.stringify(captured).includes(`Module task-board / role ${role.roleId}`));
-        assert.ok(JSON.stringify(captured).includes(`Use the task-${role.roleId} Skill`));
+        assert.ok(JSON.stringify(captured).includes(`Module cockpit-task / role ${role.roleId}`));
+        assert.ok(JSON.stringify(captured).includes(`Load the cockpit-task-${role.roleId} Skill`));
       }
       for (const request of captured) {
         const offered = JSON.stringify(request.tools);
-        for (const name of expectedTools) assert.ok(offered.includes(name), `Missing native tool ${name}`);
+        for (const name of expectedTools) assert.equal(request.tools.filter(tool =>
+          tool.type === 'function' && tool.function.name.endsWith(name)).length, 1,
+        `Expected exactly one native ${name} tool`);
         for (const name of unexpectedTools) assert.ok(!offered.includes(name), `Unexpected native tool ${name}`);
       }
     };
@@ -379,7 +387,7 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
     assert.equal(creation.result.operation.creation, 'created');
     assert.equal(creation.result.operation.capability, 'ready');
     assert.equal((await engine.roleReadiness(executorId, [executor])).ready, true);
-    await verifyAssembly(executorId, [executor], executorTools, ['task-executor']);
+    await verifyAssembly(executorId, [executor], executorTools, ['cockpit-task-executor']);
     assert.deepEqual((await tool('task_session_create', createInput)).result, creation.result);
     assert.equal(bridgeCalls.filter(call => call.name === 'session/new').length, 1, 'Creation replay cannot create a replacement');
 
@@ -403,8 +411,8 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
     assert.deepEqual(providerErrors, []);
     const dispatched = requests.slice(beforeDispatch);
     assert.ok(JSON.stringify(dispatched).includes(`Native session ID: ${executorId}`));
-    assert.ok(JSON.stringify(dispatched).includes('Module task-board / role executor'));
-    assert.ok(JSON.stringify(dispatched).includes('Use the task-executor Skill'));
+    assert.ok(JSON.stringify(dispatched).includes('Module cockpit-task / role executor'));
+    assert.ok(JSON.stringify(dispatched).includes('Load the cockpit-task-executor Skill'));
     for (const request of dispatched) {
       const offered = JSON.stringify(request.tools);
       for (const name of executorTools) assert.ok(offered.includes(name), `Missing Executor tool ${name}`);
@@ -506,6 +514,9 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
     await engine.load(executorId);
     assert.equal((await engine.roleReadiness(executorId, [executor])).ready, true);
     assert.equal(requests.length, afterNoticeModels, 'Cold resume must not send a startup prompt');
+    await verifyAssembly(executorId, [executor], executorTools, ['cockpit-task-executor']);
+    await promptAndInspect(executorId, 'Synthetic cold-resumed Executor capability check; acknowledge without tools.',
+      executorTools, ['task_create', 'task_session_create', 'task_assign']);
 
     stage = 'cold-restarting the packaged module and reading persisted state';
     await mcp.close();

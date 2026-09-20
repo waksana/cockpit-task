@@ -29,7 +29,7 @@ export function createMcpRoutes({ execute, schemas, signal, report }) {
   let stopped = false;
 
   async function connection() {
-    const server = new Server({ name: 'task-board', version: '0.1.0' }, { capabilities: { tools: {} } });
+    const server = new Server({ name: 'cockpit-task', version: '0.1.0' }, { capabilities: { tools: {} } });
     const lifetime = new AbortController();
     const pending = new Map();
     const state = {
@@ -206,7 +206,7 @@ export function createMcpRoutes({ execute, schemas, signal, report }) {
     requestSignal.addEventListener('abort', abort, { once: true });
     try {
       requestSignal.throwIfAborted();
-      const nativeRequest = new Request('http://task-board.invalid/mcp', {
+      const nativeRequest = new Request('http://cockpit-task.invalid/mcp', {
         method, headers, signal: requestSignal,
       });
       const response = await untilAborted(

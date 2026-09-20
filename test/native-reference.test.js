@@ -146,7 +146,8 @@ test('new managed owner is created once and never reapplied, closed, or initiali
   assert.deepEqual(f.calls[1].body.modules, [{ moduleId: 'task', roleId: 'owner', version: '1.2.7' }]);
   assert.equal(f.calls.at(-1).body.sessionId, result.task.ownerSessionId);
   assert.equal(f.calls.at(-1).body.mode, 'enqueue');
-  assert.match(f.calls.at(-1).body.text, /Use skill cockpit-task-owner/);
+  assert.match(f.calls.at(-1).body.text, /Legacy Work Commander execution/);
+  assert.doesNotMatch(f.calls.at(-1).body.text, /Use skill |legacy-skills|Retired executing Skill|collaboration reference/);
 });
 
 for (const stage of ['create', 'module-check']) {

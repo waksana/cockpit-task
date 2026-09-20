@@ -1,14 +1,45 @@
 ---
-name: task-owner
-description: "Coordinate independent Tasks: clarify, register, create an Executor, assign, revise and read progress through Task MCP."
+name: cockpit-task-owner
+description: "Delegate and coordinate independent Tasks through Task MCP: define outcomes, assign Executors, revise requirements and follow delivery. Not a prerequisite for ordinary conversation."
 ---
 
-# Task Owner
+# Owner
 
-Use Task Board as the common work record. Work skills and project instructions
-define domain-specific methods; this skill defines collaboration, not a git flow.
+Use Task as the common work record. This collaboration role does not replace your
+business identity or make you responsible for developing the Task module.
+Work skills and project instructions define domain-specific methods;
+this skill defines collaboration, not a domain-specific workflow.
 No child Tasks, reassignment, reopening, reverse notifications or automatic monitoring.
-If both Task roles are selected, use task-executor for your own assigned execution.
+If both Task roles are selected, use cockpit-task-executor for your own assigned execution.
+
+## Coordinate rather than implement
+
+Clarify the requested outcome, scope, constraints and acceptance criteria.
+You may inspect evidence read-only, answer questions and compare options yourself.
+For implementation and state-changing delivery, create or update a Task and
+delegate the complete work to an Executor by default. A request to achieve an
+outcome does not by itself ask you to perform the implementation personally.
+Do not bypass delegation by doing the work yourself or placing the entire
+implementation in your own subagents. The Executor owns its internal breakdown.
+
+Execute personally only when the user explicitly asks you to do so, or when you
+are explicitly assigned a Task as a capable Executor. Having both roles selected
+is not itself an assignment or a reason to take over someone else's work.
+If delegation is unavailable, report the concrete blocker rather than silently
+falling back to personal execution. Never claim an assignment, ACK or delivery
+that did not happen.
+
+## Reuse the workflow instructions
+
+Load this Skill when its workflow is first needed; use the instructions already
+in context for subsequent messages. Do not invoke it as a ritual before every
+reply or tool call. Ordinary conversation and a new user message do not require
+reloading. Read it again when relevant instructions are no longer available
+after compaction or recovery, when the Skill has changed, or when a specific
+workflow rule needs clarification.
+
+These are stable workflow instructions, not current Task state. Reusing them
+does not replace fresh Task reads, revision checks or the Executor's ACK.
 
 ## Prepare and assign
 

@@ -1,6 +1,6 @@
-# Task Board implementation contract
+# Task implementation contract
 
-The packaged [Owner Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff)
+The packaged [Owner Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md#exceptional-update-handoff)
 guides explicit pending-message preservation, cleanup and a single summary
 followed by a Task updated reference. The host advancement helper is retired;
 capability checks remain explicit and on demand. This simplification does not
@@ -21,7 +21,9 @@ not a requirement to wait for another stage before implementing.
 
 ## Module and data
 
-The new module is `task-board`, separate from the legacy Work Commander service.
+The new module is `cockpit-task`, separate from the legacy Work Commander service.
+The previous `task-board` identity needs an explicit offline host migration of its
+data directory and saved role selections; see [cutover boundaries](task-board.md#explicit-existing-installation-cutover).
 Its entry is `cockpit.module.json`; it runs in Cockpit, not a standalone daemon.
 Legacy launch commands, databases and installations are not automatically changed.
 The module uses `task-board.sqlite` under its host-provided dataRoot. It does not
@@ -186,7 +188,7 @@ Use the existing Node test runner and package manager, without adding test frame
 The module bridge is `context.host.call(name, body)`, with these implemented
 contracts (camelCase is the host API, unlike Task tool snake_case):
 
-- `session/new({cwd,roles:[{moduleId:"task-board",roleId:"executor"}]})`
+- `session/new({cwd,roles:[{moduleId:"cockpit-task",roleId:"executor"}]})`
   returns `{sessionId}`.
 - `session/get({sessionId})` returns `{meta}`; unknown sessions have `meta:null`.
   Selected roles remain metadata, but capability readiness is not projected here.

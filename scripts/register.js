@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, symlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -17,10 +17,4 @@ if (readFileSync(configPath, 'utf8') !== original) throw new Error('MCP configur
 const temporary = `${configPath}.work-commander-${process.pid}`;
 writeFileSync(temporary, JSON.stringify(config, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
 renameSync(temporary, configPath);
-for (const name of ['work-commander', 'work-commander-owner']) {
-  const target = join(homedir(), '.copilot/skills', name);
-  if (existsSync(target)) throw new Error(`Skill ${name} already exists; not overwriting it`);
-  mkdirSync(join(homedir(), '.copilot/skills'), { recursive: true });
-  symlinkSync(join(release, 'skills', name), target);
-}
-console.log('Registered independent MCP and skills. REQUIRED: set native global MCP default OFF, then refresh MCP/skills; do not reload other sessions.');
+console.log('Registered independent legacy MCP only; retired Skills are not installed. REQUIRED: set native global MCP default OFF, then refresh MCP; do not reload other sessions. Existing installed Skills require a separately authorized retirement.');

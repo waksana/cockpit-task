@@ -5,8 +5,8 @@ import { TaskService } from './service.js';
 import { TaskStore } from './store.js';
 
 export function activate(context) {
-  if (context.apiVersion !== 1 || context.moduleId !== 'task-board') {
-    throw new Error('Task Board requires Cockpit Module API v1 and its own module data directory');
+  if (context.apiVersion !== 1 || context.moduleId !== 'cockpit-task') {
+    throw new Error('Task requires Cockpit Module API v1 and module ID cockpit-task; task-board requires explicit offline migration');
   }
   const host = createHostAdapter(context.host);
   const store = new TaskStore(context.dataRoot);
@@ -52,7 +52,7 @@ export function activate(context) {
       ...mcp.routes,
     ],
     dispose() {
-      controller.abort(new Error('Task Board stopped'));
+      controller.abort(new Error('Task stopped'));
       mcp.close();
       service.close();
     },

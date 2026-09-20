@@ -1,7 +1,5 @@
----
-name: cockpit-task-owner
-description: "Cockpit Task owner role: own one bound goal, amend it on explicit user instructions in this session, and deliver each authorized version once through the service."
----
+> Retired executing Skill `cockpit-task-owner`. Historical standalone-service
+> guidance only; not the new Task coordinating Owner and not an installable Skill.
 
 # Own the complete authorized result
 

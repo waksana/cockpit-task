@@ -6,11 +6,22 @@
 
 日期：2026-09-20
 
-本文定义 agent 如何使用 Task，并对应已实现的宿主角色装配；不直接修改旧版 skills。旧版 `cockpit-task-owner` 实际指导执行方，不能按名字映射到新版 Owner；旧版最终通知、凭据路径和固定 goal 表单不沿用。
+**原则型 Skill 修订讨论中：** 原则型正文仍待审核，尚未发布。
+当前打包资源使用已确认的 `cockpit-task-owner` / `cockpit-task-executor` 名称，
+仅重命名既有指导，不使用讨论草案替换正文。
+四份旧 Skill 已从源码发现和打包入口退役，原文归档为 `docs/legacy-skills/*.md`；
+仅作仓库历史资料，不作运行时回退或发布输入，不保留 Skill 别名。
+本轮没有改动线上安装或真实 session。
 
-具体工具名称、角色范围、输入与效果见 [MCP 工具契约](task-mcp-contract.md)。本模块仅提供 Task Owner / Task Executor 两份角色技能；[Owner 设计说明](skill-drafts/task-owner.md)、[Executor 设计说明](skill-drafts/task-executor.md) 保留在原设计目录，实际打包资源为 `skills/task-owner/task-owner/SKILL.md` 与 `skills/task-executor/task-executor/SKILL.md`。外层目录分别作为角色的原生技能发现根目录，内层是技能本身。未修改真实 session 或替换旧技能。Coding / Research 是外部工作技能，不在本模块内。
+本文定义 agent 如何使用 Task，并对应已实现的宿主角色装配。旧版 `cockpit-task-owner` 实际指导执行方，不能按名字映射到新版 Owner；旧版最终通知、凭据路径和固定 goal 表单不沿用。
+
+具体工具名称、角色范围、输入与效果见 [MCP 工具契约](task-mcp-contract.md)。本模块仅提供 Owner / Executor 两份角色技能；[Owner 设计说明](skill-drafts/task-owner.md)、[Executor 设计说明](skill-drafts/task-executor.md) 保留在原设计目录，实际打包资源为 `skills/cockpit-task-owner/cockpit-task-owner/SKILL.md` 与 `skills/cockpit-task-executor/cockpit-task-executor/SKILL.md`。外层目录分别作为角色的原生技能发现根目录，内层是技能本身。未修改真实 session 或已安装的旧技能。Coding / Research 是外部工作技能，不在本模块内。
 
 **最新范围收缩：** 不做续办或改派；删除对应工具和参数。读取按 Owner / Executor 的不同关注点组织默认视图，其他正文和历史按需读取，不能把所有内容一次返回。
+
+**Owner 默认委派：** Owner 可以只读了解情况、回答问题和澄清目标；实施及改变外部状态的交付默认通过 Task 交给 Executor，不亲自实施，也不用自己的 subagent 代替独立 Executor。用户要求达成结果不等于明确要求 Owner 本人执行。用户明确要求亲自执行，或该 session 以具备能力的 Executor 身份实际承接 Task 时，才按执行职责处理；同时选择两个角色本身不构成承接。无法委派时说明具体阻塞，不静默改成自己做。
+
+**Skill 按需加载并复用：** 首次需要对应流程时读取，指令仍在上下文中就继续使用，不把每条消息或每次回复都变成重新读取 Skill 的触发器。压缩或恢复后相关指令丢失、Skill 已变化，或需要核对具体规则时再读。这不减少 Task 最新定义、revision 和 ACK 的同步要求；稳定流程说明与动态任务记录必须区分。
 
 **普通更新不积累 queue：** 普通要求只更新 Task，不排队发送 cue、提醒或追加要求。非常重要的更新由 Owner 按 Skill 主动处理 pending 队列，再发送一条包含上下文摘要和 Task updated 引用的消息。首次派单仍不擅自中断忙碌目标，不把这项例外变成普通指派默认行为。
 
@@ -22,7 +33,7 @@
 
 **其他来源队列的处理（最新决定）：** 不要求 Executor 永远没有 queue。重要更新需要接管时，建议 Owner 先读取并保留所有可获取的 pending 内容，再按已保存的消息 ID 清理队列；包含其他 session / subagent 的消息。随后总结这些内容，保留来源、未解决请求和资料，最后附上 `[Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新 revision 的要求，合成一条消息发送，替代旧的文本前缀模板。未能读取或保留的内容不能盲删；展示文本不是附件的无损备份。清理中新增或已开始执行的消息由 Owner 另行判断，不能假装快照锁定了队列。
 
-必要时使用保留队列的单次主轮次中断，不用 Stop 作为清理捷径，不自动反复中断或取消 subagent。发送前核对实际原生状态、Task 仍未结束且 Executor 未变；已停止的回执或 idle 标签不等于可以立即接续。发送和清理不是原子操作，排队或未知回执不能盲重发，实际对齐以当前 revision 的 ACK 为准。完整流程和消息模板见[正式 Owner Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff)。
+必要时使用保留队列的单次主轮次中断，不用 Stop 作为清理捷径，不自动反复中断或取消 subagent。发送前核对实际原生状态、Task 仍未结束且 Executor 未变；已停止的回执或 idle 标签不等于可以立即接续。发送和清理不是原子操作，排队或未知回执不能盲重发，实际对齐以当前 revision 的 ACK 为准。完整流程和消息模板见[正式 Owner Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md#exceptional-update-handoff)。
 
 上述强制对齐仅在 Owner 判断更新非常重要、不能等待正常同步时明确触发。普通修订仍只更新 Task；不能因未 ACK 提醒、revision 变化或每次 task_edit 而自动运行中断循环。工具只执行明确操作，不替 Owner 判定重要性。
 

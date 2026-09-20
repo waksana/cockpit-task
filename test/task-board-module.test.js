@@ -29,7 +29,7 @@ function fixture() {
     },
   };
   const context = {
-    apiVersion: 1, moduleId: 'task-board', dataRoot: root, host, signal: controller.signal,
+    apiVersion: 1, moduleId: 'cockpit-task', dataRoot: root, host, signal: controller.signal,
     invalidate: () => { invalidations++; }, report: error => errors.push(error),
   };
   let module = activate(context);
@@ -64,16 +64,33 @@ function fixture() {
 test('module roles contain exactly the agreed tool subsets and only two role skills', () => {
   const manifest = JSON.parse(readFileSync(new URL('../cockpit.module.json', import.meta.url), 'utf8'));
   const [owner, executor] = manifest.roles;
-  assert.deepEqual(owner.mcpServers.task.tools, ['task_read', 'task_create', 'task_session_create', 'task_assign', 'task_edit', 'task_cancel']);
-  assert.deepEqual(executor.mcpServers.task.tools, ['task_read', 'task_edit', 'task_ack', 'task_report', 'task_cancel']);
-  assert.deepEqual([...new Set([...owner.mcpServers.task.tools, ...executor.mcpServers.task.tools])].sort(), [...TOOL_NAMES].sort());
-  assert.deepEqual(manifest.roles.flatMap(role => role.skillDirectories), ['skills/task-owner', 'skills/task-executor']);
+  assert.equal(manifest.name, 'Task');
+  assert.equal(manifest.id, 'cockpit-task');
+  assert.deepEqual(manifest.roles.map(({ id, name }) => ({ id, name })), [
+    { id: 'owner', name: 'Owner' },
+    { id: 'executor', name: 'Executor' },
+  ]);
+  for (const role of manifest.roles) assert.deepEqual(Object.keys(role.mcpServers), ['cockpit-task']);
+  assert.deepEqual(owner.mcpServers['cockpit-task'].tools, ['task_read', 'task_create', 'task_session_create', 'task_assign', 'task_edit', 'task_cancel']);
+  assert.deepEqual(executor.mcpServers['cockpit-task'].tools, ['task_read', 'task_edit', 'task_ack', 'task_report', 'task_cancel']);
+  assert.deepEqual([...new Set([...owner.mcpServers['cockpit-task'].tools, ...executor.mcpServers['cockpit-task'].tools])].sort(), [...TOOL_NAMES].sort());
+  assert.deepEqual(manifest.roles.flatMap(role => role.skillDirectories), ['skills/cockpit-task-owner', 'skills/cockpit-task-executor']);
+});
+
+test('old module identity is rejected before opening storage instead of silently aliasing it', () => {
+  const root = mkdtempSync(join(tmpdir(), 'task-board-old-id-'));
+  try {
+    assert.throws(() => activate({
+      apiVersion: 1, moduleId: 'task-board', dataRoot: root, host: { call() {} },
+    }), /module ID cockpit-task.*explicit offline migration/);
+    assert.equal(existsSync(join(root, 'task-board.sqlite')), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('module fails before opening storage when the host bridge is absent', () => {
   const root = mkdtempSync(join(tmpdir(), 'task-board-no-host-'));
   try {
-    assert.throws(() => activate({ apiVersion: 1, moduleId: 'task-board', dataRoot: root }), /requires.*host intents/);
+    assert.throws(() => activate({ apiVersion: 1, moduleId: 'cockpit-task', dataRoot: root }), /requires.*host intents/);
     assert.equal(existsSync(join(root, 'task-board.sqlite')), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -89,7 +106,7 @@ test('module HTTP and host bridge preserve registration, creation, assignment an
     const session = await f.write('task_session_create', { cwd: '/tmp' });
     assert.equal(session.body.result.operation.capability, 'ready');
     assert.deepEqual(f.calls[0], {
-      name: 'session/new', body: { cwd: '/tmp', roles: [{ moduleId: 'task-board', roleId: 'executor' }] },
+      name: 'session/new', body: { cwd: '/tmp', roles: [{ moduleId: 'cockpit-task', roleId: 'executor' }] },
     });
     const execution = (await f.read(id)).body.result;
     const assigned = await f.write('task_assign', { task_id: id, revision: 1, executor: 'executor', write_context: execution.write_context });

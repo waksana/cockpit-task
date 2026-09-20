@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -189,7 +189,7 @@ test('base paths cover HTML/deep links while legacy gateway retains empty-prefix
   assert.equal(new Work(f.store, {}).taskUrl('fixture'), 'http://127.0.0.1:8790/?task=fixture');
 });
 
-test('module paths are opt-in and manifest roles are explicit, isolated roots', () => {
+test('legacy module paths and roles remain separate without retired Skill discovery', () => {
   assert.equal(dataDirectory({}), join(homedir(), '.local/state/work-commander'));
   assert.equal(dataDirectory({ WORK_COCKPIT_MODULE_VERSION: '1.2.0' }), join(homedir(), '.cockpit/data/task'));
   assert.equal(dataDirectory({ WORK_COCKPIT_MODULE_VERSION: '1.2.0', COCKPIT_USER_ROOT: '/custom' }), '/custom/data/task');
@@ -204,12 +204,12 @@ test('module paths are opt-in and manifest roles are explicit, isolated roots', 
   assert.deepEqual(manifest.roles.map(r => r.id), ['commander', 'owner']);
   for (const role of manifest.roles) {
     assert.deepEqual(Object.keys(role.mcp), ['cockpit-task']);
-    const skill = role.id === 'owner' ? 'cockpit-task-owner' : 'cockpit-task-commander';
-    assert.ok(readFileSync(new URL(`../${role.skills[0]}/${skill}/SKILL.md`, import.meta.url), 'utf8').includes(`name: ${skill}`));
-    assert.ok(readFileSync(new URL(`../${role.instructions}`, import.meta.url), 'utf8').includes(skill));
+    assert.deepEqual(role.skills, []);
+    assert.ok(readFileSync(new URL(`../${role.instructions}`, import.meta.url), 'utf8').includes('legacy'));
   }
   for (const legacy of ['work-commander', 'work-commander-owner']) {
-    assert.ok(readFileSync(new URL(`../skills/${legacy}/SKILL.md`, import.meta.url), 'utf8').includes(`name: ${legacy}`));
+    assert.equal(existsSync(new URL(`../skills/${legacy}/SKILL.md`, import.meta.url)), false);
+    assert.match(readFileSync(new URL(`../docs/legacy-skills/${legacy}.md`, import.meta.url), 'utf8'), /Retired Skill/);
   }
   const owner = readFileSync(new URL('../roles/owner.md', import.meta.url), 'utf8');
   assert.match(owner, /never inherited from cwd/);

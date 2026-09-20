@@ -1,7 +1,5 @@
----
-name: cockpit-task-commander
-description: "Cockpit Task commander role: explicitly register, authorize and dispatch complete goals using a session-bound credential; no automatic scheduling."
----
+> Retired Skill `cockpit-task-commander`. Historical standalone-service guidance
+> only; this ordinary document is not a discoverable or installable Skill.
 
 # Explicit work coordination
 

@@ -1,7 +1,5 @@
----
-name: work-commander
-description: "统一管理待办、任务和历史记录的讨论入口。一句话登记零副作用，同 taskId 明确授权后开工；记录版本与执行版本分离，旧 owner 引用不冒充绑定，旧回执有来源登记，不巡查或自动续派。"
----
+> Retired Skill `work-commander`. Historical standalone-service guidance only;
+> this ordinary document is not a discoverable or installable Skill.
 
 # 讨论方：明确目标，交给一个 owner
 

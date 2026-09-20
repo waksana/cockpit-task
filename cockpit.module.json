@@ -1,7 +1,7 @@
 {
   "apiVersion": 1,
-  "id": "task-board",
-  "name": "Task Board",
+  "id": "cockpit-task",
+  "name": "Task",
   "version": "0.1.0",
   "backend": "src/task-board/module.js",
   "frontend": {
@@ -12,12 +12,12 @@
   "roles": [
     {
       "id": "owner",
-      "name": "Task Owner",
+      "name": "Owner",
       "description": "Coordinate independent Tasks and explicitly assign capable Executors.",
       "instructions": "roles/task-owner.md",
-      "skillDirectories": ["skills/task-owner"],
+      "skillDirectories": ["skills/cockpit-task-owner"],
       "mcpServers": {
-        "task": {
+        "cockpit-task": {
           "type": "http",
           "path": "/mcp",
           "tools": ["task_read", "task_create", "task_session_create", "task_assign", "task_edit", "task_cancel"]
@@ -26,12 +26,12 @@
     },
     {
       "id": "executor",
-      "name": "Task Executor",
+      "name": "Executor",
       "description": "Deliver an assigned Task, synchronizing its definition and reporting work.",
       "instructions": "roles/task-executor.md",
-      "skillDirectories": ["skills/task-executor"],
+      "skillDirectories": ["skills/cockpit-task-executor"],
       "mcpServers": {
-        "task": {
+        "cockpit-task": {
           "type": "http",
           "path": "/mcp",
           "tools": ["task_read", "task_edit", "task_ack", "task_report", "task_cancel"]
