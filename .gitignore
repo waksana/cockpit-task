@@ -5,3 +5,7 @@ node_modules/
 *.db-wal
 *.token
 coverage/
+dist/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

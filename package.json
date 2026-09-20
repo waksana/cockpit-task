@@ -10,6 +10,7 @@
     "start": "node src/launch.js",
     "mcp": "node src/mcp.js",
     "test": "node --test test/*.test.js",
+    "package:module": "node scripts/package-task-board.js",
     "admin": "node src/admin.js"
   },
   "dependencies": {

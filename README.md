@@ -1,4 +1,29 @@
-# Work Commander
+# Task Board
+
+Task Board 是 Cockpit 模块：用共同的持久化 Task 记录协作，通过 Owner / Executor
+角色组合短指令、Skill 和 HTTP MCP。Task 引用直接在聊天中显示卡片，详情按需读取；
+不保存聊天、不自动监工或调度、不自动发送进度或完成通知。
+
+一个 Executor 完整负责一个独立 Task，可在内部使用 subagents。要求直接修改 Task，
+Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的版本。没有子任务树、
+改派或续办；Coding / Research 的具体工作方法不属于 Task 模块。
+
+**使用与打包：[Task Board](docs/task-board.md)**。新模块需要支持模块角色和宿主
+能力接口的 Cockpit；旧版宿主不能仅靠安装这个包获得这些能力。构建、合并不等于安装
+或升级，部署须由操作者另行决定。
+
+契约：[产品设计](docs/task-design.md) · [Schema](docs/task-schema.md) ·
+[MCP 工具](docs/task-mcp-contract.md) · [角色 Skills](docs/task-tools-skills.md) ·
+[宿主接入](docs/task-host-contract.md) · [实现边界](docs/task-implementation.md)。
+
+新模块代码位于 `src/task-board/`，卡片位于 `web/task-board/`；
+`npm run package:module` 生成独立模块归档。数据仅使用宿主提供的模块目录，
+不会导入真实旧数据库、覆盖旧安装或启动旧 daemon。
+
+## Legacy Work Commander
+
+**以下内容只描述保留的旧服务，不是 Task Board 模块的启动或使用说明。**
+旧 `npm start`、stdio MCP、权限凭证、数据库和部署脚本均与新模块分离。
 
 独立的工作服务 + SQLite + MCP + 两层协作 skill + 私人工作页。Cockpit 仍是唯一真实会话基础服务；这里不保存聊天、模型目录或会话状态副本，不运行指挥 agent、巡查器或自动调度。
 

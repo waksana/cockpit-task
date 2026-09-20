@@ -1,0 +1,42 @@
+{
+  "apiVersion": 1,
+  "id": "task-board",
+  "name": "Task Board",
+  "version": "0.1.0",
+  "backend": "src/task-board/module.js",
+  "frontend": {
+    "entry": "web/task-board/index.js",
+    "styles": ["web/task-board/style.css"],
+    "assets": ["web/task-board/index.js", "web/task-board/style.css"]
+  },
+  "roles": [
+    {
+      "id": "owner",
+      "name": "Task Owner",
+      "description": "Coordinate independent Tasks and explicitly assign capable Executors.",
+      "instructions": "roles/task-owner.md",
+      "skillDirectories": ["skills/task-owner"],
+      "mcpServers": {
+        "task": {
+          "type": "http",
+          "path": "/mcp",
+          "tools": ["task_read", "task_create", "task_session_create", "task_assign", "task_edit", "task_cancel"]
+        }
+      }
+    },
+    {
+      "id": "executor",
+      "name": "Task Executor",
+      "description": "Deliver an assigned Task, synchronizing its definition and reporting work.",
+      "instructions": "roles/task-executor.md",
+      "skillDirectories": ["skills/task-executor"],
+      "mcpServers": {
+        "task": {
+          "type": "http",
+          "path": "/mcp",
+          "tools": ["task_read", "task_edit", "task_ack", "task_report", "task_cancel"]
+        }
+      }
+    }
+  ]
+}
