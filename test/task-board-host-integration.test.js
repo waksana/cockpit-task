@@ -51,6 +51,8 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
   const providerErrors = [];
   const bridgeCalls = [];
   const nativeMessages = [];
+  const nativeTaskReads = new Map();
+  const nativeTaskReports = new Map();
   const isolatedSessionIds = new Set();
   const reports = [];
   let invalidations = 0;
@@ -113,11 +115,75 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
         const message = JSON.parse(text);
         requests.push(message);
         const completion = { id: 'synthetic-task-integration', created: 1, model: message.model };
+        const contentText = content => {
+          if (typeof content === 'string') return content;
+          assert.ok(Array.isArray(content), 'Expected native text content');
+          return content.map(part => {
+            assert.equal(part.type, 'text');
+            return part.text;
+          }).join('\n');
+        };
+        const latestUser = message.messages.findLast(item => item.role === 'user');
+        const taskReference = latestUser && /\[Task\]\(task:([0-9a-f-]{36})\)/u.exec(contentText(latestUser.content));
+        let toolCall;
+        if (taskReference) {
+          const taskId = taskReference[1];
+          const actor = /Native session ID: ([0-9a-f-]{36})/u.exec(JSON.stringify(message.messages));
+          assert.ok(actor, 'Role System Prompt must supply the actual actor session ID');
+          const call = (name, action, input) => {
+            const tools = message.tools.filter(tool => tool.type === 'function' && tool.function.name.endsWith(name));
+            assert.equal(tools.length, 1, `Executor must have exactly one native ${name} tool`);
+            return {
+              id: `synthetic-${action}-${taskId}`, type: 'function',
+              function: {
+                name: tools[0].function.name,
+                arguments: JSON.stringify({ task_id: taskId, actor_session_id: actor[1], ...input }),
+              },
+            };
+          };
+          const replyFor = action => message.messages.findLast(item =>
+            item.role === 'tool' && item.tool_call_id === `synthetic-${action}-${taskId}`);
+          const envelopeFor = reply => {
+            const envelope = JSON.parse(contentText(reply.content));
+            assert.equal(envelope.error, null, 'Native MCP business call must succeed');
+            assert.ok(envelope.definition_check);
+            return envelope;
+          };
+          const readReply = replyFor('read');
+          if (!readReply) {
+            toolCall = call('task_read', 'read', { view: 'execution' });
+          } else {
+            const execution = envelopeFor(readReply).result;
+            assert.equal(execution.id, taskId);
+            assert.equal(execution.description, 'Synthetic complete requirements. No external work.',
+              'Native tool execution must return the stored definition, not only advertise a tool');
+            nativeTaskReads.set(taskId, execution);
+            const input = { revision: execution.revision, write_context: execution.write_context };
+            const ackReply = replyFor('ack');
+            if (!ackReply) {
+              toolCall = call('task_ack', 'ack', { ...input, request_id: `native-ack-${taskId}` });
+            } else {
+              envelopeFor(ackReply);
+              const reportReply = replyFor('report');
+              if (!reportReply) {
+                toolCall = call('task_report', 'report', {
+                  ...input, request_id: `native-report-${taskId}`, status: 'in_progress',
+                  activity: { text: 'Native Executor began the assigned Task.' },
+                });
+              } else {
+                nativeTaskReports.set(taskId, envelopeFor(reportReply));
+              }
+            }
+          }
+        }
+        const assistantMessage = toolCall
+          ? { role: 'assistant', content: null, tool_calls: [toolCall] }
+          : { role: 'assistant', content: 'Synthetic local acknowledgment. No external work.' };
         if (message.stream) {
           response.writeHead(200, { 'content-type': 'text/event-stream' });
           for (const choice of [
-            { delta: { role: 'assistant', content: 'Synthetic local acknowledgment. No tools or external work.' }, finish_reason: null },
-            { delta: {}, finish_reason: 'stop' },
+            { delta: toolCall ? { role: 'assistant', tool_calls: [{ index: 0, ...toolCall }] } : assistantMessage, finish_reason: null },
+            { delta: {}, finish_reason: toolCall ? 'tool_calls' : 'stop' },
           ]) response.write(`data: ${JSON.stringify({
             ...completion, object: 'chat.completion.chunk', choices: [{ index: 0, ...choice }],
           })}\n\n`);
@@ -126,7 +192,7 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
           response.writeHead(200, { 'content-type': 'application/json' });
           response.end(JSON.stringify({
             ...completion, object: 'chat.completion',
-            choices: [{ index: 0, message: { role: 'assistant', content: 'Synthetic local acknowledgment.' }, finish_reason: 'stop' }],
+            choices: [{ index: 0, message: assistantMessage, finish_reason: toolCall ? 'tool_calls' : 'stop' }],
             usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
           }));
         }
@@ -336,6 +402,13 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
     }
     const reference = `[Task](task:${taskId})`;
     assert.deepEqual(nativeMessages.filter(message => message.sessionId === executorId), [{ sessionId: executorId, content: reference }]);
+    assert.equal(nativeTaskReads.size, 1, 'The native Executor must execute the advertised Task MCP tool');
+    assert.ok(nativeTaskReads.has(taskId));
+    assert.equal(nativeTaskReports.size, 1, 'The native Executor must ACK and report through its actual MCP tools');
+    assert.ok(nativeTaskReports.has(taskId));
+    const nativeStarted = (await tool('task_read', { view: 'execution', task_id: taskId })).result;
+    assert.equal(nativeStarted.acknowledged_revision, 1);
+    assert.equal(nativeStarted.status, 'in_progress');
     assert.deepEqual((await tool('task_assign', assignInput)).result, assigned.result);
     assert.deepEqual(bridgeCalls.filter(call => call.name === 'prompt'), [
       { name: 'prompt', body: { sessionId: executorId, text: reference, mode: 'enqueue' } },
@@ -353,7 +426,7 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
     const updated = (await tool('task_read', { view: 'execution', task_id: taskId })).result;
     assert.equal(updated.description, description);
     assert.equal(updated.revision, 2);
-    assert.equal(updated.acknowledged_revision, null);
+    assert.equal(updated.acknowledged_revision, 1, 'An Owner edit must not ACK the new revision on behalf of the Executor');
     const invalidReport = await mcp.callTool({
       name: 'task_report',
       arguments: {
@@ -427,7 +500,7 @@ test('packaged Task Board integrates with real isolated host roles, native SDK a
     assert.equal(persistedActivity.json().result.items[0].text, latest.activity.text);
     assert.ok(reports.every(({ error }) => error.code === 'MODULE_VERSION_MISMATCH'), reports.map(({ error }) => String(error)).join('\n'));
     assert.deepEqual(providerErrors, []);
-    t.diagnostic('Verified real artifact install/activation, digest guards, official HTTP MCP, native Owner/Executor/union roles, once-only dispatch, no edit messages, cold resume and persistent module restart.');
+    t.diagnostic('Verified real artifact install/activation, digest guards, official HTTP MCP, native Owner/Executor/union roles, once-only dispatch, actual native Task read/ACK/report tool execution, no edit messages, cold resume and persistent module restart.');
   } catch (error) {
     failed = true;
     t.diagnostic(`Integration failed while ${stage}.`);
