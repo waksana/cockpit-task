@@ -15,7 +15,7 @@
 | `task_read` | 是 | 是 | 按角色关注点读取，说明、历史、成果与操作结果按需展开 |
 | `task_create` | 是 | 否 | 只登记，不指派或创建 session |
 | `task_session_create` | 是 | 否 | 创建 Executor session 并配置执行能力，不关联 Task 或发送派单消息 |
-| `task_assign` | 是 | 否 | 对未分配 Task 首次指派，检查已有能力、更新 Task、发送 ID，不补齐角色配置 |
+| `task_assign` | 是 | 否 | 对未分配 Task 首次指派，检查已有能力、更新 Task、发送一次 assigned 引用，不补齐角色配置 |
 | `task_edit` | 是 | 是 | 修改完整 description 或补充资料，不改变执行状态 |
 | `task_ack` | 否 | 是 | 只确认 description 版本 |
 | `task_report` | 否 | 是 | 记录 activity、明确更新状态或提交 outcome，不隐式 ACK |
@@ -35,7 +35,7 @@ Executor 默认工具集合不包含创建 Task 或为自己追加 Owner。本�
 用户明确：普通要求更新只写 Task，不发送追加指令、提醒或待执行 cue。Owner 真正判断本次更新非常重要、不能等待正常同步时，可明确触发强制对齐。
 
 - Owner 按 Skill 先读取并保留 pending 内容，再按已保存的消息 ID 清理，包括其他 session / subagent 的消息；不能盲删未知内容或并发新消息。
-- 随后总结保留的上下文，最后附上 Task updated 引用，合为一条消息发送；不复制完整 description。
+- 随后总结保留的上下文，最后附上 `[Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新 revision 的要求，合为一条消息发送；不复制完整 description。
 - 必要时单次中断主轮次，不循环推进或静默取消后台工作；发送前查看真实原生状态，接受回执不等于已读取或 ACK。
 - 首次指派同样使用非排队启动。目标忙碌或不能安全接收时明确返回未发送，指派工具不擅自中断。
 - 不通过后台巡查、定时发送或 Task 自建消息队列触发该行为，不宣称是原子排他保证。
@@ -50,7 +50,7 @@ Executor 默认工具集合不包含创建 Task 或为自己追加 Owner。本�
 
 | 名称 | 含义 |
 | --- | --- |
-| `task_id` | 已存在 Task 的 ID |
+| `task_id` | 已存在 Task 的 UUID；不是完整 `task:` URI，不含 query |
 | `actor_session_id` | 操作者自报的 session 标识；所有写入必填，读取可选，不是鉴权凭据 |
 | `revision` | agent 实际读取或执行所依据的 description 版本，正整数 |
 | `request_id` | 每次明确变更的稳定请求标识；同请求重试保持不变 |
@@ -112,7 +112,7 @@ UI 可以不提供 actor，不伪造 human session ID；定向读取仍检查该
 
 ### task_session_create
 
-这是已实现的独立入口。Owner 决定新建以及所需工作环境；Task MCP 通过宿主公开能力创建真实 Executor session、装配 Task Executor 所需指导和工具，并确认能力就绪。不能要求 Owner 自己拼装 MCP、skills 和系统指令，或用自报“能力已就绪”代替程序确认。
+这是已实现的独立入口。Owner 决定新建以及所需工作环境；Task MCP 通过宿主公开能力创建真实 Executor session、装配 Task Executor 所需指导和工具，并确认能力就绪。不能要求 Owner 自己拼装 MCP、skills 和角色 System Prompt，或用自报“能力已就绪”代替程序确认。
 
 完整输入：`actor_session_id, request_id, cwd`。不接受 `work_skills`、任意角色或宿主配置透传。Task 只负责自身 Executor 协作能力；Coding / Research 的内容、安装和维护不属于本模块。模块调用 `context.host.call("session/new",{cwd,roles:[{moduleId:"task-board",roleId:"executor"}]})`，再用 `roles/readiness` 与 `session/get` 检查能力及原生状态。
 
@@ -136,8 +136,12 @@ UI 可以不提供 actor，不伪造 human session ID；定向读取仍检查该
 ```text
 确认所选 session 及执行能力可用
   → 首次绑定 Task 的 Executor，ACK 仍为空，等待明确确认和开始执行
-  → 以非排队方式发送约定格式的 Task ID，启动读取
+  → 以非排队方式仅发送一次 [Task assigned to you](task:<uuid>?event=assigned)，启动读取
 ```
+
+该引用就是完整首次派单消息，标签无需 UI 渲染也能说明原因，不复制 description。
+Owner 不再手工重复发送。`event` 是消息/引用元数据，不增加工具参数、Task 字段、
+Task 类型或状态，也不是命令或调度机制。工具的能力检查、原生忙碌判断与幂等规则不变。
 
 发送时 Task 的定义与归属必须仍符合该次操作前提，不能拿先前检查冒充现在可发送。已知目标不能安全接收时，在绑定前拒绝；若绑定后重新检查发现忙碌或冲突，返回归属已应用、消息未发送的真实部分结果，不自动重试或换人。适配器在确认 idle 且队列为空后调用 `prompt({sessionId,text,mode:"enqueue"})`，空闲时直接开始；不使用会中断新启动工作的 immediate。检查与发送之间不是原子窗口，竞态下实际 queued 必须作为异常保留，不能宣称严格 idle-only 保证。
 
@@ -268,7 +272,13 @@ activity 只能引用当前执行归属下本人已经 ACK 过的版本；本人
 
 ## 5. 正常调用示例
 
-以下为调用顺序，省略的共用字段仍为实际输入必填。Task 引用固定为 `[Task](task:<UUID>)`，例如 `[Task](task:de33dc0a-2f93-4c5a-b14e-87111940d520)`；这也是整条首次派单消息，不附 description。
+以下为调用顺序，省略的共用字段仍为实际输入必填。通用引用仍为 `[Task](task:<uuid>)`，例如 `[Task](task:de33dc0a-2f93-4c5a-b14e-87111940d520)`。整条首次派单消息则为 `[Task assigned to you](task:<uuid>?event=assigned)`，不附 description。
+
+只有小写 `assigned` / `updated` 是有效 event。消息原因固定不变，卡片仍读取最新
+Task；renderer 只看 URL 中的显式 event，不从 label 或 Task status 推断。
+通用引用及历史消息不显示事件标题，保持兼容；未知 event、畸形 query 不认领，
+不能丢弃 query 后冒充通用引用。不使用可能被识别为文件的相对 `task/<id>` 路径。
+无需宿主协议变更；File 兼容性与完整引用边界见[实现契约](task-implementation.md#read-boundaries-and-reference)。
 
 ```text
 Owner:
@@ -276,7 +286,7 @@ Owner:
   task_session_create(cwd, ...)                   → 新建并配置 Executor 协作能力
   或 Owner 明确选择已有 session                   → 不隐式新建
   task_read(view=overview, task_id)               → 状态与归属概览、write_context
-  task_assign(task_id, executor, ...)             → 确保能力、关联、发送 ID
+  task_assign(task_id, executor, ...)             → 确保能力、关联、一次发送 assigned 引用
 
 Executor:
   task_read(view=execution, task_id)              → 完整 description v1 与当前工作资料
@@ -292,7 +302,7 @@ Executor:
 
 每次写入都带 actor_session_id 和新的明确 request_id；已有 Task 写入还带读取返回的 write_context，create/session_create 不带。相同操作重试保留相同输入和 request_id。Skill 读取也提交自己的 actor_session_id；每次响应都处理 definition_check。
 
-重要更新由 Owner 按正式 Skill 保存并清理 pending 内容，再用 `cockpit_send_prompt` 一次发送摘要和 `Task updated: [Task](task:<UUID>)`。必要时使用保留队列的单次中断；不用清全部队列的 Stop 作为清理捷径，不重复发送未知结果的消息，不把接续回执当作当前 revision 的 ACK。
+重要更新由 Owner 按正式 Skill 保存并清理 pending 内容，再用 `cockpit_send_prompt` 一次发送摘要，末尾附 `[Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新 revision 的要求，替代旧的文本前缀模板。必要时使用保留队列的单次中断；不用清全部队列的 Stop 作为清理捷径，不重复发送未知结果的消息，不把接续回执当作当前 revision 的 ACK。普通 `task_edit` 不自动发通知，是否发送仅由 Owner 明确决定。
 
 ## 6. 实现边界与历史依据
 

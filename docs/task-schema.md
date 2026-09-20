@@ -16,6 +16,12 @@
 
 **访问模型更新（节点 3）：** 系统按所选角色注入 MCP，有对应工具即可操作其他 Task，不按 owner / executor 归属限制读写。以下角色行为表示协作分工，不是访问控制；作者来源、当前工作上下文和 ACK 的业务记录不依赖新的通用可信身份服务。版本、状态、幂等与绑定不可替换等数据规则继续保留。
 
+**消息事件不改变 Schema：** 通用引用仍为 `[Task](task:<uuid>)`，首次派单和 Owner
+显式重要更新分别使用 `?event=assigned` / `?event=updated`。event 仅是该条消息
+固定的引用元数据，不是 Task 实体字段、类型、状态、命令或调度事件。Task ID 始终
+是纯 UUID，不含 URI/query。卡片保留消息原因并读取当前 Task 数据；事件不改变
+revision、ACK、activity 或生命周期。完整语法见[实现契约](task-implementation.md#read-boundaries-and-reference)。
+
 ## 1. 已确认的边界
 
 | 方面 | 当前决定 |
@@ -25,7 +31,7 @@
 | 角色 | Owner 创建和派单，Executor 更新自己承接的 Task；不实现已有 Executor 追加 Owner |
 | 信任 | Owner 充分信任 Executor，不设置默认的上游验收关卡 |
 | 共同记录 | 任务背景、完整要求、澄清、动态和成果写入 Task；外部资料可通过引用关联 |
-| 派单 | 消息仅为标准引用 `[Task](task:<UUID>)`，不复制说明 |
+| 派单 | `task_assign` 仅发送一次 `[Task assigned to you](task:<uuid>?event=assigned)`，不复制说明、不另发手工派单 |
 | 登记 | 允许先登记 Task，不创建 Executor；之后由 Owner 明确派单，同一 Task ID 保持不变 |
 | 执行 session 创建 | Owner 通过独立 Task MCP 入口创建并配置能力；不与 Task 登记或指派合并，不要求 Owner 自行拼装底层能力 |
 | 进度读取 | Owner 主动读取 Task；执行者不发送进度、阻塞、完成等反向消息 |
@@ -35,7 +41,7 @@
 | 调用时提醒 | 每次 Executor 调用 Task MCP 都检查最新 description 与 ack；发现待确认更新时提示读取并 ack，不自动确认 |
 | 旧版执行活动 | 当前 Executor 可以补写本人已 ACK 过版本的 activity，仍指向原 description revision；未确认版本拒绝，旧版状态与成果不能保存 |
 | 重要修订 | Owner 修改后查看 Executor 运行情况与最近活动，自行判断是否打断并要求重新对齐；不自动中断 |
-| 普通更新与强制对齐 | 普通更新只改 Task；非常重要的更新由 Owner 按 Skill 处理 pending，再一次发送摘要和 Task updated 引用，不自动触发 |
+| 普通更新与强制对齐 | 普通更新只改 Task；非常重要的更新由 Owner 按 Skill 处理 pending，再一次发送摘要和 `[Task updated](task:<uuid>?event=updated)` 及读取/ACK 最新版要求，不自动触发 |
 | 其他来源的队列 | Owner 先读取并保留内容再按消息 ID 清理，包含其他 session / subagent 消息；未知内容及并发新消息不盲删，不循环中断或静默取消后台工作 |
 | 同步 | 开始、重要阶段间、重要操作前、交付前及恢复时检查最新要求；不忙循环轮询 |
 | 一致性 | 旧确认、旧结果不能覆盖新版本或结束事实；跨 Task 操作也不能虚报执行者确认或更换已有绑定 |
@@ -154,7 +160,7 @@ acknowledged_revision          当前 Executor 确认的 description 版本
 | 行为 | 操作主体 | 工作记录效果 |
 | --- | --- | --- |
 | 登记 | Owner | 新建 `todo`，`executor=null`，尚未确认 |
-| 明确指派 | Owner | 接收 Owner 已创建/选定的 session；确保能力后更新 Task 的 Executor，再发送 Task ID；仍为 `todo`，指派不等于承接 |
+| 明确指派 | Owner | 接收 Owner 已创建/选定的 session；确保能力后更新 Task 的 Executor，再发送一次 assigned 引用；仍为 `todo`，指派不等于承接 |
 | 确认定义 | 当前 Executor | 读取并 ACK 当前 revision，仅更新 acknowledged_revision，不改变 status 或 activity |
 | 开始执行 | 当前 Executor | 明确更新为 `in_progress`，与 ACK 分开 |
 | 报告阻塞 / 恢复处理 | 当前 Executor | `in_progress`、`blocked` 之间按实际情况更新；保存动态，不改变要求版本 |
@@ -171,7 +177,7 @@ done / cancelled 不接受普通报告恢复执行；指派只用于未分配的
 用户确认允许先登记、之后再派单。只登记时 Task 处于 `todo`、Executor 为空，不创建 session 或发送消息。稍后派单使用同一 Task，不为启动执行再复制一条工作记录。节点 2 进一步确认不提供合并登记与派单的工具；Owner 自己判断新建还是复用 session，接口保持可组合。
 
 1. Owner 与用户澄清，将足够执行的完整工作约定写入 Task。
-2. Owner 通过独立 Task MCP 入口创建并配置 Executor session，或明确选择已有 session，然后调用指派 MCP 工具。指派工具确认目标当前能力、更新 Task 的执行归属、发送只携带 Task ID 的消息；Owner 不自行检查底层能力或重复发送，指派工具也不创建替代 session。
+2. Owner 通过独立 Task MCP 入口创建并配置 Executor session，或明确选择已有 session，然后调用指派 MCP 工具。指派工具确认目标当前能力、更新 Task 的执行归属、发送一次 assigned 引用；Owner 不自行检查底层能力或重复发送，指派工具也不创建替代 session。
 3. Executor 根据角色指导读取当前 Task，ACK 对应 description 版本；真正开始工作时另行明确更新执行状态，不把两者合并。
 4. Executor 内部组织步骤或 subagent，处理完整工作；有意义的动态写回 Task。
 5. 用户可以直接与 Executor 澄清；影响工作的结论由 Executor 写回共同记录，不经 Owner 转述。
@@ -218,7 +224,7 @@ activity 所引用的版本必须在当前执行归属下记录过该 Executor �
 
 ### 先登记、后执行
 
-Owner 登记“设计 Task 模块”，暂未安排执行者：Task 为 `todo`，Executor 为空，没有消息。后来明确派单，准备好 Executor 的角色和读取能力，发送只携带 Task ID 的引用。Executor 读取并 ACK，状态仍为 todo；实际开始工作时再明确更新为 in_progress。派单及阶段动态都不改变 description 版本，动态指向执行所依据的版本。完成 description 所要求的交付后，Executor 写入 outcome 并直接标记 `done`。Owner 下次主动读取时看到成果。
+Owner 登记“设计 Task 模块”，暂未安排执行者：Task 为 `todo`，Executor 为空，没有消息。后来明确派单，准备好 Executor 的角色和读取能力，由 `task_assign` 发送一次 assigned 引用。Executor 读取并 ACK，状态仍为 todo；实际开始工作时再明确更新为 in_progress。派单及阶段动态都不改变 description 版本，动态指向执行所依据的版本。完成 description 所要求的交付后，Executor 写入 outcome 并直接标记 `done`。Owner 下次主动读取时看到成果。
 
 ### Executor 直接澄清与修订
 
@@ -226,7 +232,7 @@ Owner 登记“设计 Task 模块”，暂未安排执行者：Task 为 `todo`�
 
 ### Owner 的重要修订
 
-Owner 将“允许部署”改为“本轮不部署”，修订 description、推进版本并追加 changelog，不替 Executor 确认。随后查看其实际运行情况与最近活动，判断是否即将执行部署，是否需要明确打断。不能因为要求已经落盘就假定正在执行的外部操作停止。重新对齐时仍使用 Task ID，让 Executor 读取真实当前要求，不在消息里复制另一份 description。
+Owner 将“允许部署”改为“本轮不部署”，修订 description、推进版本并追加 changelog，不替 Executor 确认。随后查看其实际运行情况与最近活动，判断是否即将执行部署，是否需要明确打断。不能因为要求已经落盘就假定正在执行的外部操作停止。重新对齐时按 Skill 保留并处理 pending 内容，在单条摘要后附 updated 引用及读取/ACK 最新 revision 的要求，不在消息里复制另一份 description。
 
 ### 结束后的复用与迟到请求
 

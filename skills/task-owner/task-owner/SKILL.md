@@ -24,7 +24,7 @@ Include your actor_session_id on reads too, so any Task you also execute is chec
 
 When a new Executor is needed, call `task_session_create(cwd, ...)`. It creates
 and configures the Executor role through Cockpit; do not manually assemble MCP,
-Skill or system instructions. Inspect creation and readiness separately. A known
+Skill or role System Prompt. Inspect creation and readiness separately. A known
 session ID with failed readiness is not permission to create a replacement.
 
 Alternatively, choose an existing Executor candidate from Cockpit's session list
@@ -33,8 +33,9 @@ and its recorded roles. A role label is not current capability proof.
 One session can execute at most one unfinished Task.
 
 Read `task_read(view="overview", task_id, ...)`, then call `task_assign` with the
-selected Executor, revision and context. It binds the Task and sends its reference
-once. Do not send a second manual dispatch. Known busy targets are not interrupted
+selected Executor, revision and context. It binds the Task and sends exactly one
+`[Task assigned to you](task:<uuid>?event=assigned)` as the entire first dispatch.
+Do not send a second manual dispatch. Known busy targets are not interrupted
 or queued. Acceptance is not reading, ACK or actual work.
 
 If an external step fails, inspect `task_read(view="operation", request_id, ...)`.
@@ -94,12 +95,13 @@ Do not use `cockpit_advance_queue` for this workflow.
 Pending context:
 <summary of the preserved pending messages>
 
-Task updated: [Task](task:<id>)
+[Task updated](task:<uuid>?event=updated)
 Read the current Task and acknowledge its latest revision before continuing.
 ```
 
-Replace `<id>` with the actual Task ID. This message explains why it was sent;
-it does not duplicate the Task description. Cleanup and sending are not atomic.
+Replace `<uuid>` with the actual Task ID. This replaces the old text-prefix
+notice. Its label explains why it was sent even without card rendering; it does
+not duplicate the Task description. Cleanup and sending are not atomic.
 If sending is queued or unconfirmed, inspect the actual result, not another send.
 Acceptance is not reading or ACK; use the Executor's recorded ACK of the current
 revision as confirmation when checking alignment. Never perform this workflow
@@ -112,7 +114,16 @@ Cancellation does not stop the native session.
 ## References and results
 
 Reference a Task with `[Task](task:<uuid>)`; the ID comes from Task MCP.
-The frontend resolves current data. Do not copy description into dispatch messages.
+Pass only the UUID as `task_id`, never the full URI or query. Use the event-bearing
+forms above only for their stated message reasons; only lowercase `assigned` and
+`updated` are accepted. The event is immutable message/reference metadata, not a
+Task type, status, command or event bus. Rendering uses the URL event, not the label or Task
+status. Generic references and old messages remain compatible without an event
+header; unknown events and malformed queries stay unclaimed. The frontend resolves
+current data without changing the message reason.
+Do not use relative `task/<id>` links, which may be treated as files.
+Do not copy description into dispatch messages. These references add no tool,
+Task field, scheduler or automatic notification after `task_edit`.
 References between independent Tasks are links, not dependencies or child Tasks.
 
 Every response separates `result`, `error` and `definition_check`. Check all three,

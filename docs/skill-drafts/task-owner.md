@@ -45,7 +45,7 @@ send a message.
 When a new Executor is needed, use `task_session_create` with the working
 directory. Task MCP creates the real session through
 host capabilities and configures its execution capability. Do not manually
-assemble or certify its MCP, skills or system instructions. Inspect the returned
+assemble or certify its MCP, skills or role System Prompt. Inspect the returned
 creation and readiness results; a created session alone is not proof of readiness.
 
 Alternatively, use the host session list, including its recorded creation roles,
@@ -60,8 +60,9 @@ A session can hold only one unfinished Task; do not displace its work.
 Session creation neither registers a Task nor sends an assignment.
 
 Read the Task, then use `task_assign` with the selected session. That operation
-ensures execution capability is currently available, updates the assignment, and sends the Task
-reference. Do not send a second manual assignment message. Confirmed submission
+ensures execution capability is currently available, updates the assignment, and sends exactly
+one `[Task assigned to you](task:<uuid>?event=assigned)` as the entire dispatch.
+Do not send a second manual assignment message. Confirmed submission
 does not establish ACK or execution.
 
 Assignment must start without queueing. If the target cannot safely receive it,
@@ -118,7 +119,11 @@ Do not silently cancel background work or equate an idle label with readiness.
 Summarize the preserved messages with their sources, unresolved requests and
 useful references. Confirm Task is still active and assigned to the Executor,
 then send one message containing that summary followed by
-`Task updated: [Task](task:<UUID>)` and a request to read/ACK the latest revision.
+`[Task updated](task:<uuid>?event=updated)` and the instruction:
+“Read the current Task and acknowledge its latest revision before continuing.”
+This replaces the former text-prefix notice. Its label explains the reason even
+without card rendering; it is sent only by Owner's explicit decision, never
+automatically after `task_edit`.
 The summary is context, not a competing requirements document. Do not resend the
 individual messages or repeat the Task reference in a second message. Unknown or
 queued sending outcomes need inspection, not retries. Cleanup and sending are not
@@ -134,13 +139,20 @@ Preserve `request_id` and input on retries. Read the original operation on
 failure or uncertainty. A partial result must be handled by its recorded effects,
 not by blindly repeating the entire operation.
 
-Display a Task using `[Task](task:<UUID>)`, substituting the actual Task ID.
-The frontend reads the record to render its card. Do not write a competing status
-card or include instructions in the reference.
+Display an ordinary Task reference using `[Task](task:<uuid>)`, substituting the
+actual returned UUID. Pass just that UUID to `task_id`, not the full URI/query.
+Use the assigned/updated forms above for those message reasons; only lowercase
+`assigned` and `updated` are accepted. Event metadata belongs immutably to the
+message/reference, not a Task type, status, command, event bus or scheduler.
+The frontend reads current Task data and uses the URL event, never the label or
+current status, to identify the message reason. Generic and old references remain
+compatible without event headers; unknown events or malformed queries stay
+unclaimed. No new MCP tools or Task fields are needed. Do not write a competing
+status card or use relative `task/<id>` paths that can be treated as files.
 
 For example, `[Task](task:de33dc0a-2f93-4c5a-b14e-87111940d520)` illustrates the
-syntax with a synthetic UUID; actual calls must use a returned Task ID. The
-entire initial dispatch is one such reference, never copied instructions.
+generic syntax with a synthetic UUID; actual calls must use a returned Task ID.
+Initial dispatch uses the assigned form above, never copied instructions.
 
 Coding and research methods belong to separately provided work skills, not this
 module. Follow applicable external guidance without requiring a fixed work-skill

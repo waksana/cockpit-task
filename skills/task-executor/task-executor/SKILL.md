@@ -12,11 +12,25 @@ If you also have Owner capabilities, they do not transfer your delivery responsi
 
 ## Read, acknowledge, start
 
-A dispatch is `[Task](task:<uuid>)`. Call `task_read` with view execution, task_id
-and your actor_session_id. Read the complete description, references, metadata,
+A first dispatch is `[Task assigned to you](task:<uuid>?event=assigned)`.
+An explicit Owner update notice is `[Task updated](task:<uuid>?event=updated)`,
+followed by an instruction to read and ACK the latest revision. These labels
+explain why the message was sent even without UI rendering. Generic references
+and old messages using `[Task](task:<uuid>)` remain valid.
+
+Extract just the UUID as `task_id`, not the full URI or query. Call `task_read`
+with view execution, task_id and your actor_session_id.
+Read the complete description, references, metadata,
 revision, assignment and status. Other details and history are separate views.
 Use your session ID supplied by the host, not an ID guessed from a title.
 Reported actor IDs are attribution, not authenticated authority.
+
+Only lowercase `assigned` and `updated` are accepted event values. The event is
+immutable message/reference metadata, not a Task type, status or command; the card
+reads current Task data. Rendering uses the explicit URL event, not the label or
+current status. Generic references have no event header; unknown events or malformed
+queries are not silently reinterpreted as generic references. Use the generic
+form for ordinary display, never relative `task/<id>` file-like paths.
 
 Call `task_ack` for the exact current revision and returned write_context.
 ACK changes neither status nor activity. Then call `task_report` explicitly with
@@ -37,6 +51,11 @@ Do not merely relabel old activity or outcomes as work against the new definitio
 After interrupted or queued work resumes, reread the current Task before proceeding.
 Do not rely only on the last cue or previous turn's memory. Do not ask the Owner to
 queue instructions: ordinary updates live in Task.
+On an explicit updated notice, reconcile the current requirements and ACK the latest
+revision before continuing. The preserved-message summary is context, not a second
+requirements document. `task_edit` does not automatically send notices; their use
+is Owner's decision, not a new tool, Task field or scheduler. Do not duplicate the
+first dispatch sent by `task_assign`.
 
 Clarify genuine decisions directly with the user. Record changed requirements
 with `task_edit`, supplying the complete new description and a reason.

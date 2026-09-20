@@ -30,6 +30,12 @@
   font-weight: 600;
 }
 
+.tb-card-event {
+  color: var(--ck-color-accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .tb-card-meta {
   color: var(--ck-color-muted);
   font-size: 12px;

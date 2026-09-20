@@ -59,10 +59,14 @@ function fixture() {
 test('Task references claim only exact link targets with canonical UUIDs', () => {
   assert.equal(parseTaskReference({ kind: 'link', target: `task:${taskId}` }), taskId);
   assert.equal(parseTaskReference({ kind: 'link', target: `task:${taskId.toUpperCase()}` }), taskId);
+  assert.equal(parseTaskReference({ kind: 'link', target: `task:${taskId}?event=assigned` }), taskId);
+  assert.equal(parseTaskReference({ kind: 'link', target: `task:${taskId}?event=updated` }), taskId);
   for (const target of [
     `TASK:${taskId}`, `Task:${taskId}`, `task:${taskId}#revision`, `task:${taskId}?view=execution`,
     `task://${taskId}`, ` task:${taskId}`, `task:${taskId}\n`, `task:${taskId}/`, 'task:not-an-id',
     `https://example.test/task:${taskId}`, `[Task](task:${taskId})`, null, {},
+    `task:${taskId}?event=unknown`, `task:${taskId}?event=updated&event=assigned`,
+    './report.csv', 'file:///tmp/report.csv',
   ]) assert.equal(parseTaskReference({ kind: 'link', target }), null, String(target));
   assert.equal(parseTaskReference({ kind: 'image', target: `task:${taskId}` }), null);
   assert.equal(parseTaskReference(null), null);
@@ -108,6 +112,46 @@ test('activation requires public compatibility and preserves native fallback on 
   assert.equal(renderer.component({ node: { kind: 'link', target: 'https://example.test' }, fallback }), fallback);
   const rendered = renderer.component({ node: { kind: 'link', target: `task:${taskId}` }, fallback });
   assert.equal(rendered.props.taskId, taskId);
+  assert.equal(rendered.props.event, null);
+  for (const event of ['assigned', 'updated']) {
+    const node = { kind: 'link', target: `task:${taskId}?event=${event}`, label: 'An unrelated label' };
+    assert.equal(renderer.matches(node), true);
+    assert.equal(renderer.component({ node, fallback }).props.event, event);
+  }
+  const unknown = { kind: 'link', target: `task:${taskId}?event=deleted`, label: 'Task assigned to you' };
+  assert.equal(renderer.matches(unknown), false);
+  assert.equal(renderer.component({ node: unknown, fallback }), fallback);
+});
+
+test('card event headings come from the message and survive loading, failure and Task updates', () => {
+  let snapshot = { phase: 'loading', data: null, error: null };
+  const context = {
+    apiVersion: 2, uiVersion: 1, createPortal() {},
+    signal: new AbortController().signal,
+    react: {
+      Fragment: 'fragment',
+      createElement: (type, props, ...children) => ({ type, props, children }),
+      useMemo: callback => callback(),
+      useSyncExternalStore: () => snapshot,
+      useEffect() {},
+      useRef: () => ({ current: null }),
+      useState: value => [value, () => {}],
+    },
+  };
+  const renderer = activate(context).markdown[0];
+  const render = (event, label = 'Task') => {
+    const node = { kind: 'link', target: `task:${taskId}${event ? `?event=${event}` : ''}`, label };
+    const card = renderer.component({ node, fallback: null });
+    return card.type(card.props).children[0];
+  };
+  const heading = card => card.children.find(child => child?.props?.className === 'tb-card-event');
+  assert.deepEqual(heading(render('assigned')).children, ['Task assigned to you']);
+  snapshot = { phase: 'ready', data: { ...result, status: 'done', revision: 4 }, error: null };
+  assert.deepEqual(heading(render('assigned', 'Task updated')).children, ['Task assigned to you']);
+  assert.deepEqual(heading(render('updated', 'Task assigned to you')).children, ['Task updated']);
+  assert.equal(heading(render(null, 'Task updated')), undefined);
+  snapshot = { phase: 'missing', data: null, error: new Error('Missing Task') };
+  assert.deepEqual(heading(render('updated')).children, ['Task updated']);
 });
 
 test('HTTP reads use the scoped POST contract, without reported actor or chat requests', async () => {

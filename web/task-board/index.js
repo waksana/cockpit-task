@@ -1,4 +1,5 @@
-const TASK_TARGET = /^task:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+import { parseTaskTarget, TASK_EVENTS } from '../../src/task-board/reference.js';
+
 const STATUS_LABELS = {
   todo: 'To do',
   in_progress: 'In progress',
@@ -9,9 +10,7 @@ const STATUS_LABELS = {
 };
 
 export function parseTaskReference(node) {
-  if (node?.kind !== 'link' || typeof node.target !== 'string') return null;
-  if (!node.target.startsWith('task:')) return null;
-  return TASK_TARGET.exec(node.target.toLowerCase())?.[1] ?? null;
+  return node?.kind === 'link' ? parseTaskTarget(node.target)?.taskId ?? null : null;
 }
 
 export function safeReferenceHref(target) {
@@ -397,7 +396,7 @@ export function activate(context) {
     ), document.body);
   }
 
-  function Card({ taskId }) {
+  function Card({ taskId, event }) {
     const state = useRead({ view: 'overview', task_id: taskId });
     const [open, setOpen] = useState(false);
     const button = useRef(null);
@@ -415,6 +414,10 @@ export function activate(context) {
         'aria-expanded': open,
         onClick: () => setOpen(true),
       },
+      event ? h('span', {
+        className: 'tb-card-event',
+        title: 'Why this message was sent; current Task data is shown below.',
+      }, TASK_EVENTS[event]) : null,
       h('span', { className: 'tb-card-title' }, summary),
       task ? h(React.Fragment, null,
         h('span', { className: 'tb-card-meta' }, `${statusLabel(task.status)} · Executor: ${task.executor ?? 'Unassigned'}`),
@@ -427,8 +430,8 @@ export function activate(context) {
   }
 
   function TaskReference({ node, fallback }) {
-    const taskId = parseTaskReference(node);
-    return taskId ? h(Card, { key: taskId, taskId }) : fallback;
+    const reference = node?.kind === 'link' ? parseTaskTarget(node.target) : null;
+    return reference ? h(Card, { key: `${reference.taskId}:${reference.event ?? ''}`, ...reference }) : fallback;
   }
 
   return {
