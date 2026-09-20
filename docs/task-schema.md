@@ -196,7 +196,7 @@ Owner 修订时不替 Executor 确认。Executor 在之后的检查点主动读�
 
 重要性判断和是否打断由 Owner 负责，不预设自动检测规则、自动取消或自动发消息。Task 的 revision 保护能够拒绝过期更新，但不能撤销执行者已经做出的外部操作，因此不能用版本保护代替必要的主动中断判断。
 
-用于判断的原生动态和 Task 自报动态必须区分，未知仍是未知。普通修订只更新 Task；非常重要的更新由 Owner 按[正式 Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff)保存 pending 内容、清理已保存项，整理摘要并在末尾附 Task updated 引用，一次发送。需要中断时仅中断主轮次一次，真实后台工作、并发新消息和未知结果由 Owner 明确处理；不以 idle 标签或消息接受回执冒充可接续或已确认。修订本身仍不发消息，也不触发循环。
+用于判断的原生动态和 Task 自报动态必须区分，未知仍是未知。普通修订只更新 Task；非常重要的更新由 Owner 按 [Owner 随包参考](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)保存 pending 内容、清理已保存项，整理摘要并在末尾附 Task updated 引用，一次发送。需要中断时仅中断主轮次一次，真实后台工作、并发新消息和未知结果由 Owner 明确处理；不以 idle 标签或消息接受回执冒充可接续或已确认。修订本身仍不发消息，也不触发循环。
 
 ## 5. 归属、修订与旧结果保护
 

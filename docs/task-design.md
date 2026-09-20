@@ -5,7 +5,7 @@
 讨论跟踪：[cockpit-task#1](https://github.com/waksana/cockpit-task/issues/1)
 
 **后续决定（2026-09-20，覆盖下文旧队列方案）：** 重要更新的队列处理写入
-[Owner Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md#exceptional-update-handoff)，
+[Owner 随包参考](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)，
 不再推荐自动推进 MCP。Owner 先读取并保留 pending 内容，再按已保存 ID 清理，
 随后总结，最后附 Task updated 引用一次发送；普通更新仍然静默。
 宿主同步移除旧 helper，能力就绪仅在创建后确认、指派前等明确请求时检查，

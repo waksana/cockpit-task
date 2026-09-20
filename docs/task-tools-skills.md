@@ -6,22 +6,25 @@
 
 日期：2026-09-20
 
-**原则型 Skill 修订讨论中：** 原则型正文仍待审核，尚未发布。
-当前打包资源使用已确认的 `cockpit-task-owner` / `cockpit-task-executor` 名称，
-仅重命名既有指导，不使用讨论草案替换正文。
+**原则型 Skill 已纳入正式源码与模块打包：** 正文使用已确认的
+`cockpit-task-owner` / `cockpit-task-executor` 名称，按职责与判断组织；
+常驻 role prompt 只保留核心责任和按需加载入口。
+每份 Skill 都携带独立的 references，不依赖仓库 docs 或另一份 Skill。
 四份旧 Skill 已从源码发现和打包入口退役，原文归档为 `docs/legacy-skills/*.md`；
 仅作仓库历史资料，不作运行时回退或发布输入，不保留 Skill 别名。
-本轮没有改动线上安装或真实 session。
+源码与打包就绪不代表线上安装、真实 session 切换或部署已完成。
 
 本文定义 agent 如何使用 Task，并对应已实现的宿主角色装配。旧版 `cockpit-task-owner` 实际指导执行方，不能按名字映射到新版 Owner；旧版最终通知、凭据路径和固定 goal 表单不沿用。
 
-具体工具名称、角色范围、输入与效果见 [MCP 工具契约](task-mcp-contract.md)。本模块仅提供 Owner / Executor 两份角色技能；[Owner 设计说明](skill-drafts/task-owner.md)、[Executor 设计说明](skill-drafts/task-executor.md) 保留在原设计目录，实际打包资源为 `skills/cockpit-task-owner/cockpit-task-owner/SKILL.md` 与 `skills/cockpit-task-executor/cockpit-task-executor/SKILL.md`。外层目录分别作为角色的原生技能发现根目录，内层是技能本身。未修改真实 session 或已安装的旧技能。Coding / Research 是外部工作技能，不在本模块内。
+具体工具名称、角色范围、输入与效果见 [MCP 工具契约](task-mcp-contract.md)。本模块仅提供 [Owner Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md) 与 [Executor Skill](../skills/cockpit-task-executor/cockpit-task-executor/SKILL.md)。外层目录分别作为角色的原生技能发现根目录，内层是自包含技能。原设计正文路径仅保留历史指引，不再维护第二套运行规则；评估、原始记录与协调材料不作为产品资源打包。Coding / Research 是外部工作技能，不在本模块内。
 
 **最新范围收缩：** 不做续办或改派；删除对应工具和参数。读取按 Owner / Executor 的不同关注点组织默认视图，其他正文和历史按需读取，不能把所有内容一次返回。
 
 **Owner 默认委派：** Owner 可以只读了解情况、回答问题和澄清目标；实施及改变外部状态的交付默认通过 Task 交给 Executor，不亲自实施，也不用自己的 subagent 代替独立 Executor。用户要求达成结果不等于明确要求 Owner 本人执行。用户明确要求亲自执行，或该 session 以具备能力的 Executor 身份实际承接 Task 时，才按执行职责处理；同时选择两个角色本身不构成承接。无法委派时说明具体阻塞，不静默改成自己做。
 
 **Skill 按需加载并复用：** 首次需要对应流程时读取，指令仍在上下文中就继续使用，不把每条消息或每次回复都变成重新读取 Skill 的触发器。压缩或恢复后相关指令丢失、Skill 已变化，或需要核对具体规则时再读。这不减少 Task 最新定义、revision 和 ACK 的同步要求；稳定流程说明与动态任务记录必须区分。
+
+**只通过 Task 协作：** Owner 不向 Executor 聊天追进度、澄清要求、催工或索要确认；Executor 在自己的 session 直接问用户，不向 Owner 发送问题、确认、进展、阻塞或完成消息，也不让 subagent 转送。Owner 按需读取或修订 Task，向用户简洁总结是允许的，但不维护另一份持续进度账。首次 assigned 通知由 `task_assign` 发送；重要 updated 通知仍由 Owner 明确判断并处理，普通 `task_edit` 不自动发送它。
 
 **普通更新不积累 queue：** 普通要求只更新 Task，不排队发送 cue、提醒或追加要求。非常重要的更新由 Owner 按 Skill 主动处理 pending 队列，再发送一条包含上下文摘要和 Task updated 引用的消息。首次派单仍不擅自中断忙碌目标，不把这项例外变成普通指派默认行为。
 
@@ -33,7 +36,7 @@
 
 **其他来源队列的处理（最新决定）：** 不要求 Executor 永远没有 queue。重要更新需要接管时，建议 Owner 先读取并保留所有可获取的 pending 内容，再按已保存的消息 ID 清理队列；包含其他 session / subagent 的消息。随后总结这些内容，保留来源、未解决请求和资料，最后附上 `[Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新 revision 的要求，合成一条消息发送，替代旧的文本前缀模板。未能读取或保留的内容不能盲删；展示文本不是附件的无损备份。清理中新增或已开始执行的消息由 Owner 另行判断，不能假装快照锁定了队列。
 
-必要时使用保留队列的单次主轮次中断，不用 Stop 作为清理捷径，不自动反复中断或取消 subagent。发送前核对实际原生状态、Task 仍未结束且 Executor 未变；已停止的回执或 idle 标签不等于可以立即接续。发送和清理不是原子操作，排队或未知回执不能盲重发，实际对齐以当前 revision 的 ACK 为准。完整流程和消息模板见[正式 Owner Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md#exceptional-update-handoff)。
+必要时使用保留队列的单次主轮次中断，不用 Stop 作为清理捷径，不自动反复中断或取消 subagent。发送前核对实际原生状态、Task 仍未结束且 Executor 未变；已停止的回执或 idle 标签不等于可以立即接续。发送和清理不是原子操作，排队或未知回执不能盲重发，实际对齐以当前 revision 的 ACK 为准。完整流程和消息模板见 [Owner 的重要更新参考](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)。
 
 上述强制对齐仅在 Owner 判断更新非常重要、不能等待正常同步时明确触发。普通修订仍只更新 Task；不能因未 ACK 提醒、revision 变化或每次 task_edit 而自动运行中断循环。工具只执行明确操作，不替 Owner 判定重要性。
 
@@ -54,7 +57,7 @@ Task 工具的 ID 仍为纯 UUID，不带 URI 或 query。event 是该条消息�
 | description / revision / changelog | 当前完整定义、定义版本与对应的定义修订记录 |
 | activity | Executor 执行时添加的活动，明确关联所依据的 description 版本 |
 | acknowledged_revision | 当前 Executor 确认的 description 版本 |
-| 角色与执行归属 | 决定谁可操作哪项工作；首次绑定后不替换 Executor，不借用 description revision 处理身份或生命周期 |
+| 角色与执行归属 | 声明能力和责任，不构成逐 Task 鉴权；首次绑定后不替换 Executor，不借用 description revision 处理身份或生命周期 |
 
 Owner 修改定义不自动添加 Executor activity；Executor 报告进度不修订定义。工具也不能通过任意对象更新，让调用者直接写入 owner、revision、ack 或伪造历史。
 
@@ -68,7 +71,7 @@ Owner 修改定义不自动添加 Executor activity；Executor 报告进度不�
 | --- | --- | --- | --- |
 | 读取 | Owner / Executor | Task ID 或有界筛选；按角色默认视图或显式读取类型 | Owner 看概览，Executor 看完整执行定义；历史、成果与操作结果按需读取，不隐式 ack，不加载聊天或唤醒 session |
 | 登记 | Owner | title、description、可选资料 | 创建未分配的 todo；不创建 session 或发送消息 |
-| 创建执行 session | Owner | 工作目录、所选工作技能等创建选项 | Task MCP 通过宿主创建并配置执行能力；不登记、关联 Task 或发消息 |
+| 创建执行 session | Owner | cwd、actor_session_id、request_id | Task MCP 通过宿主创建并配置执行能力；不登记、关联 Task 或发消息 |
 | 明确指派 | Owner | Task ID、Owner 已创建或选定的 Executor session ID | 确保目标具备执行能力，更新 Task 的执行归属，再发送一次 assigned 引用；不新建或自动选择 session，不代表已承接 |
 | 修订定义 | Owner / 当前 Executor | Task ID、所读 revision、完整新 description、原因 | 原子更新 description、revision 和 changelog；Executor 本人成功修订同时 ack |
 | 确认定义 | 当前 Executor | Task ID、已读 revision | 只更新 acknowledged_revision；首次和后续 ACK 都不改变 status，不生成 activity |
@@ -83,7 +86,7 @@ Owner 修改定义不自动添加 Executor activity；Executor 报告进度不�
 
 1. 确保 Owner 提供的目标 session 具备执行能力。
 2. 更新 Task，将该 session 设为 Executor。
-3. 以非排队方式发送一次 `[Task assigned to you](task:<uuid>?event=assigned)`；忙碌或不能安全启动则明确失败，不放入 queue。
+3. 确认 idle 且 queue 为空后，以 enqueue 模式发送一次 `[Task assigned to you](task:<uuid>?event=assigned)`；已知忙碌则不发送、不主动中断。检查和发送不原子，竞态可能产生 queued / unconfirmed，必须保留真实步骤结果，不能承诺绝不入队或盲重发。
 
 **ACK 与执行状态分开：** 用户明确两者是不同操作，不合并。Executor ACK 只记录对某版 description 的确认；即使首次 ACK，也不能自动把 todo 改为 in_progress。`task_report` 显式接受 activity、status、outcome 的任意非空组合；done 必须同次提交新 outcome，不隐式 ACK。
 
@@ -97,7 +100,7 @@ Owner 修改定义不自动添加 Executor activity；Executor 报告进度不�
 
 ## 3. 输入与结果的一致性
 
-Owner skill 默认指定 overview，关注状态、执行者、最新 activity 摘录、revision / ack 差异和成果可用性。Executor skill 默认指定 execution，读取完整当前 description、资料、revision / ack、归属与状态。不把历史活动、所有修订和成果全文附在两种视图后面。Owner 编辑前显式读取 definition；activity、changelog、outcomes 分别分页读取。工具不以 Task 归属限制这些视图，列表范围由显式业务筛选决定。
+Owner 默认用 `list` 并显式指定 `owner=自己的 session ID`，单项用 `overview`；关注 id/title、执行者、状态、最新 activity 及时间、revision / acknowledged_revision 和 outcome.available/current。活动是报告而非 live，存在且匹配版本的 outcome 也不证明完整交付，需要读取成果本体。Executor 默认用 `execution`，读取完整当前 description、资料、版本、归属与状态。Owner 编辑前读 `definition`；activity、changelog、outcomes 分别按需分页读取。列表/概览不附说明、资料、历史或成果全文；`actor_session_id` 不代替 owner/executor 筛选，也不构成角色自动过滤。
 
 每项写入都需要明确的操作身份，避免网络重试重复产生 changelog、activity、Task 或 session。相同操作重试返回原操作事实，不把它描述为当前版本的重新授权；当前状态仍应读取。
 
@@ -242,7 +245,7 @@ Executor 接到提醒后的行为：
 | Owner 更新要求但未决定中断 | 只修订 Task，无消息、queue 或后台唤醒 |
 | Owner 因重要更新明确接管 | 先保存 pending 内容再清理，发送一条摘要加 Task updated 引用；没有自动推进循环 |
 | 清理期间又有新消息 | 重新读取并由 Owner 判断，不盲删未读消息、不假装原子排空 |
-| 首次派单发送时目标忙碌 | 不入队、不擅自中断；返回真实未发送及已产生的其他效果 |
+| 首次派单检查时目标忙碌 | 不发送、不擅自中断；返回真实未发送及已产生的其他效果；检查后竞态产生 queued/unknown 时不盲重发 |
 
 这些场景指导了当前核心与接入测试；是否通过以对应工作树的实际测试结果为准，不把设计清单或文档状态当作已发布/已部署证明。
 
@@ -250,27 +253,18 @@ Executor 接到提醒后的行为：
 
 以下为两份已实现角色技能的协作摘要。Owner 注入 read/create/session_create/assign/edit/cancel；Executor 注入 read/edit/ack/report/cancel（工具均带 `task_` 前缀），多角色取并集。通用 Task 引用为 `[Task](task:<uuid>)`，派单/重要更新使用上文的 assigned/updated 引用，不能把 `<uuid>` 占位符作为实际 ID。角色资源具备可打包实现，不表示已安装进任何生产 session。
 
-### Task Owner
+常驻 role prompt 只固定责任与加载原则，Skill 正文解释判断和默认关注信息，
+具体操作边界按问题展开以下参考，不要求每轮全读：
 
-1. 与用户澄清工作，将完整当前要求写入 Task 的 description；资料和成果通过 Task 中的引用关联。
-2. 可先登记，再明确派单。每项独立工作由一个 Executor 完整负责，不创建父子 Task。
-3. 新建执行 session 时调用 Task MCP 的创建入口，由它创建并配置执行能力；也可明确选择已有 session。登记 Task 与创建 session 相互独立，两者就绪后调用指派工具，由工具确认当前能力、更新归属并发送一次 assigned 引用，不再手工重复发送。消息不附带任务说明或凭据。
-4. 主动按需读取自己的 Task，以状态、执行者、最新活动、确认差异和成果可用性为概览；需要修订时再读取完整定义，需要细节时再读取对应历史或成果。不要求 Executor 反向汇报，不自动轮询。
-5. 普通修订只提交完整新 description 和原因。Owner 判断更新非常重要、不能等待时，才按 Skill 保存并清理 pending 内容，归并摘要，最后附 Task updated 引用一次发送。需要中断时只做单次主轮次中断，原生阻塞及新消息由 Owner 明确处理，不自动推进。
-6. 信任 Executor 完整交付；不添加统一的 Owner 验收门槛。取消必须明确，不能把记录变更当作 session 已停止；不续办或改派。
-7. 面向用户展示工作时使用规定的 Task 引用格式，卡片从后端读取真实数据，不在消息里维护另一份状态。
+| 何时需要 | Owner 随包参考 | Executor 随包参考 |
+| --- | --- | --- |
+| 不清楚视图、字段、截断或分页 | [Task 读取](../skills/cockpit-task-owner/cockpit-task-owner/references/reading-tasks.md) | [Task 读取](../skills/cockpit-task-executor/cockpit-task-executor/references/reading-tasks.md) |
+| 不熟悉写入、版本冲突、部分保存或未知副作用 | [写入与恢复](../skills/cockpit-task-owner/cockpit-task-owner/references/task-writes-and-recovery.md) | [写入与恢复](../skills/cockpit-task-executor/cockpit-task-executor/references/task-writes-and-recovery.md) |
+| 不熟悉 Task 链接或通知原因 | [Task 链接](../skills/cockpit-task-owner/cockpit-task-owner/references/task-links.md) | [Task 链接](../skills/cockpit-task-executor/cockpit-task-executor/references/task-links.md) |
+| Owner 判断重要变更不能等正常检查点 | [重要更新](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md) | 不打包，不把队列接管交给 Executor |
 
-### Task Executor
-
-1. 收到 Task 引用后读取完整当前 description，核对本人归属并 ACK 对应 revision。ACK 不代表开始工作；真正开始执行时，另行明确将状态更新为 in_progress。
-2. 对整项工作负责，按工作技能与项目约定执行。可用内部 subagent，但不创建子 Task 或为自己追加 Owner 能力。
-3. 在开始、重要阶段间、重要操作前、交付前及恢复时读取最新要求。每次 Task MCP 响应都检查定义更新提醒；发现新版本先读取、对齐再 ack，不能把收到提醒或读过内容当成已经确认。不忙循环轮询。
-4. 用户可直接与你澄清。影响定义的结论写成完整新 description，成功修订时确认新版本；并发冲突时重新读取，不覆盖新内容。
-5. 有意义的进展、阻塞和交付写成 activity，携带实际依据的 description 版本；不把一次 activity 当作定义修订。旧版 activity 可以保留，但过期状态和成果会被拒绝；先读取新定义并 ack，再判断后续工作，不把旧成果直接重新贴上新版本。
-6. 完成当前约定后写入成果并直接 done。任务要求评审时执行评审，不把 in_review 当成固定 Owner 审批。
-7. 不向 Owner 发送进度、阻塞或完成消息。真正需要用户决定时在自己的会话提问；取消按用户要求明确操作，不恢复已结束任务。
-8. 不覆盖旧归属或新版本。失败和未知结果如实保留，不自动换任务、换 session、重发派单。
-9. 对用户展示 Task 时使用约定引用格式；不手写会与后端失同步的卡片内容。
+这些资源说明协作规则，不增加业务方法或底层 API，也不是强制执行器。
+文字约束、模拟决策和有限连续读取证据均不能证明真实 native Skill 调用已杜绝每轮重读。
 
 ## 5. 外部工作技能边界
 
@@ -279,6 +273,20 @@ Coding Work、Research Work 不包含在 Task 模块内，本仓库不维护其�
 外部工作技能定义“如何完成具体工作”，可经宿主通用机制组合；Task 不硬编码技能名单或业务流程，不把它们做成 Task 子类型或模块必装依赖。工作产出的相关进展与成果由角色技能指导写入 Task，不要求外部工作技能绑定 Task API。
 
 ## 6. 实现交付与历史边界
+
+旧版有价值的协作经验按职责吸收，而不是按旧名字机械迁移：
+
+| 退役入口 | 当前职责 | 保留的核心经验 |
+| --- | --- | --- |
+| `work-commander` | Owner | 有限只读调查、尊重讨论/授权边界、默认委派，不用自身 subagent 绕过 |
+| `cockpit-task-commander` | Owner | 一个完整结果、明确派单、按需跟进，Task 为共同记录 |
+| `work-commander-owner` | Executor | 全程交付、内部拆分不转移责任、真实决策直接问用户 |
+| 旧 `cockpit-task-owner` | Executor | 当前定义与逐版 ACK、有意义报告、如实保留部分成果和未知效果 |
+
+两份新 Skill 共同保留稳定请求身份、资源/授权不随 fork 自动继承、用户决定来源和
+不重复索要开工口令等原则。不恢复终身目标绑定、终态续办、改派、依赖引擎、
+自动最终通知或后台监工；旧凭据流程、固定模型/表单和具体业务方法不进入角色 Skill。
+旧同名执行技能不能与新版协调技能并行作为活跃入口；实际安装切换仍需显式操作。
 
 实现工具为 `task_read`、`task_create`、`task_session_create`、`task_assign`、`task_edit`、`task_ack`、`task_report`、`task_cancel`。创建并配置执行 session 是独立入口，首次指派仍独立；删除续办与改派。read 按角色关注点组织默认视图，历史与操作结果显式有界读取。
 

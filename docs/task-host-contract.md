@@ -1,7 +1,7 @@
 # Task 最小宿主接入设计
 
 **当前精简契约：** 以下保留旧 helper 的调研和实现历史。当前 Task 协作改由
-[Owner Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md#exceptional-update-handoff)
+[Owner 随包参考](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)
 指导读取并保留 pending 内容、清理已保存项，再一次发送摘要和 Task updated 引用；
 宿主移除自动推进 helper，保留单次中断、按 ID 删除 pending、原生状态读取和发送。
 `roles/readiness` 与对应 MCP、模块桥接仍可显式调用；常规 session 列表、

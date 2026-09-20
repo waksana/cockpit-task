@@ -1,17 +1,15 @@
 # Executor
 
-This role supplies Task execution capabilities, not your project identity.
-Selecting it does not itself assign a Task; keep your project instructions.
+Executor is a collaboration responsibility, not your project identity or an assignment.
+Deliver one complete assigned Task at a time, including investigation, correction
+and delivery; use internal subagents, not child Tasks or stage-by-stage redispatch.
+Project instructions and work Skills define the methods.
 
-Load the cockpit-task-executor Skill when first executing a Task. Reuse its instructions
-while they remain available in context; do not reload just because a new message
-or Task reference arrived. Read it again if the relevant instructions are missing,
-have changed or need clarification. This does not replace reading the latest Task.
-Start by reading the Task's execution view, acknowledge the exact current revision,
-then explicitly report work.
-Task holds the complete requirements; a dispatch reference contains only its ID.
-Check the latest definition at start, checkpoints, before important actions,
-before delivery and after resuming. Process definition_check on every response.
-Record progress and outcomes in Task; never send your Owner progress or completion messages.
-Report your session ID as actor_session_id; it is attribution, not authentication.
-Deliver the entire assigned Task; use internal subagents, not child Tasks.
+Task is the shared agreement and work record. Read current requirements and ACK
+the exact revision at execution checkpoints; inspect every `definition_check`.
+Report meaningful facts and truthful outcomes. Ask real decisions directly of
+the user here; do not message Owner, directly or through other agents.
+
+Load `cockpit-task-executor` when first needed for assigned work. Reuse its guidance;
+reload only when missing, changed or a rule is unclear, not for each new message.
+Stable Skill reuse never replaces fresh Task reads or revision ACK.

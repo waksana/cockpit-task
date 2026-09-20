@@ -1,163 +1,109 @@
 ---
 name: cockpit-task-owner
-description: "Delegate and coordinate independent Tasks through Task MCP: define outcomes, assign Executors, revise requirements and follow delivery. Not a prerequisite for ordinary conversation."
+description: "Guide sessions acting as Owner: clarify requests, delegate implementation and state-changing delivery through Task, and follow or revise the shared agreement. Use when first establishing this responsibility or when its guidance needs refreshing, not before every message. An outcome request alone does not authorize personal implementation."
 ---
 
 # Owner
 
-Use Task as the common work record. This collaboration role does not replace your
-business identity or make you responsible for developing the Task module.
-Work skills and project instructions define domain-specific methods;
-this skill defines collaboration, not a domain-specific workflow.
-No child Tasks, reassignment, reopening, reverse notifications or automatic monitoring.
-If both Task roles are selected, use cockpit-task-executor for your own assigned execution.
+Use the `cockpit-task` MCP for the shared Task record.
+Owner is a collaboration responsibility, not a business identity or extra authority.
+Project instructions and work skills define execution methods.
 
-## Coordinate rather than implement
+## Coordinate by default; delegate delivery
 
-Clarify the requested outcome, scope, constraints and acceptance criteria.
-You may inspect evidence read-only, answer questions and compare options yourself.
-For implementation and state-changing delivery, create or update a Task and
-delegate the complete work to an Executor by default. A request to achieve an
-outcome does not by itself ask you to perform the implementation personally.
-Do not bypass delegation by doing the work yourself or placing the entire
-implementation in your own subagents. The Executor owns its internal breakdown.
+Your default responsibility is clarification, delegation and follow-through.
+Bounded read-only investigation, answers and option comparisons are yours to provide.
+Delegate implementation and state-changing delivery through Task to an independent
+Executor, not your own tools or subagents: this keeps delivery responsibility clear.
+A result request is not permission for personal implementation, even for small work.
 
-Execute personally only when the user explicitly asks you to do so, or when you
-are explicitly assigned a Task as a capable Executor. Having both roles selected
-is not itself an assignment or a reason to take over someone else's work.
-If delegation is unavailable, report the concrete blocker rather than silently
-falling back to personal execution. Never claim an assignment, ACK or delivery
-that did not happen.
+Personal execution requires an explicit request to execute personally or an actual
+assignment as a capable Executor. Dual-role selection alone is neither assignment
+nor permission to take over another Executor's work. Unavailable delegation is a
+blocker to explain, not an exception.
 
-## Reuse the workflow instructions
+Distinguish discussion, investigation, recording an idea and authorizing execution.
+Investigation does not authorize changes; recording does not authorize dispatch.
+Respect "discuss only" and "not now", and do not create Tasks for casual conversation.
+Ask about real decisions, missing essentials or uncertain scope, not procedural
+steps or a second start command for already-authorized work.
 
-Load this Skill when its workflow is first needed; use the instructions already
-in context for subsequent messages. Do not invoke it as a ritual before every
-reply or tool call. Ordinary conversation and a new user message do not require
-reloading. Read it again when relevant instructions are no longer available
-after compaction or recovery, when the Skill has changed, or when a specific
-workflow rule needs clarification.
+## Delegate one complete outcome
 
-These are stable workflow instructions, not current Task state. Reusing them
-does not replace fresh Task reads, revision checks or the Executor's ACK.
+One coherent outcome belongs to one Task and one accountable Executor, including
+investigation, implementation, correction and delivery. Split independent outcomes,
+not tightly coupled stages, resources or specialties. Tasks are flat: use references,
+not child Tasks, dependency engines, helper-request workflows or standing role pools.
+Executor manages internal steps/subagents without stage-by-stage redispatch or a
+mandatory Owner acceptance gate.
 
-## Prepare and assign
+Provide the complete current agreement and minimum relevant materials/environment,
+not copied chat or a mandatory project form. Choose a capable session without
+competing work: one unfinished Task at a time, not one lifetime goal.
+New/forked sessions neither isolate shared resources nor inherit authorization.
 
-Clarify the complete goal, constraints and acceptance criteria. Call `task_create`
-with title, complete description, owner session ID and optional references/metadata.
-This registers an unassigned todo; it does not create sessions or send messages.
+Use `task_create` to register, `task_session_create` when a new Executor is needed,
+and `task_assign` to assign. Let tools assemble/check capabilities rather than
+hand-building them or relaxing user-selected requirements. Registration, creation,
+readiness, message acceptance, ACK and execution are distinct facts.
+`task_assign` sends the first assigned reference itself; do not send a duplicate.
 
-All writes need a new stable `request_id` and your reported `actor_session_id`.
-Existing-Task writes also need the `write_context` returned by a fresh read and,
-where required, the actual description `revision`. Replaying the same operation
-keeps its request ID and exact input. Actor IDs are attribution, not authenticated identity.
-Include your actor_session_id on reads too, so any Task you also execute is checked.
+## Coordinate through Task, not session chat
 
-When a new Executor is needed, call `task_session_create(cwd, ...)`. It creates
-and configures the Executor role through Cockpit; do not manually assemble MCP,
-Skill or role System Prompt. Inspect creation and readiness separately. A known
-session ID with failed readiness is not permission to create a replacement.
+Keep approved scope, constraints and delivery expectations in Task's current
+definition so requirements and results share one record. Distinguish decisions
+from proposals/quotations; record change reasons, sources and superseded decisions.
+Executors ask users directly and update requirements in their own sessions.
+Do not become their relay or ACK on their behalf.
 
-Alternatively, choose an existing Executor candidate from Cockpit's session list
-and its recorded roles. A role label is not current capability proof.
-`task_assign` checks existing capability; it never installs missing capability.
-One session can execute at most one unfinished Task.
+Do not chat with Executor to ask for progress, clarify requirements, chase work or
+request confirmation; read or update Task instead. Executor communicates with the
+user in its own session, not back to you, directly or through other agents.
+This keeps requirements and decisions out of a second conversation channel.
 
-Read `task_read(view="overview", task_id, ...)`, then call `task_assign` with the
-selected Executor, revision and context. It binds the Task and sends exactly one
-`[Task assigned to you](task:<uuid>?event=assigned)` as the entire first dispatch.
-Do not send a second manual dispatch. Known busy targets are not interrupted
-or queued. Acceptance is not reading, ACK or actual work.
+There are only two cross-session notices: the initial assignment sent by
+`task_assign`, and an explicit important-update handoff when normal checkpoints
+cannot wait. Ordinary edits/reports are silent: `task_edit` does not send an
+updated notice, and there are no reminders or service final notifications.
+For the exceptional handoff, read [important updates](references/important-updates.md)
+before handling pending messages or interrupting; preserve context rather than
+starting a monitoring or conversation loop.
 
-If an external step fails, inspect `task_read(view="operation", request_id, ...)`.
-Do not retry an uncertain send or creation with a new ID. Only a confirmed
-not-sent dispatch can be explicitly resumed using `resume_request_id`, a new
-request ID and fresh Task context; it retains the same Task and Executor.
+## Follow bounded evidence
 
-## Follow and revise
+Start your portfolio with `task_read(view=list, owner=<your session ID>)`; for one
+Task use `view=overview`. Include your own `actor_session_id`: it is attribution,
+not authentication, an owner filter or a role-based read restriction. Focus on:
 
-Use `view="list"` filtered by owner for an overview, and `view="overview"` for one
-Task's status, Executor, latest reported activity, revision/ACK and outcome availability.
-Use `view="definition"` before editing; read changelog/activity/outcomes on demand,
-not all history every time. Changelog pages contain summaries; select a revision
-to read its complete definition.
+| Information | What it tells you |
+| --- | --- |
+| `id`, `title`, `executor`, `status` | Which outcome, who delivers it, and the recorded state |
+| Latest `activity` and its `at` time | A reported fact, not live observation |
+| `revision`, `acknowledged_revision` | Whether the Executor confirmed the current definition |
+| `outcome.available`, `outcome.current` | Whether a result exists and matches the revision, not whether delivery is complete |
 
-`task_edit` accepts a complete replacement description and reason. Ordinary edits
-only update Task. Do not queue follow-up requirements, reminders or "read later"
-cues. ACK belongs to the Executor. Do not turn their activity into a separate
-progress summary or treat it as real-time native activity.
+These views omit the full definition, materials, histories and outcome text.
+Read `definition` before editing requirements and `outcomes` when judging delivery;
+expand `activity` or `changelog` for a concrete question. Use the
+[Task views and fields](references/reading-tasks.md) for fields, truncation and pagination.
+Trust complete delivery unless the Task requires review; preserve partial results
+and unexecuted boundaries. When asked, summarize active, waiting, complete or unknown
+work from Task evidence, not a second ledger. Do not infer completion from idle,
+scan chats routinely or schedule monitoring.
 
-### Exceptional update handoff
+## Preserve state; reuse stable guidance
 
-Only intervene when you judge an update too important to wait for a checkpoint.
-Save the complete updated requirements in Task first. Queue handling is your
-decision, guided by this Skill, not an automatic module or host advancement loop.
-Do not use `cockpit_advance_queue` for this workflow.
+Use actual Task/session IDs, stable mutation request IDs and fresh returned
+`write_context`; inspect errors and `definition_check` as well as the result.
+Unknown effects do not justify a blind retry or replacement Task/session; preserve
+request identity and known effects. Cancel only on an explicit decision: record
+changes neither stop native work nor undo external effects. Do not reassign a bound
+Task or reopen done/cancelled; authorized follow-up after termination needs a new Task.
 
-1. Read the Executor's current native state and full exposed pending queue, not
-   just message previews. Before clearing anything, preserve each pending item's
-   ID, text and available references in your working context. Display text is not
-   a lossless attachment or native-event backup; do not discard content you
-   cannot adequately read or preserve.
-2. Aim to clear all pending items for this explicit handoff, including messages
-   from other sessions or subagents, after preserving their content. Use
-   `cockpit_remove_queued` for the saved IDs. A message that is no longer pending
-   may already have started; inspect the result rather than assuming it was
-   removed or replaying its work. Re-read the queue and handle new arrivals
-   separately; a snapshot does not lock the queue.
-3. If the current main turn must be interrupted, use the public
-   `session/interrupt` operation once. Do not use Stop / `cockpit_cancel_turn`
-   as a queue-cleanup shortcut: it can discard unread concurrent arrivals.
-   Do not repeatedly interrupt or silently cancel background work.
-4. Inspect the resulting native state, including pending messages and active
-   subagents. An interrupt receipt or an idle label alone does not establish
-   readiness. If work still prevents a handoff, resolve it explicitly or wait;
-   do not claim the queue is empty or force a fresh message into known waiting work.
-5. Summarize the preserved messages, retaining their sources, unresolved requests,
-   useful results, constraints and references. Do not silently omit non-Task
-   messages or turn quoted requests into approved Task requirements. Any intended
-   requirement changes belong in Task, not only in this summary.
-6. Re-read Task and confirm it is still active and assigned to this Executor.
-   Send one message containing the summary followed by the update notice below.
-   Omit the summary section when there were no pending messages. Do not resend
-   individual messages or send the Task reference a second time.
-
-```text
-Pending context:
-<summary of the preserved pending messages>
-
-[Task updated](task:<uuid>?event=updated)
-Read the current Task and acknowledge its latest revision before continuing.
-```
-
-Replace `<uuid>` with the actual Task ID. This replaces the old text-prefix
-notice. Its label explains why it was sent even without card rendering; it does
-not duplicate the Task description. Cleanup and sending are not atomic.
-If sending is queued or unconfirmed, inspect the actual result, not another send.
-Acceptance is not reading or ACK; use the Executor's recorded ACK of the current
-revision as confirmation when checking alignment. Never perform this workflow
-automatically after an edit, pending ACK or a timer.
-
-Trust the Executor's delivery; in_review is optional, not mandatory Owner approval.
-Use `task_cancel` only for an explicit cancellation decision, with a reason.
-Cancellation does not stop the native session.
-
-## References and results
-
-Reference a Task with `[Task](task:<uuid>)`; the ID comes from Task MCP.
-Pass only the UUID as `task_id`, never the full URI or query. Use the event-bearing
-forms above only for their stated message reasons; only lowercase `assigned` and
-`updated` are accepted. The event is immutable message/reference metadata, not a
-Task type, status, command or event bus. Rendering uses the URL event, not the label or Task
-status. Generic references and old messages remain compatible without an event
-header; unknown events and malformed queries stay unclaimed. The frontend resolves
-current data without changing the message reason.
-Do not use relative `task/<id>` links, which may be treated as files.
-Do not copy description into dispatch messages. These references add no tool,
-Task field, scheduler or automatic notification after `task_edit`.
-References between independent Tasks are links, not dependencies or child Tasks.
-
-Every response separates `result`, `error` and `definition_check`. Check all three,
-including on replay or failure. If activity saved but stale status/outcome failed,
-do not blindly replay or relabel the old work. Tool access permits cross-Task
-operations, but never claim someone else read or completed work without evidence.
+Reuse this Skill while it remains in context; reload for missing/changed guidance
+or an unclear rule, not a new message. This never replaces fresh Task state or ACK.
+Use tool schemas for arguments; consult
+[Task writes and recovery](references/task-writes-and-recovery.md) for unfamiliar
+write rules, conflicts or uncertain effects, and
+[Task links](references/task-links.md) for link syntax or unfamiliar notices.
+Load only the reference needed, not the whole set.

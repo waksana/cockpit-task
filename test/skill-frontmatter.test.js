@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
-import { basename, join } from 'node:path';
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 // Enforce a small YAML-safe release format, not a replacement YAML parser:
@@ -14,6 +15,43 @@ function skillMetadata(source) {
   assert.equal(typeof description, 'string');
   assert.ok(description.trim(), 'Skill description must not be empty');
   return { name: header[1], description };
+}
+
+const root = fileURLToPath(new URL('../', import.meta.url));
+const sharedReferences = ['reading-tasks.md', 'task-links.md', 'task-writes-and-recovery.md'];
+const skillDirectory = role => `skills/cockpit-task-${role}/cockpit-task-${role}`;
+const skillFiles = role => [
+  'SKILL.md',
+  ...[...sharedReferences, ...(role === 'owner' ? ['important-updates.md'] : [])]
+    .map(name => `references/${name}`),
+].sort();
+const prose = source => source.replace(/\s+/g, ' ');
+const localLinks = source => [...source.matchAll(/\[[^\]\n]*\]\(([^)\s]+)\)/g)]
+  .map(([, target]) => target)
+  .filter(target => !/^(?:[a-z][a-z\d+.-]*:|#)/i.test(target));
+
+function assertSkillClosure(directory, role) {
+  const expected = skillFiles(role);
+  assert.deepEqual(readdirSync(directory, { recursive: true }).sort(),
+    [...expected, 'references'].sort(), 'Only the body and runtime references belong in a Skill');
+  const pending = ['SKILL.md'];
+  const visited = new Set();
+  while (pending.length) {
+    const file = pending.pop();
+    if (visited.has(file)) continue;
+    visited.add(file);
+    const path = join(directory, file);
+    assert.ok(lstatSync(path).isFile(), `${file} must not depend on a symlink`);
+    const source = readFileSync(path, 'utf8');
+    assert.doesNotMatch(source, /Discussion draft|not an installed Skill|skill-drafts|evaluation\/|\/home\//);
+    for (const link of localLinks(source)) {
+      const target = resolve(dirname(path), decodeURIComponent(link.split(/[?#]/)[0]));
+      assert.ok(target.startsWith(`${directory}${sep}`), `${file}: ${link} escapes this Skill`);
+      assert.ok(existsSync(target), `${file}: missing local reference ${link}`);
+      pending.push(relative(directory, target));
+    }
+  }
+  assert.deepEqual([...visited].sort(), expected, 'Every bundled reference must be reachable');
 }
 
 test('only the two current Task role Skills are discoverable, with YAML-safe frontmatter', () => {
@@ -43,6 +81,115 @@ test('only the two current Task role Skills are discoverable, with YAML-safe fro
   const installer = readFileSync(join(root, 'scripts/install.sh'), 'utf8');
   assert.match(installer, /--exclude='docs\/legacy-skills'/);
   assert.match(installer, /--exclude='skills'/);
+});
+
+test('each current Skill has an independent relative reference closure without research payloads', t => {
+  const isolated = mkdtempSync(join(tmpdir(), 'task-skill-closure-'));
+  t.after(() => rmSync(isolated, { recursive: true, force: true }));
+  for (const role of ['owner', 'executor']) {
+    const directory = join(isolated, role);
+    cpSync(join(root, skillDirectory(role)), directory, { recursive: true });
+    assertSkillClosure(directory, role);
+    const source = readFileSync(join(directory, 'SKILL.md'), 'utf8');
+    const metadata = skillMetadata(source);
+    assert.equal(metadata.name, `cockpit-task-${role}`);
+    assert.match(metadata.description, /first|reuse/i);
+    assert.ok(source.split('\n').length < 150, 'The body should remain a concise principles guide');
+    assert.match(source, /Load only the reference needed, not the whole set/);
+    assert.match(source, /Reuse this Skill while it remains in context/);
+    assert.match(source, /fresh Task/);
+  }
+  for (const reference of sharedReferences) {
+    assert.equal(readFileSync(join(isolated, 'owner/references', reference), 'utf8'),
+      readFileSync(join(isolated, 'executor/references', reference), 'utf8'),
+      `${reference}: independent copies must retain the same shared protocol guidance`);
+  }
+});
+
+test('role prompts stay short while the Skills preserve delegation, communication and synchronization boundaries', () => {
+  for (const role of ['owner', 'executor']) {
+    const prompt = prose(readFileSync(join(root, `roles/task-${role}.md`), 'utf8'));
+    assert.ok(prompt.split(' ').length <= 200, `${role}: keep details in the Skill and references`);
+    assert.ok(prompt.includes(`Load \`cockpit-task-${role}\` when first needed`));
+    assert.match(prompt, /Reuse.*reload only when missing, changed or a rule is unclear/);
+    assert.match(prompt, /not for each new message/);
+    assert.match(prompt, /Stable Skill reuse never replaces fresh Task reads/);
+  }
+  const ownerPrompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
+  assert.match(ownerPrompt, /independent Executor through Task, not your own tools or subagents/);
+  assert.match(ownerPrompt, /explicit user request or an actual assignment as a capable Executor/);
+  assert.match(ownerPrompt, /dual-role selection alone is neither/);
+  assert.match(ownerPrompt, /Coordinate through Task, not chats with Executor/);
+  assert.match(ownerPrompt, /do not monitor or schedule reminders/);
+  const executorPrompt = prose(readFileSync(join(root, 'roles/task-executor.md'), 'utf8'));
+  assert.match(executorPrompt, /one complete assigned Task at a time/);
+  assert.match(executorPrompt, /directly of the user here; do not message Owner, directly or through other agents/);
+  assert.match(executorPrompt, /exact revision.*every `definition_check`/);
+
+  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  assert.match(owner, /independent Executor, not your own tools or subagents/);
+  assert.match(owner, /A result request is not permission for personal implementation, even for small work/);
+  assert.match(owner, /Split independent outcomes, not tightly coupled stages, resources or specialties/);
+  assert.match(owner, /Do not chat with Executor to ask for progress, clarify requirements, chase work or request confirmation/);
+  assert.match(owner, /only two cross-session notices/);
+  assert.match(owner, /`task_assign` sends the first assigned reference itself; do not send a duplicate/);
+  assert.match(owner, /task_read\(view=list, owner=<your session ID>\)/);
+  assert.match(owner, /view=overview/);
+  for (const field of ['id', 'title', 'executor', 'status', 'activity', 'at', 'revision',
+    'acknowledged_revision', 'outcome.available', 'outcome.current']) {
+    assert.ok(owner.includes(`\`${field}\``), `Owner needs an explicit default focus on ${field}`);
+  }
+  assert.match(owner, /Read `definition` before editing requirements and `outcomes` when judging delivery/);
+  assert.match(owner, /scan chats routinely or schedule monitoring/);
+
+  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  assert.match(executor, /task_read\(view=execution\)/);
+  assert.match(executor, /At start, on resumption, between stages, before consequential actions and before delivery, read the latest Task/);
+  assert.match(executor, /Inspect `definition_check` on every Task response, including errors and replays/);
+  assert.match(executor, /later ACKs do not confirm skipped revisions/);
+  assert.match(executor, /complete updated Task definition with reason\/source and the decision superseded/);
+  assert.match(executor, /report `done` with a new outcome in the same request/);
+  assert.match(executor, /not as a mandatory Owner acceptance gate/);
+  assert.match(executor, /Do not send Owner questions, confirmations, progress, blockers or completion messages, directly or via subagents/);
+});
+
+test('public Skill links resolve to active resources rather than obsolete handoff anchors', () => {
+  for (const file of ['task-board.md', 'task-tools-skills.md', 'task-mcp-contract.md',
+    'task-host-contract.md', 'task-implementation.md', 'task-design.md', 'task-schema.md']) {
+    const source = readFileSync(join(root, 'docs', file), 'utf8');
+    assert.doesNotMatch(source, /#exceptional-update-handoff|skills\/(?:task-owner|task-executor)\//);
+    for (const link of localLinks(source).filter(link => link.startsWith('../skills/'))) {
+      assert.ok(existsSync(resolve(root, 'docs', link.split('#')[0])), `${file}: ${link}`);
+    }
+  }
+  for (const role of ['owner', 'executor']) {
+    const source = readFileSync(join(root, `docs/skill-drafts/task-${role}.md`), 'utf8');
+    assert.ok(!source.startsWith('---'), 'Historical pointers must not be discoverable Skills');
+    assert.match(source, /historical design entry/);
+    assert.ok(localLinks(source).includes(`../../${skillDirectory(role)}/SKILL.md`));
+  }
+});
+
+test('module packaging carries both isolated Skills and no draft or evaluation resources', t => {
+  const packaged = spawnSync('npm', ['run', 'package:module'], { cwd: root, encoding: 'utf8' });
+  assert.equal(packaged.status, 0, packaged.error?.message ?? `${packaged.stdout}\n${packaged.stderr}`);
+  const manifest = JSON.parse(readFileSync(join(root, 'cockpit.module.json'), 'utf8'));
+  const archive = join(root, 'dist', `cockpit-task-${manifest.version}.tgz`);
+  const entries = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n');
+  const expected = ['owner', 'executor']
+    .flatMap(role => skillFiles(role).map(file => `./${skillDirectory(role)}/${file}`)).sort();
+  assert.deepEqual(entries.filter(entry => entry.startsWith('./skills/') && !entry.endsWith('/')).sort(), expected);
+  assert.ok(!entries.some(entry => /^\.\/docs\//.test(entry)), 'No design, evaluation or private coordination docs');
+  for (const entry of expected) {
+    assert.equal(execFileSync('tar', ['-xOf', archive, entry], { encoding: 'utf8' }),
+      readFileSync(join(root, entry), 'utf8'), `Archive must contain the current resource: ${entry}`);
+  }
+  const readme = execFileSync('tar', ['-xOf', archive, './README.md'], { encoding: 'utf8' });
+  assert.doesNotMatch(readme, /#exceptional-update-handoff/);
+  for (const link of localLinks(readme)) {
+    assert.ok(entries.includes(`./${link.split('#')[0]}`), `Packaged README link: ${link}`);
+  }
+  t.diagnostic(`npm run package:module produced ${archive} with both bodies and seven runtime references`);
 });
 
 test('legacy explicit registration installs only its MCP and preserves unrelated resources', t => {

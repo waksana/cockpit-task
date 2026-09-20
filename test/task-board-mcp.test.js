@@ -7,6 +7,7 @@ import { z } from 'zod/v4';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { assignExecutor } from '../src/task-board/operations.js';
 import { createMcpRoutes } from '../src/task-board/mcp.js';
+import { toolSchemas } from '../src/task-board/contracts.js';
 
 function fixture(execute, sharedModule, schemas = { task_read: z.object({ task_id: z.string() }).strict() }) {
   const controller = new AbortController();
@@ -66,6 +67,33 @@ test('Task HTTP MCP speaks the official protocol and retains structured failures
     assert.deepEqual(JSON.parse(response.content[0].text), expected);
     assert.deepEqual(calls, [{ name: 'task_read', input: { task_id: 'one' } }]);
     assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
+
+test('published tool descriptions explain filters, dispatch races and same-report delivery without changing schemas', async () => {
+  const f = fixture(() => assert.fail('Listing descriptions must not execute a Task operation'), undefined, toolSchemas);
+  try {
+    await f.connect();
+    const { tools } = await f.client.listTools();
+    assert.deepEqual(tools.map(tool => tool.name).sort(), Object.keys(toolSchemas).sort());
+    const descriptions = Object.fromEntries(tools.map(tool => [tool.name, tool.description]));
+    for (const tool of tools) {
+      assert.deepEqual(tool.inputSchema, z.toJSONSchema(toolSchemas[tool.name], { target: 'draft-7' }));
+      assert.ok(tool.description.length < 500, `${tool.name}: keep workflow detail in Skills`);
+    }
+    assert.match(descriptions.task_read, /list, explicitly filter by owner or executor/);
+    assert.match(descriptions.task_read, /actor_session_id.*not an automatic list filter or authentication/);
+    assert.match(descriptions.task_read, /Reads never acknowledge/);
+    assert.match(descriptions.task_assign, /send one assigned reference/);
+    assert.match(descriptions.task_assign, /without installing capability or proactively interrupting/);
+    assert.match(descriptions.task_assign, /not atomic.*queued or unconfirmed/);
+    assert.match(descriptions.task_assign, /per-step results; never blindly resend/);
+    assert.doesNotMatch(descriptions.task_assign, /Does not interrupt or queue instructions/);
+    assert.match(descriptions.task_edit, /actual description change.*unfinished Task/);
+    assert.match(descriptions.task_edit, /unchanged text and metadata-only edits do not/);
+    assert.match(descriptions.task_edit, /Does not send messages or change execution status/);
+    assert.match(descriptions.task_report, /done requires a new outcome in the same request/);
+    assert.match(descriptions.task_report, /Stale activity may save while stale status\/outcome are rejected/);
   } finally { await f.close(); }
 });
 
