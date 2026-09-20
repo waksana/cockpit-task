@@ -199,10 +199,10 @@ export function createReadResource(context, input) {
 
 export function activate(context) {
   if (context.apiVersion !== 2 || context.uiVersion !== 1) {
-    throw new Error('Task Board requires Cockpit Web API v2 and Module UI v1.');
+    throw new Error('Task requires Cockpit Web API v2 and Module UI v1.');
   }
   if (typeof context.createPortal !== 'function') {
-    throw new Error('Task Board requires the host createPortal capability.');
+    throw new Error('Task requires the host createPortal capability.');
   }
   const React = context.react;
   const h = React.createElement;

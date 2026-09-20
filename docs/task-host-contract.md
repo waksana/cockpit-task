@@ -1,7 +1,7 @@
 # Task 最小宿主接入设计
 
 **当前精简契约：** 以下保留旧 helper 的调研和实现历史。当前 Task 协作改由
-[Owner Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff)
+[Owner Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md#exceptional-update-handoff)
 指导读取并保留 pending 内容、清理已保存项，再一次发送摘要和 Task updated 引用；
 宿主移除自动推进 helper，保留单次中断、按 ID 删除 pending、原生状态读取和发送。
 `roles/readiness` 与对应 MCP、模块桥接仍可显式调用；常规 session 列表、
@@ -54,7 +54,7 @@ description revision、ACK 或成果。模块公开接口不足，不意味着�
 宿主提供发现、显式选择、创建时装配及独立的按需能力检查，不硬编码 Task 角色名。
 用户明确：前端新建与 MCP 新建都能选角色，共用同一套创建契约，
 不是仅为 Task 的 task_session_create 增加私有入口。未选择角色不隐式追加角色。
-Task 仅声明 `task-owner`、`task-executor`；Coding / Research 的定义、安装、
+Task 仅声明 `cockpit-task-owner`、`cockpit-task-executor`；Coding / Research 的定义、安装、
 维护不包含在 Task 模块内。
 
 首次创建链：
@@ -150,8 +150,8 @@ create/resume 参数转发代码及 GitHub 官方文档核对。结论是：
 
 | 选择 | Skill | Task MCP 工具 |
 | --- | --- | --- |
-| Owner | `task-owner` | read、create、session_create、assign、edit、cancel |
-| Executor | `task-executor` | read、edit、ack、report、cancel |
+| Owner | `cockpit-task-owner` | read、create、session_create、assign、edit、cancel |
+| Executor | `cockpit-task-executor` | read、edit、ack、report、cancel |
 | Owner + Executor | 两份 Skill | 八个工具的并集，同一个连接配置 |
 
 上表省略工具的 `task_` 前缀；正式 schema / Skill 使用完整名称。

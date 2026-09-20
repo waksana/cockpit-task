@@ -23,7 +23,7 @@ flock -n 9 || { printf '%s\n' 'Another deployment is active.' >&2; exit 1; }
 release="$root/releases/$revision"
 if [[ ! -d "$release" ]]; then
   staging=$(mktemp -d "$root/releases/.build-XXXXXXXX")
-  git archive HEAD | tar -x -C "$staging"
+  git archive HEAD | tar -x --exclude='docs/legacy-skills' --exclude='skills' -C "$staging"
   npm ci --prefix "$staging" --omit=dev --ignore-scripts --no-audit --no-fund
   mv "$staging" "$release"
 fi
@@ -45,7 +45,7 @@ systemctl --user enable --now work-commander
 for attempt in {1..30}; do
   if curl --fail --silent "http://127.0.0.1:${WORK_PORT:-8790}/health" | \
     node -e 'let text="";process.stdin.on("data",d=>text+=d);process.stdin.on("end",()=>{try{const h=JSON.parse(text);if(!h.ok||h.release!==process.argv[1])process.exitCode=1;else console.log(text);}catch{process.exitCode=1;}})' "$revision"; then
-    printf 'Installed release %s; native MCP/skill registration is a separate explicit step.\n' "$revision"
+    printf 'Installed legacy release %s; native MCP registration is a separate explicit step. Retired Skills are not registered.\n' "$revision"
     exit 0
   fi
   sleep 0.2

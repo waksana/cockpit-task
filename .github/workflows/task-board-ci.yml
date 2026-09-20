@@ -1,4 +1,4 @@
-name: Task Board CI
+name: Task CI
 on:
   pull_request:
   push:
@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   module:
-    name: Task Board module
+    name: Task module
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -20,9 +20,9 @@ jobs:
       - run: npm run package:module
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: task-board-module
+          name: cockpit-task-module
           path: |
-            dist/task-board-*.tgz
-            dist/task-board-*.tgz.sha256
+            dist/cockpit-task-*.tgz
+            dist/cockpit-task-*.tgz.sha256
           if-no-files-found: error
           retention-days: 7

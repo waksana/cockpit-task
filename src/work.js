@@ -426,7 +426,7 @@ export class Work {
   prompt(task, input, credential) {
     const goal = JSON.parse(this.store.get('SELECT goal FROM versions WHERE task_id=? AND version=?', task.id, task.version).goal);
     return [
-      `Use skill ${this.ownerModules ? 'cockpit-task-owner' : 'work-commander-owner'}. You are the sole owner of ONE complete goal.`,
+      'Legacy Work Commander execution: you are the sole owner of ONE complete goal, not the new Task coordinating Owner.',
       `taskId=${task.id}; goalVersion=${task.version}; workstream=${task.workstream}`,
       `owner_session_id=${task.owner}; caller_session_id=${task.caller}`,
       `MCP ${this.ownerModules ? 'cockpit-task' : 'work-commander'} credential=${credential} (path, not token; do not display file contents).`,
@@ -508,10 +508,6 @@ export class Work {
         await this.step(id, 'mcp', async () => {
           const result = await this.cockpit.call('mcp/session-toggle', { sessionId: task.owner, name: 'work-commander', on: true });
           if (result.status && result.status !== 'connected') throw new EffectUnknown('MCP enablement not confirmed connected');
-          return { acknowledged: true };
-        });
-        await this.step(id, 'skill', async () => {
-          await this.cockpit.call('skills/session-toggle', { sessionId: task.owner, name: 'work-commander-owner', enabled: true });
           return { acknowledged: true };
         });
       }

@@ -1,10 +1,10 @@
 import { TaskError } from './contracts.js';
 
-const executorRoles = [{ moduleId: 'task-board', roleId: 'executor' }];
+const executorRoles = [{ moduleId: 'cockpit-task', roleId: 'executor' }];
 
 export function createHostAdapter(host) {
   if (typeof host?.call !== 'function') {
-    throw new Error('Task Board requires the Cockpit module host intents and session roles contract');
+    throw new Error('Task requires the Cockpit module host intents and session roles contract');
   }
   const get = async sessionId => {
     const result = await host.call('session/get', { sessionId });

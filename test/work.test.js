@@ -132,13 +132,15 @@ test('one-call dispatch, owner reports, final single notification and compact re
   assert.equal(result.operation.status, 'succeeded');
   assert.equal(result.task.status, 'dispatched');
   assert.deepEqual(f.c.calls.map(c => c.name), ['session/get', 'session/new', 'session/get',
-    'mcp/session-toggle', 'skills/session-toggle', 'session/get', 'prompt']);
+    'mcp/session-toggle', 'session/get', 'prompt']);
   const prompt = f.c.calls.at(-1).body.text;
-  assert.match(prompt, /Use skill work-commander-owner/);
+  assert.match(prompt, /Legacy Work Commander execution/);
+  assert.doesNotMatch(prompt, /Use skill |legacy-skills|Retired Skill|collaboration reference/);
+  assert.match(prompt, /accept this version with work_report/);
   assert.match(prompt, /follow the target project engineering\/runtime rules/);
   assert.match(prompt, /binding neither provides engineering isolation nor grants extra authority/);
   assert.match(prompt, /Do NOT send any separate caller final\/ACK/);
-  assert.doesNotMatch(prompt, /worktree|Use skill work-owner/);
+  assert.doesNotMatch(prompt, /\bworktree\b|Use skill work-owner/);
   const report = (kind, key) => f.w.execute(owner, 'work_report', { taskId: id, goalVersion: 1, kind, summary: kind, idempotencyKey: key });
   await report('accepted', 'accept-001'); await report('progress', 'progress-001');
   await report('blocked', 'blocked-001'); await report('needs_decision', 'decision-001'); await report('result', 'result-001');
@@ -199,8 +201,8 @@ test('managed new and fork select owner explicitly without Assistant or legacy g
     assert.equal(f.c.calls.some(c => /session-toggle/.test(c.name)), false);
     assert.ok(f.c.calls.indexOf(inspected) < f.c.calls.findIndex(c => c.name === 'prompt'));
     assert.match(f.c.calls.at(-1).body.text, /MCP cockpit-task credential=/);
-    assert.match(f.c.calls.at(-1).body.text, /Use skill cockpit-task-owner/);
-    assert.doesNotMatch(f.c.calls.at(-1).body.text, /Use skill work-commander-owner/);
+    assert.match(f.c.calls.at(-1).body.text, /Legacy Work Commander execution/);
+    assert.doesNotMatch(f.c.calls.at(-1).body.text, /Use skill |legacy-skills|Retired executing Skill|collaboration reference/);
     assert.equal(f.owner(result.task.taskId).role, 'owner');
     assert.equal(f.s.get("SELECT count(*) AS n FROM credentials WHERE role='caller'").n, 1);
     assert.equal(JSON.stringify(created.body).includes('assistant'), false);

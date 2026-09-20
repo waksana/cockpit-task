@@ -14,7 +14,7 @@ export class TaskService {
 
   async execute(name, rawInput, { signal } = {}) {
     if (this.closing) return {
-      result: null, error: { code: 'MODULE_CLOSING', message: 'Task Board is closing', status: 503 },
+      result: null, error: { code: 'MODULE_CLOSING', message: 'Task is closing', status: 503 },
       definition_check: { status: 'unavailable', error: { code: 'MODULE_CLOSING', message: 'Task storage is closing' } },
     };
     this.active++;

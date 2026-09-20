@@ -5,7 +5,7 @@
 讨论跟踪：[cockpit-task#1](https://github.com/waksana/cockpit-task/issues/1)
 
 **后续决定（2026-09-20，覆盖下文旧队列方案）：** 重要更新的队列处理写入
-[Owner Skill](../skills/task-owner/task-owner/SKILL.md#exceptional-update-handoff)，
+[Owner Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md#exceptional-update-handoff)，
 不再推荐自动推进 MCP。Owner 先读取并保留 pending 内容，再按已保存 ID 清理，
 随后总结，最后附 Task updated 引用一次发送；普通更新仍然静默。
 宿主同步移除旧 helper，能力就绪仅在创建后确认、指派前等明确请求时检查，
@@ -28,7 +28,7 @@ Task ID 仍仅是 UUID。卡片读取当前数据，历史通用消息仍无事�
 [实现契约](task-implementation.md#read-boundaries-and-reference)，不使用相对文件式路径。
 
 本文保留用户对 Task 的产品讨论及最终决策，不是逐字段实现规格。
-当前模块使用说明见 [Task Board](task-board.md)，具体实现边界见
+当前模块使用说明见 [Task](task-board.md)，具体实现边界见
 [实现契约](task-implementation.md)。早期段落里的“尚未确定”描述当时讨论状态；
 后续确认及实现状态以本节最新决定和第 16 节为准。
 

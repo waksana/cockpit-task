@@ -5,7 +5,7 @@
   "validation": [["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], ["npm", "test"]],
   "build": {
     "argv": ["node", "--check", "src/server.js"],
-    "artifactPaths": ["src", "web", "skills", "roles", "module.json", "deploy", "package.json", "package-lock.json", "node_modules"]
+    "artifactPaths": ["src", "web", "roles/commander.md", "roles/owner.md", "module.json", "deploy", "package.json", "package-lock.json", "node_modules"]
   },
   "delivery": {
     "adapter": "github-actions-v1",

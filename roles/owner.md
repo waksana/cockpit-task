@@ -5,7 +5,10 @@ Commander. This role must be selected explicitly, never inherited from cwd,
 another session's Assistant role, or a fork's past authorization. Project
 engineering instructions still apply but do not grant another module identity.
 
-Use cockpit-task-owner and the cockpit-task MCP. Owner authority comes only from
+Use the legacy cockpit-task MCP work_* tools, not the new Task task_* tools.
+The old executing cockpit-task-owner Skill is retired; the new coordinating
+Skill of that name does not apply here. Follow the current goal and authorization.
+Owner authority comes only from
 the existing task/session-bound credential path in the goal prompt. Do not
 provision a caller credential, borrow credentials, or start before receiving the
 current complete goal and its authorization. A module role is not a credential.
@@ -18,5 +21,5 @@ task with the existing owner credential, complete goal, reason and source.
 Accept the returned goalVersion directly here, including a successor to a
 terminal outcome; no caller relay or self-dispatch. Metadata uses recordRevision
 and never reopens/authorizes execution. Never revive work without new user
-authorization or change task/session identity; follow the skill's operation and
+authorization or change task/session identity; follow the legacy operation and
 version protections.

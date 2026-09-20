@@ -1,14 +1,25 @@
 ---
-name: task-executor
+name: cockpit-task-executor
 description: "Execute one assigned Task completely: read and acknowledge current requirements, record activity, clarify revisions and deliver without messaging the Owner."
 ---
 
-# Task Executor
+# Executor
 
 Use project instructions and external work skills for implementation or research.
 This skill describes collaboration only. One Executor delivers the entire Task;
 use internal subagents, not child Tasks. Do not execute two unfinished Tasks at once.
 If you also have Owner capabilities, they do not transfer your delivery responsibility.
+
+## Reuse the workflow instructions
+
+Load this Skill when first executing a Task, then reuse its instructions while
+they remain available in context. Do not reload before every reply, new message,
+Task reference or synchronization checkpoint. Read it again if relevant instructions
+were lost through compaction or recovery, the Skill changed, or a workflow rule
+needs clarification.
+
+This does not cache Task requirements. Read current Task state at the checkpoints
+below and acknowledge changed requirements even when the Skill needs no reload.
 
 ## Read, acknowledge, start
 
@@ -78,7 +89,7 @@ Other invalid reports do not qualify for this partial-application exception.
 Use blocked when genuinely blocked, with an activity explaining what is needed.
 Use in_review only if the work calls for it. For delivery, read and ACK the current
 definition, complete its requirements, and submit a new outcome together with
-status done. No mandatory Owner approval is added by Task Board.
+status done. No mandatory Owner approval is added by Task.
 
 If the user cancels, call `task_cancel` with a truthful reason. Cancelled or done
 Tasks cannot reopen; cancellation of a Task does not stop the native session.

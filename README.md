@@ -1,8 +1,11 @@
-# Task Board
+# Task
 
-Task Board 是 Cockpit 模块：用共同的持久化 Task 记录协作，通过 Owner / Executor
+Task 是 Cockpit 模块：用共同的持久化 Task 记录协作，通过 Owner / Executor
 角色组合 System Prompt、Skill 和 HTTP MCP。Task 引用直接在聊天中显示卡片，详情按需读取；
 不保存聊天、不自动监工或调度、不自动发送进度或完成通知。
+
+Owner / Executor 是 Task 提供的协作能力，不是 session 的业务身份。例如 Cockpit Owner
+仍负责 Cockpit 本体，选择 Owner 只增加任务协调能力，不表示负责开发 Task 模块或绑定某条 Task。
 
 通用引用为 `[Task](task:<uuid>)`；首次指派由 `task_assign` 仅发送一次
 `[Task assigned to you](task:<uuid>?event=assigned)`。Owner 明确决定的重要更新
@@ -13,7 +16,7 @@ event 只说明这条消息的原因，不是 Task 状态；卡片仍读取当�
 Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的版本。没有子任务树、
 改派或续办；Coding / Research 的具体工作方法不属于 Task 模块。
 
-**使用与打包：[Task Board](docs/task-board.md)**。新模块需要支持模块角色和宿主
+**使用与打包：[Task](docs/task-board.md)**。新模块需要支持模块角色和宿主
 能力接口的 Cockpit；旧版宿主不能仅靠安装这个包获得这些能力。构建、合并不等于安装
 或升级，部署须由操作者另行决定。
 
@@ -24,17 +27,28 @@ Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的�
 新模块代码位于 `src/task-board/`，卡片位于 `web/task-board/`；
 `npm run package:module` 生成独立模块归档。数据仅使用宿主提供的模块目录，
 不会导入真实旧数据库、覆盖旧安装或启动旧 daemon。
+模块 ID、MCP key 和归档内部包名均为 `cockpit-task`；Skill 为
+`cockpit-task-owner` / `cockpit-task-executor`。旧 `task-board` 数据和角色关联
+必须通过[显式离线迁移](docs/task-board.md#explicit-existing-installation-cutover)保留，
+不能并装两个 Task，也不提供长期别名。代码实现不授权线上迁移。
 
 ## Legacy Work Commander
 
-**以下内容只描述保留的旧服务，不是 Task Board 模块的启动或使用说明。**
+**以下内容只描述保留的旧服务，不是 Task 模块的启动或使用说明。**
 旧 `npm start`、stdio MCP、权限凭证、数据库和部署脚本均与新模块分离。
 
-独立的工作服务 + SQLite + MCP + 两层协作 skill + 私人工作页。Cockpit 仍是唯一真实会话基础服务；这里不保存聊天、模型目录或会话状态副本，不运行指挥 agent、巡查器或自动调度。
+独立的工作服务 + SQLite + MCP + 私人工作页。Cockpit 仍是唯一真实会话基础服务；这里不保存聊天、模型目录或会话状态副本，不运行指挥 agent、巡查器或自动调度。
 
-**Cockpit Task 是面向 agent 的结构化工作记录与操作服务，主动方是 agent。** 从实际协作中形成的通用约定由 schema 承载，统一身份、状态、关系和结果表达，降低沟通成本并直接支撑 Dashboard；skill 指导何时、为何调用，agent 判断具体内容与下一步。Commander 显式派单，owner 主动写回；Task 执行指定操作，不主动监工、验收或推进任务。看板反映最近报告，不是实时监测。详见[定位与契约](docs/contract.md#定位供-commander-使用的工作工具)。现有 MCP、skill 和安装技术名称仍保留 `work-commander`。
+**旧 Cockpit Task 是面向 agent 的结构化工作记录与操作服务，主动方是 agent。** 从实际协作中形成的通用约定由 schema 承载，统一身份、状态、关系和结果表达，降低沟通成本并直接支撑 Dashboard；agent 判断具体内容与下一步。Commander 显式派单，owner 主动写回；服务执行指定操作，不主动监工、验收或推进任务。看板反映最近报告，不是实时监测。详见[定位与契约](docs/contract.md#定位供-commander-使用的工作工具)。旧 standalone MCP 和安装技术名称仍保留 `work-commander`。
 
-**一个 MCP，两份协作 skill**：`work-commander` 给讨论方，`work-commander-owner` 给执行方，规定目标、授权、结果责任和服务报告；工程方法遵守目标项目规范，Git 服务开发按需使用独立模块的 `service-development`，不在协作正文重复。权限由 caller/owner 凭证决定，不靠自报 sessionId；本服务最终通知统一由服务发送。旧 `work-owner` 已退役，旧在途任务兼容及工程承接见[入口切换](docs/operations.md#协作入口与旧定义退役)。
+**旧 Skill 已在源码退役**：`work-commander`、`work-commander-owner`、
+`cockpit-task-commander` 和旧执行型 `cockpit-task-owner` 的正文归档于
+`docs/legacy-skills/*.md`，仅作仓库历史资料，不作为运行时回退或发布输入。
+旧服务派单保留自包含的绑定、授权版本、承接和最终交付指导，不读取归档，
+不再要求安装或开启这些 Skill；旧 manifest 不声明 Skill。
+新版协调型 `cockpit-task-owner` 不随旧服务发布。旧服务权限、数据库、daemon、
+`work_*` 工具和唯一最终通知规则不变。真实已安装 Skill 的移除需要另外授权，
+本次源码变化不修改个人安装。原则型新 Skill 草案尚未发布。
 
 ## 使用入口
 
