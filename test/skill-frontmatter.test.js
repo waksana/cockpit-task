@@ -20,6 +20,7 @@ function skillMetadata(source) {
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sharedReferences = ['reading-tasks.md', 'task-links.md', 'task-writes-and-recovery.md'];
 const skillDirectory = role => `skills/cockpit-task-${role}/cockpit-task-${role}`;
+const codingDirectory = 'skills/github-coding/github-coding';
 const skillFiles = role => [
   'SKILL.md',
   ...[...sharedReferences, ...(role === 'owner' ? ['important-updates.md'] : [])]
@@ -30,10 +31,10 @@ const localLinks = source => [...source.matchAll(/\[[^\]\n]*\]\(([^)\s]+)\)/g)]
   .map(([, target]) => target)
   .filter(target => !/^(?:[a-z][a-z\d+.-]*:|#)/i.test(target));
 
-function assertSkillClosure(directory, role) {
-  const expected = skillFiles(role);
+function assertSkillClosure(directory, expected) {
+  const directories = [...new Set(expected.map(file => dirname(file)).filter(path => path !== '.'))];
   assert.deepEqual(readdirSync(directory, { recursive: true }).sort(),
-    [...expected, 'references'].sort(), 'Only the body and runtime references belong in a Skill');
+    [...expected, ...directories].sort(), 'Only the body and runtime references belong in a Skill');
   const pending = ['SKILL.md'];
   const visited = new Set();
   while (pending.length) {
@@ -54,10 +55,10 @@ function assertSkillClosure(directory, role) {
   assert.deepEqual([...visited].sort(), expected, 'Every bundled reference must be reachable');
 }
 
-test('only the two current Task role Skills are discoverable, with YAML-safe frontmatter', () => {
+test('two Task role Skills and one shared coding Skill have unique YAML-safe metadata', () => {
   const files = readdirSync(join(root, 'skills'), { recursive: true })
     .filter(path => basename(path) === 'SKILL.md');
-  assert.equal(files.length, 2);
+  assert.equal(files.length, 3);
   const names = new Set();
   for (const path of files) {
     const metadata = skillMetadata(readFileSync(join(root, 'skills', path), 'utf8'));
@@ -65,7 +66,7 @@ test('only the two current Task role Skills are discoverable, with YAML-safe fro
     assert.ok(!names.has(metadata.name), `Duplicate skill name: ${metadata.name}`);
     names.add(metadata.name);
   }
-  assert.deepEqual([...names].sort(), ['cockpit-task-executor', 'cockpit-task-owner']);
+  assert.deepEqual([...names].sort(), ['cockpit-task-executor', 'cockpit-task-owner', 'github-coding']);
 });
 
 test('repository entrypoints describe only the current Task module', () => {
@@ -96,7 +97,7 @@ test('each current Skill has an independent relative reference closure without r
   for (const role of ['owner', 'executor']) {
     const directory = join(isolated, role);
     cpSync(join(root, skillDirectory(role)), directory, { recursive: true });
-    assertSkillClosure(directory, role);
+    assertSkillClosure(directory, skillFiles(role));
     const source = readFileSync(join(directory, 'SKILL.md'), 'utf8');
     const metadata = skillMetadata(source);
     assert.equal(metadata.name, `cockpit-task-${role}`);
@@ -111,6 +112,60 @@ test('each current Skill has an independent relative reference closure without r
       readFileSync(join(isolated, 'executor/references', reference), 'utf8'),
       `${reference}: independent copies must retain the same shared protocol guidance`);
   }
+  const coding = join(isolated, 'github-coding');
+  cpSync(join(root, codingDirectory), coding, { recursive: true });
+  assertSkillClosure(coding, ['SKILL.md']);
+  const source = readFileSync(join(coding, 'SKILL.md'), 'utf8');
+  assert.equal(skillMetadata(source).name, 'github-coding');
+  assert.ok(source.split('\n').length < 130, 'Coding guidance stays a short flow, not a command catalogue');
+  assert.doesNotMatch(source, /```(?:sh|bash)|git (?:checkout|reset|stash|push|clean)\b/);
+});
+
+test('coding guidance composes with roles without widening implementation or subscription authority', () => {
+  for (const role of ['owner', 'executor']) {
+    const source = readFileSync(join(root, skillDirectory(role), 'SKILL.md'), 'utf8');
+    const section = source.match(/## Coding work\n([\s\S]*?)(?=\n## )/)?.[1];
+    assert.ok(section?.includes('`github-coding`'), `${role} must independently discover the work Skill`);
+    assert.ok(section.trim().split('\n').length <= 6, 'Do not duplicate the work flow in role Skills');
+  }
+  const prompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
+  assert.match(prompt, /Issue\/environment preparation and safe post-merge cleanup are coordination, not permission to implement code/);
+  const coding = prose(readFileSync(join(root, codingDirectory, 'SKILL.md'), 'utf8'));
+  const requirements = [
+    /"main" means the repository's agreed target mainline/,
+    /Questions and idea exploration do not require an Issue, Task or worktree/,
+    /investigation-only, patch-only or PR-only authorization stops at that boundary/,
+    /existing suitable Issue or work environment rather than duplicating it/,
+    /not hosted on GitHub.*skipping inapplicable Issue\/PR steps/,
+    /Release\/tag creation, installation, deployment, restart and data migration are not default coding stages/,
+    /clean, freshly fetched main without discarding anyone's work/,
+    /not to reset, stash or delete it to look clean/,
+    /Do not switch or update another worker's checkout/,
+    /dedicated branch and worktree/,
+    /before creating and assigning Task/,
+    /not permission to implement the code personally or through Owner's subagents/,
+    /one Task for the complete result/,
+    /`references`.*`metadata`.*`outcome.references`/,
+    /Link them rather than mirroring every comment or log/,
+    /register one `done` subscription before assignment/,
+    /Do not subscribe when there is no such follow-up, another explicit cleanup arrangement suffices/,
+    /Read the latest Task, linked Issue and repository instructions/,
+    /Do not assume you inherited Owner's Skill context/,
+    /independent read-only review and fixes/,
+    /PR and promptly add its link to Task/,
+    /exact latest PR head, not an earlier green run/,
+    /Merge normally only within the authorized boundary and repository protections; never bypass them/,
+    /Do not manually message Owner, directly or through subagents/,
+    /Task done means Executor's agreed code result, not resource cleanup or an idle native session/,
+    /worktree is no longer used by Executor, subagents or other work/,
+    /uncommitted, untracked, ignored or otherwise needed artifacts and unmerged work/,
+    /including squash or rebase merges/,
+    /only this work's merged temporary worktree and local\/remote branches/,
+    /except those retained by repository policy/,
+    /Only then call the complete coding flow finished/,
+    /not another Task, new status or mandatory acceptance gate/,
+  ];
+  for (const requirement of requirements) assert.match(coding, requirement);
 });
 
 test('role prompts stay short while the Skills preserve delegation, communication and synchronization boundaries', () => {
@@ -261,14 +316,16 @@ test('public documentation links resolve to active resources rather than retired
   }
 });
 
-test('module packaging carries both isolated Skills and no draft or evaluation resources', t => {
+test('module packaging carries the role Skills and shared coding Skill without evaluation resources', t => {
   const packaged = spawnSync('npm', ['run', 'package:module'], { cwd: root, encoding: 'utf8' });
   assert.equal(packaged.status, 0, packaged.error?.message ?? `${packaged.stdout}\n${packaged.stderr}`);
   const manifest = JSON.parse(readFileSync(join(root, 'cockpit.module.json'), 'utf8'));
   const archive = join(root, 'dist', `cockpit-task-${manifest.version}.tgz`);
   const entries = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n');
-  const expected = ['owner', 'executor']
-    .flatMap(role => skillFiles(role).map(file => `./${skillDirectory(role)}/${file}`)).sort();
+  const expected = [
+    ...['owner', 'executor'].flatMap(role => skillFiles(role).map(file => `./${skillDirectory(role)}/${file}`)),
+    `./${codingDirectory}/SKILL.md`,
+  ].sort();
   assert.deepEqual(entries.filter(entry => entry.startsWith('./skills/') && !entry.endsWith('/')).sort(), expected);
   assert.ok(!entries.some(entry => /^\.\/docs\//.test(entry)), 'No design, evaluation or private coordination docs');
   const topLevel = [...new Set(entries.filter(entry => entry !== './').map(entry => entry.split('/')[1]))].sort();
@@ -279,6 +336,15 @@ test('module packaging carries both isolated Skills and no draft or evaluation r
   const packagedMetadata = JSON.parse(execFileSync('tar', ['-xOf', archive, './package.json'], { encoding: 'utf8' }));
   assert.equal(packagedMetadata.name, manifest.id);
   assert.equal(packagedMetadata.version, manifest.version);
+  const packagedManifest = JSON.parse(execFileSync('tar', ['-xOf', archive, './cockpit.module.json'], { encoding: 'utf8' }));
+  for (const selected of [[packagedManifest.roles[0]], [packagedManifest.roles[1]], packagedManifest.roles]) {
+    const directories = new Set(selected.flatMap(role => role.skillDirectories));
+    assert.ok(directories.has('skills/github-coding'));
+    const discovered = entries.filter(entry => entry.endsWith('/SKILL.md') &&
+      [...directories].some(directory => entry.startsWith(`./${directory}/`)));
+    assert.equal(discovered.filter(entry => entry === `./${codingDirectory}/SKILL.md`).length, 1);
+    assert.equal(discovered.length, selected.length + 1);
+  }
   for (const entry of expected) {
     assert.equal(execFileSync('tar', ['-xOf', archive, entry], { encoding: 'utf8' }),
       readFileSync(join(root, entry), 'utf8'), `Archive must contain the current resource: ${entry}`);
@@ -288,7 +354,7 @@ test('module packaging carries both isolated Skills and no draft or evaluation r
   for (const link of localLinks(readme)) {
     assert.ok(entries.includes(`./${link.split('#')[0]}`), `Packaged README link: ${link}`);
   }
-  t.diagnostic(`npm run package:module produced ${archive} with both bodies and seven runtime references`);
+  t.diagnostic(`npm run package:module produced ${archive} with three Skills and seven runtime references`);
 });
 
 test('unquoted mapping separators in either role description fail release validation', () => {

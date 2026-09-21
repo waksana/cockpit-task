@@ -15,7 +15,7 @@ try {
   for (const path of [
     'cockpit.module.json', 'src/task-board', 'web/task-board',
     'roles/task-owner.md', 'roles/task-executor.md',
-    'skills/cockpit-task-owner', 'skills/cockpit-task-executor', 'node_modules',
+    'skills/cockpit-task-owner', 'skills/cockpit-task-executor', 'skills/github-coding', 'node_modules',
   ]) {
     cpSync(join(root, path), join(stage, path), {
       recursive: true,

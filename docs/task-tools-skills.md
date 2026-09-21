@@ -7,9 +7,10 @@
 
 ## 1. 角色资源与工具
 
-Task 只维护 [Owner Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md)
-和 [Executor Skill](../skills/cockpit-task-executor/cockpit-task-executor/SKILL.md)。
-Coding / Research 等工作方法来自外部，不是 Task 子类型或必装包。
+Task 提供 [Owner Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md)
+和 [Executor Skill](../skills/cockpit-task-executor/cockpit-task-executor/SKILL.md)，
+并随包提供独立工作 Skill [github-coding](../skills/github-coding/github-coding/SKILL.md)。
+工作方法与协作角色正交，不新增 Task 子类型；非编码或研究工作不加载编码流程。
 
 | 角色 | 常驻指令 | 注入的 Task 工具 |
 | --- | --- | --- |
@@ -21,12 +22,33 @@ Task 不提供给已有 session 追加角色的工具，指派也不补能力。
 不是项目身份、实际承接或逐 Task ACL；自报 actor 只是归因。
 
 常驻 prompt 固定责任及加载入口；Skill 正文指导判断，随包 references 解释
-具体问题。外层目录是各角色独立的原生发现根目录，内层技能自包含；
-不依赖仓库 docs 或另一份 Skill。
+具体问题。外层目录是原生发现根目录，内层技能自包含，不依赖仓库 docs。
+两角色的 `skillDirectories` 都包含同一个 `skills/github-coding` 根；
+双角色由宿主按同源资源去重。Task 正文按名字指向这个可发现工作 Skill，
+不假定 Executor 继承 Owner 已读的上下文，也不在 role prompt 注入整套方法。
 
 首次需要时加载 Skill，指令仍在上下文时复用。压缩/恢复后缺失、内容改变或
 具体规则不清楚时再读，不因每条消息或检查点重复加载。稳定指导可以复用，
 可变的 Task 定义、状态和 ACK 却必须按需刷新；文字指导不是加载频率的程序保证。
+
+### Git/GitHub 编码协作
+
+Owner 确认授权与仓库状态，将自己的主目录保持为干净最新主线，准备专用
+branch/worktree 和环境；先复用或创建 Issue，再创建描述完整且关联资料的 Task。
+这些准备、Issue 维护及合并后清理属于协调职责，不允许 Owner 亲自实施代码。
+已有合适 Issue/环境继续使用，不能为“干净”丢弃、stash 或删除用户改动。
+
+Executor 使用指定 worktree，完整负责实现、必要验证、独立只读 review、修复、
+关联 PR 和授权内正常合并；PR 创建后及时补 Task 链接，确认最新 head 的 CI，
+不绕过仓库保护。Task 用现有 references/metadata/outcome.references 表达关联，
+不增加 GitHub 字段、MCP 或评论镜像。仅 PR、补丁、调查授权不擅自扩成合并。
+
+Task done 是 Executor 的约定结果，不等于 session 空闲或环境已清理。Owner 确认合并、
+无其他工作仍使用且无未保存/需保留产物后，仅清理本次已合并临时分支和 worktree，
+让主目录回到干净最新主线；不能安全清理时说明尚未收尾。需要后续通知恢复这一
+真实清理动作时，可在派单前登记一次 done 订阅；无必要或另有安排时不登记，
+不轮询或自动续订，也不新建清理 Task/审批门。发布、部署、重启不是默认阶段。
+讨论、非编码和非 GitHub 工作不被强加不适用的步骤。
 
 ## 2. Owner：澄清、委派、跟进
 

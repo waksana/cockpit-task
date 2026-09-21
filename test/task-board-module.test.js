@@ -62,7 +62,7 @@ function fixture() {
   };
 }
 
-test('module roles contain exactly the agreed tool subsets and only two role skills', () => {
+test('module roles retain tool subsets and share one coding Skill alongside the two role Skills', () => {
   const manifest = JSON.parse(readFileSync(new URL('../cockpit.module.json', import.meta.url), 'utf8'));
   const [owner, executor] = manifest.roles;
   assert.equal(manifest.name, 'Task');
@@ -75,7 +75,8 @@ test('module roles contain exactly the agreed tool subsets and only two role ski
   assert.deepEqual(owner.mcpServers['cockpit-task'].tools, ['task_read', 'task_create', 'task_session_create', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe']);
   assert.deepEqual(executor.mcpServers['cockpit-task'].tools, ['task_read', 'task_edit', 'task_ack', 'task_report', 'task_cancel']);
   assert.deepEqual([...new Set([...owner.mcpServers['cockpit-task'].tools, ...executor.mcpServers['cockpit-task'].tools])].sort(), [...TOOL_NAMES].sort());
-  assert.deepEqual(manifest.roles.flatMap(role => role.skillDirectories), ['skills/cockpit-task-owner', 'skills/cockpit-task-executor']);
+  assert.deepEqual(owner.skillDirectories, ['skills/cockpit-task-owner', 'skills/github-coding']);
+  assert.deepEqual(executor.skillDirectories, ['skills/cockpit-task-executor', 'skills/github-coding']);
 });
 
 test('old module identity is rejected before opening storage instead of silently aliasing it', () => {

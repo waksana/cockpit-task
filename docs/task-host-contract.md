@@ -56,9 +56,13 @@ HTTP MCP 配置和工具选择。Web 与 MCP 创建共用宿主角色选择流�
 
 | 选择 | Skill | Task MCP 工具（省略 `task_` 前缀） |
 | --- | --- | --- |
-| Owner | `cockpit-task-owner` | read、create、session_create、assign、edit、cancel、subscribe、unsubscribe |
-| Executor | `cockpit-task-executor` | read、edit、ack、report、cancel |
-| 两者 | 两份 Skill | 十个工具的并集，共用 `cockpit-task` HTTP MCP 配置 |
+| Owner | `cockpit-task-owner`、`github-coding` | read、create、session_create、assign、edit、cancel、subscribe、unsubscribe |
+| Executor | `cockpit-task-executor`、`github-coding` | read、edit、ack、report、cancel |
+| 两者 | 两份角色 Skill 与一份 `github-coding` | 十个工具的并集，共用 `cockpit-task` HTTP MCP 配置 |
+
+两角色都声明同一个 `skills/github-coding` 发现根；宿主复用同来源工作 Skill，
+不复制到各角色目录，不新增装载接口。它仅在编码工作需要时读取，非编码不触发；
+Skill 可发现不等于正文已读，Executor 不继承 Owner 的加载上下文。
 
 工具子集是 agent 能力装配，不是 Task 逐记录 ACL。业务 actor 为自报来源；
 具有工具不证明用户授权或另一个 Executor 已阅读要求。

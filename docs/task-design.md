@@ -28,6 +28,9 @@ Owner 可以只读调查、回答问题和比较方案。实施及改变外部�
 不亲自实施或用自己的 subagent 代替独立 Executor。用户要求一个结果不等于要求
 Owner 本人执行；明确要求本人执行，或实际以具备能力的 Executor 身份承接 Task，
 才是例外。无法委派应说明阻塞，不静默接管。
+编码工作的 Issue 维护、独立工作环境准备和安全的合并后清理属于 Owner 协调，
+不属于代码实施；独立 [github-coding Skill](../skills/github-coding/github-coding/SKILL.md)
+定义这条工作流程，不改变角色分工或为非编码 Task 增加步骤。
 
 ## 2. Task 是共同工作记录
 

@@ -10,7 +10,7 @@
 Task 提供十个工具，模块 ID 与 MCP key 为 `cockpit-task`。
 登记、创建执行 session 和首次指派是独立操作；状态订阅是可选的一次性等待，
 不是默认最终通知、监工或依赖调度。模块只维护 Owner / Executor 两份角色技能，
-不包含 Coding / Research 工作技能。
+另随包提供独立的 `github-coding` 工作 Skill，不改变 Task 工具或引入业务类型。
 
 | 工具 | Owner | Executor | 职责 |
 | --- | --- | --- | --- |
@@ -143,7 +143,7 @@ Owner 决定新建及所需工作环境；该独立入口通过宿主公开能�
 session、装配 Task 指导与工具并显式检查能力。不要求 Owner 手工拼装，
 也不接受自报“能力已就绪”代替检查。
 
-完整输入：`actor_session_id, request_id, cwd`。不接受 `work_skills`、任意角色或宿主配置透传。Task 只负责自身 Executor 协作能力；Coding / Research 的内容、安装和维护不属于本模块。模块调用 `context.host.call("session/new",{cwd,roles:[{moduleId:"cockpit-task",roleId:"executor"}]})`，再用 `roles/readiness` 与 `session/get` 检查能力及原生状态。
+完整输入：`actor_session_id, request_id, cwd`。不接受 `work_skills`、任意角色或宿主配置透传。Executor 角色通过既有 skillDirectories 声明发现协作 Skill 及共享 `github-coding` 工作 Skill；编码方式不增加本工具参数。模块调用 `context.host.call("session/new",{cwd,roles:[{moduleId:"cockpit-task",roleId:"executor"}]})`，再用 `roles/readiness` 与 `session/get` 检查能力及原生状态。
 
 `roles/readiness` 仅在明确请求时读取当下的 Skill、MCP 和工具能力；常规 session 列表、快照、详情不附带该结果，也不持续维护就绪状态或展示 badge。`session/get` 的运行、pending、subagent 等信息是另一类检查，不能把能力可用当作当前可立即接单。
 

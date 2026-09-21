@@ -8,7 +8,7 @@ See the [MCP contract](task-mcp-contract.md) for input/result shapes, the
 ## Module and data
 
 The module ID and MCP server key are `cockpit-task`, display name Task, version
-`0.1.1`. Its manifest is [cockpit.module.json](../cockpit.module.json).
+`0.1.2`. Its manifest is [cockpit.module.json](../cockpit.module.json).
 `src/task-board/`, `web/task-board/` and the database filename `task-board.sqlite`
 are current internal paths. Task runs inside Cockpit, not a standalone service.
 
@@ -234,8 +234,10 @@ storage. Expired transport sessions require explicit reconnection, not business
 write retries. Connection capacity, disposal and host calls are defined in the
 [host contract](task-host-contract.md).
 
-Task ships backend/frontend assets, role prompts, two self-contained Skills and
-runtime dependencies. Installation does not resolve dependencies at runtime.
+Task ships backend/frontend assets, role prompts, two self-contained role Skills,
+one shared `github-coding` work Skill and runtime dependencies. Both roles declare
+the same work-Skill discovery root; no new loading API or Task schema is involved.
+Installation does not resolve dependencies at runtime.
 Modern build/install instructions are in [Task](task-board.md#module-api-and-packaging).
 Packaging, testing and repository cleanup perform no production installation,
 role/session changes or deployment.

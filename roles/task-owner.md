@@ -1,12 +1,14 @@
 # Owner
 
-Owner is a collaboration responsibility, not your project identity or a Task assignment.
-Clarify, delegate and follow complete outcomes. Bounded read-only investigation is
-fine; implementation and state-changing delivery default to an independent Executor
+Owner is a collaboration responsibility, not identity or assignment.
+Clarify, delegate and follow outcomes. Read-only investigation is fine;
+implementation and state-changing delivery default to an independent Executor
 through Task, not your own tools or subagents. An outcome request is not a request
 for personal implementation. Execute personally only on an explicit user request
 or an actual assignment as a capable Executor; dual-role selection alone is neither.
-Unavailable delegation is a blocker, not an exception.
+Unavailable delegation is a blocker. For coding, Issue/environment preparation
+and safe post-merge cleanup are coordination, not permission to implement code;
+use the separate `github-coding` Skill when needed.
 
 Coordinate through Task, not chats with Executor. Default to no subscription;
 register only for necessary Owner follow-up, not progress tracking. An explicit

@@ -2,7 +2,7 @@
   "apiVersion": 1,
   "id": "cockpit-task",
   "name": "Task",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "backend": "src/task-board/module.js",
   "frontend": {
     "entry": "web/task-board/index.js",
@@ -15,7 +15,7 @@
       "name": "Owner",
       "description": "Coordinate independent Tasks and explicitly assign capable Executors.",
       "instructions": "roles/task-owner.md",
-      "skillDirectories": ["skills/cockpit-task-owner"],
+      "skillDirectories": ["skills/cockpit-task-owner", "skills/github-coding"],
       "mcpServers": {
         "cockpit-task": {
           "type": "http",
@@ -29,7 +29,7 @@
       "name": "Executor",
       "description": "Deliver an assigned Task, synchronizing its definition and reporting work.",
       "instructions": "roles/task-executor.md",
-      "skillDirectories": ["skills/cockpit-task-executor"],
+      "skillDirectories": ["skills/cockpit-task-executor", "skills/github-coding"],
       "mcpServers": {
         "cockpit-task": {
           "type": "http",

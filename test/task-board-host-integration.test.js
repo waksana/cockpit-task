@@ -28,7 +28,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
   timeout: 180_000,
 }, async t => {
   const hostSource = resolve(hostWorktree);
-  const archive = join(repository, 'dist', 'cockpit-task-0.1.1.tgz');
+  const archive = join(repository, 'dist', 'cockpit-task-0.1.2.tgz');
   const originalEnv = { ...process.env };
   const originalCwd = process.cwd();
   const root = await mkdtemp(join(repository, '.task-board-host-integration-'));
@@ -271,7 +271,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
         enableSessionStore: false, enableSkills: true, pluginDirectories: [], instructionDirectories: [], customAgents: [],
         enableManagedSettings: false, skipEmbeddingRetrieval: true, embeddingCacheStorage: 'in-memory',
         enableSessionTelemetry: false, remoteSession: 'off', enableExperimentalMode: true,
-        availableTools: new ToolSet().addMcp('*'),
+        availableTools: new ToolSet().addMcp('*').addBuiltIn('skill'),
       },
     });
     engine = new Engine({ runtime });
@@ -301,7 +301,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     stage = 'installing the real artifact and activating its backend';
     const installed = await installLocalModule(archive, { hostRoot: dirs.host, trustLocalCode: true, enable: true });
     assert.equal(installed.manifest.id, 'cockpit-task');
-    assert.equal(installed.manifest.version, '0.1.1');
+    assert.equal(installed.manifest.version, '0.1.2');
     assert.ok(installed.root.startsWith(`${dirs.host}/modules/installed/`));
     const startModule = async ({ listen = true, port = 0 } = {}) => {
       app = Fastify({ forceCloseConnections: true });
@@ -324,7 +324,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const origin = await startModule();
     const bootstrap = moduleHost.bootstrap();
     assert.deepEqual(bootstrap.errors, []);
-    assert.deepEqual(bootstrap.active, [{ id: 'cockpit-task', version: '0.1.1', digest: installed.digest }]);
+    assert.deepEqual(bootstrap.active, [{ id: 'cockpit-task', version: '0.1.2', digest: installed.digest }]);
     const apiBase = bootstrap.modules[0].apiBase;
     const headers = { 'X-Cockpit-Module-Digest': installed.digest };
     assert.equal((await app.inject(bootstrap.modules[0].entry)).statusCode, 200);
@@ -395,13 +395,14 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(requests.length, 0, 'Role creation must not send a startup prompt');
 
     const verifyAssembly = async (sessionId, selected, expectedTools, expectedSkills) => {
+      const skillNames = [...expectedSkills, 'github-coding'].sort();
       const assembly = await roles.assemble(sessionId, selected);
       assert.deepEqual(Object.keys(assembly.config.mcpServers), ['cockpit-task']);
       const server = assembly.config.mcpServers['cockpit-task'];
       assert.equal(server.url, `${origin}${apiBase}/mcp`);
       assert.deepEqual(server.headers, headers);
       assert.deepEqual(server.tools, [...expectedTools].sort());
-      assert.deepEqual(assembly.skills.map(skill => skill.name).sort(), [...expectedSkills].sort());
+      assert.deepEqual(assembly.skills.map(skill => skill.name).sort(), skillNames);
       for (const role of selected) {
         assert.ok(assembly.config.systemMessage.content.includes(`Module cockpit-task / role ${role.roleId}`));
         const source = await readFile(join(installed.root, `roles/task-${role.roleId}.md`), 'utf8');
@@ -409,8 +410,11 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       }
       assert.ok(assembly.config.systemMessage.content.includes(`Native session ID: ${sessionId}`));
       const nativeSkills = await engine.getPanel(sessionId, 'skills');
-      assert.deepEqual(nativeSkills.filter(skill => skill.label.startsWith('cockpit-task-')).map(skill => skill.label).sort(), [...expectedSkills].sort());
-      for (const skill of nativeSkills.filter(skill => skill.label.startsWith('cockpit-task-'))) assert.equal(skill.enabled, true);
+      const taskSkills = nativeSkills.filter(skill => skill.label.startsWith('cockpit-task-') || skill.label === 'github-coding');
+      assert.deepEqual(taskSkills.map(skill => skill.label).sort(), skillNames,
+        'Owner, Executor and their union discover exactly one shared work Skill');
+      for (const skill of taskSkills) assert.equal(skill.enabled, true);
+      assert.ok(assembly.config.skillDirectories.includes(join(installed.root, 'skills/github-coding')));
       assert.equal(nativeSkills.some(skill => ['task-owner', 'task-executor', 'work-commander', 'work-commander-owner', 'cockpit-task-commander'].includes(skill.label)), false);
       const nativeMcp = await engine.getPanel(sessionId, 'mcpServers');
       assert.equal(nativeMcp.filter(server => server.label === 'cockpit-task').length, 1,
@@ -424,6 +428,10 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const verifyNativePrompts = async (sessionId, captured) => {
       const capturedJson = JSON.stringify(captured);
       assert.ok(capturedJson.includes(`Native session ID: ${sessionId}`));
+      const codingSource = await readFile(join(installed.root, 'skills/github-coding/github-coding/SKILL.md'), 'utf8');
+      const codingDescription = JSON.parse(/^description: (".*")$/m.exec(codingSource)[1]);
+      assert.ok(capturedJson.includes(JSON.stringify(codingDescription).slice(1, -1)),
+        'The native provider must see the shared work Skill metadata, not only a role hint');
       for (const role of roles.read(sessionId)) {
         assert.ok(capturedJson.includes(`Module cockpit-task / role ${role.roleId}`));
         const source = await readFile(join(installed.root, `roles/task-${role.roleId}.md`), 'utf8');
