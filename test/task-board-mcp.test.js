@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -8,6 +11,8 @@ import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { assignExecutor } from '../src/task-board/operations.js';
 import { createMcpRoutes } from '../src/task-board/mcp.js';
 import { toolSchemas } from '../src/task-board/contracts.js';
+import { TaskService } from '../src/task-board/service.js';
+import { TaskStore } from '../src/task-board/store.js';
 
 function fixture(execute, sharedModule, schemas = { task_read: z.object({ task_id: z.string() }).strict() }) {
   const controller = new AbortController();
@@ -100,20 +105,57 @@ test('published tool descriptions explain filters, dispatch races and same-repor
   } finally { await f.close(); }
 });
 
-test('notification failure is a surfaced MCP error without erasing successful Task effects', async () => {
-  const expected = {
-    result: { status: 'applied', task_status: 'cancelled' }, error: null,
-    notifications: [{ notification: { status: 'unknown' } }],
-    notification_error: { code: 'NOTIFICATION_UNCONFIRMED', message: 'Task is saved; do not blindly resend' },
-    definition_check: { status: 'checked', tasks: [] },
+test('real notification failure crosses MCP without erasing Task effects or resending on inspection/replay', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'task-mcp-subscription-'));
+  const store = new TaskStore(root);
+  const sent = [];
+  const service = new TaskService(store, {
+    ownerExists: async () => true,
+    async send(owner, text) { sent.push({ owner, text }); throw new Error('Synthetic lost acceptance response'); },
+  });
+  const f = fixture((name, input, options) => service.execute(name, input, options), undefined, toolSchemas);
+  const call = async (name, input) => {
+    const response = await f.client.callTool({ name, arguments: { actor_session_id: 'actor', ...input } });
+    assert.deepEqual(JSON.parse(response.content[0].text), response.structuredContent);
+    assert.ok(response.structuredContent.definition_check);
+    return response;
   };
-  const f = fixture(async () => expected);
   try {
     await f.connect();
-    const response = await f.client.callTool({ name: 'task_read', arguments: { task_id: 'synthetic' } });
+    const created = await call('task_create', {
+      request_id: 'create', owner: 'recorded-owner', title: 'Synthetic Task', description: 'Verify delivery evidence.',
+    });
+    assert.notEqual(created.isError, true);
+    const { task_id, write_context } = created.structuredContent.result;
+    const registered = await call('task_subscribe', {
+      request_id: 'subscribe', task_id, write_context, statuses: ['cancelled'],
+    });
+    assert.notEqual(registered.isError, true);
+    assert.deepEqual(sent, []);
+    const input = { request_id: 'cancel', task_id, write_context, reason: 'Synthetic cancellation' };
+    const response = await call('task_cancel', input);
     assert.equal(response.isError, true);
-    assert.deepEqual(response.structuredContent, expected);
-  } finally { await f.close(); }
+    const envelope = response.structuredContent;
+    assert.equal(envelope.error, null);
+    assert.equal(envelope.result.task_status, 'cancelled');
+    assert.equal(envelope.notification_error.code, 'NOTIFICATION_UNCONFIRMED');
+    assert.equal(envelope.notifications[0].notification.status, 'unknown');
+    const overview = await call('task_read', { view: 'overview', task_id });
+    assert.equal(overview.structuredContent.result.status, 'cancelled');
+    const history = await call('task_read', { view: 'subscriptions', task_id });
+    assert.notEqual(history.isError, true, 'Inspecting failed delivery is a successful bounded read');
+    assert.deepEqual(history.structuredContent.result.items, envelope.notifications);
+    const replay = await call('task_cancel', input);
+    assert.equal(replay.isError, true);
+    assert.deepEqual(replay.structuredContent, envelope);
+    assert.deepEqual(sent, [{
+      owner: 'recorded-owner', text: `[Task status updated](task:${task_id}?event=status_changed)`,
+    }]);
+  } finally {
+    await f.close();
+    service.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('malformed envelopes and rejected headers cannot retain cancelled protocol sessions', async t => {

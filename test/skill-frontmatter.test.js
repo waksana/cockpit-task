@@ -191,6 +191,12 @@ test('explicit one-shot subscriptions preserve silent defaults, role boundaries 
     assert.match(writes, /do not claim exactly-once delivery/);
     assert.match(writes, /unknown send does not authorize a blind resend, replacement Task or another subscription/);
     assert.match(writes, /neither restores default progress\/final notifications nor permits Executor-to-Owner messages/);
+    assert.match(writes, /Unsubscribe cancels only a waiting subscription; it cannot retract a triggered notification/);
+    assert.match(writes, /terminal status outside the selected targets, the waiting subscription expires without notification/);
+    assert.match(writes, /original `result`, including `subscription_ids`, is retained alongside `notifications` and an independent `notification_error`/);
+    assert.match(writes, /notification failure can set MCP `isError=true` while `error` remains null/);
+    assert.match(writes, /saved Task status and outcome are not rolled back/);
+    assert.match(writes, /Do not repeat a saved report, redo delivery or manually send a replacement notice to Owner because notification failed/);
     const reading = reference('reading-tasks.md');
     assert.match(reading, /`subscriptions` with `task_id`/);
     assert.match(reading, /do not poll while waiting/);

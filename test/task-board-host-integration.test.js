@@ -54,6 +54,8 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
   const nativeTaskReads = new Map();
   const nativeTaskAcks = new Map();
   const nativeTaskReports = new Map();
+  const nativeOwnerWorkflows = new Map();
+  const nativeOwnerCalls = [];
   const expectedDefinitions = new Map();
   const isolatedSessionIds = new Set();
   const reports = [];
@@ -130,6 +132,8 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
         };
         const latestUser = message.messages.findLast(item => item.role === 'user');
         const taskReference = latestUser && /\[(Task assigned to you|Task updated)\]\(task:([0-9a-f-]{36})\?event=(assigned|updated)\)/u.exec(contentText(latestUser.content));
+        const ownerSubscription = latestUser && /Synthetic Owner subscription for task:([0-9a-f-]{36})\./u.exec(contentText(latestUser.content));
+        const ownerNotice = latestUser && /\[Task status updated\]\(task:([0-9a-f-]{36})\?event=status_changed\)/u.exec(contentText(latestUser.content));
         let toolCall;
         if (taskReference) {
           const taskId = taskReference[2];
@@ -183,6 +187,45 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
               }
             }
           }
+        }
+        if (ownerSubscription || ownerNotice) {
+          const taskId = (ownerSubscription ?? ownerNotice)[1];
+          const phase = ownerSubscription ? 'subscribe' : 'status_changed';
+          const key = `${phase}:${taskId}`;
+          const actor = /Native session ID: ([0-9a-f-]{36})/u.exec(JSON.stringify(message.messages));
+          assert.ok(actor, 'Owner uses its injected native session ID, not a guessed recipient');
+          const evidence = {};
+          const step = (name, action, input) => {
+            const id = `synthetic-owner-${phase}-${action}-${taskId}`;
+            const reply = message.messages.findLast(item => item.role === 'tool' && item.tool_call_id === id);
+            if (reply) {
+              const envelope = JSON.parse(contentText(reply.content));
+              assert.equal(envelope.error, null, 'Owner must be able to execute the Skill-described MCP workflow');
+              assert.ok(envelope.definition_check);
+              evidence[action] = envelope.result;
+              return envelope.result;
+            }
+            const tools = message.tools.filter(tool => tool.type === 'function' && tool.function.name.endsWith(name));
+            assert.equal(tools.length, 1, `Owner must have exactly one native ${name} tool`);
+            const args = { task_id: taskId, actor_session_id: actor[1], ...input };
+            nativeOwnerCalls.push({ key, name, input: args });
+            toolCall = { id, type: 'function', function: { name: tools[0].function.name, arguments: JSON.stringify(args) } };
+            return null;
+          };
+          // Script the packaged Skill's workflow to exercise native tool wiring, not model judgment.
+          const overview = step('task_read', 'overview', { view: 'overview' });
+          if (overview) {
+            assert.equal(overview.id, taskId);
+            assert.equal(overview.owner, actor[1]);
+            if (ownerSubscription) {
+              step('task_subscribe', 'subscription', {
+                write_context: overview.write_context, request_id: `native-subscribe-${taskId}`, statuses: ['done'],
+              });
+            } else if (!overview.outcome.available || step('task_read', 'outcomes', { view: 'outcomes' })) {
+              step('task_read', 'subscriptions', { view: 'subscriptions' });
+            }
+          }
+          if (!toolCall) nativeOwnerWorkflows.set(key, evidence);
         }
         const assistantMessage = toolCall
           ? { role: 'assistant', content: null, tool_calls: [toolCall] }
@@ -563,8 +606,16 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const cancelledSubscription = await tool('task_unsubscribe', unsubscriptionInput);
     assert.equal(cancelledSubscription.result.subscription.state, 'cancelled');
     assert.deepEqual((await tool('task_unsubscribe', unsubscriptionInput)).result, cancelledSubscription.result);
-    const armed = await tool('task_subscribe', { ...subscriptionInput, request_id: 'subscribe-done', statuses: ['done'] });
     assert.equal(nativeMessages.length, beforeSubscriptionMessages, 'Registration and cancellation are silent');
+    await promptAndInspect(ownerId, `Synthetic Owner subscription for task:${taskId}.`,
+      ownerTools, ['task_ack', 'task_report']);
+    const ownerRegistration = nativeOwnerWorkflows.get(`subscribe:${taskId}`);
+    assert.ok(ownerRegistration, 'Native Owner must complete its read and subscription tool calls');
+    assert.equal(ownerRegistration.subscription.subscription.state, 'waiting');
+    assert.equal(ownerRegistration.subscription.subscription.owner, ownerId);
+    assert.deepEqual(nativeOwnerCalls.filter(call => call.key === `subscribe:${taskId}`).map(call => call.name),
+      ['task_read', 'task_subscribe']);
+    const beforeStatusMessages = nativeMessages.length;
     const completeInput = {
       actor_session_id: executorId, request_id: 'integration-task-done', task_id: taskId,
       revision: subscribedTask.revision, write_context: subscribedTask.write_context,
@@ -573,12 +624,21 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const complete = await tool('task_report', completeInput);
     assert.equal(complete.notification_error, null);
     assert.equal(complete.result.task_status.value, 'done');
-    assert.equal(complete.notifications[0].subscription_id, armed.result.subscription.subscription_id);
+    assert.equal(complete.notifications[0].subscription_id, ownerRegistration.subscription.subscription.subscription_id);
     assert.ok(['accepted', 'queued'].includes(complete.notifications[0].notification.status));
     const statusCard = `[Task status updated](task:${taskId}?event=status_changed)`;
     await waitFor(async () => nativeMessages.some(message => message.sessionId === ownerId && message.content === statusCard)
+      && nativeOwnerWorkflows.has(`status_changed:${taskId}`)
       && await engine.busyCount() === 0, 'one-shot Owner notification native completion');
-    assert.deepEqual(nativeMessages.slice(beforeSubscriptionMessages), [{ sessionId: ownerId, content: statusCard }]);
+    assert.deepEqual(nativeMessages.slice(beforeStatusMessages), [{ sessionId: ownerId, content: statusCard }]);
+    const ownerEvidence = nativeOwnerWorkflows.get(`status_changed:${taskId}`);
+    assert.equal(ownerEvidence.overview.status, 'done');
+    assert.equal(ownerEvidence.outcomes.items[0].summary, 'Synthetic isolated completion');
+    assert.equal(ownerEvidence.subscriptions.items[0].event.status, 'done');
+    assert.deepEqual(nativeOwnerCalls.filter(call => call.key === `status_changed:${taskId}`)
+      .map(call => [call.name, call.input.view]),
+    [['task_read', 'overview'], ['task_read', 'outcomes'], ['task_read', 'subscriptions']],
+    'A status notice uses current evidence, not ACK, another subscription, or a message to Executor');
     assert.deepEqual((await tool('task_report', completeInput)).result, complete.result);
     const subscriptions = (await tool('task_read', { view: 'subscriptions', task_id: taskId })).result.items;
     assert.equal(subscriptions[0].event.status, 'done');
@@ -639,9 +699,14 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(moduleHost.ready(), undefined, 'Service-ready dispatch must be nonblocking');
     moduleHost.ready();
     await waitFor(async () => nativeMessages.some(message => message.sessionId === ownerId && message.content === recoveredCard)
+      && nativeOwnerWorkflows.has(`status_changed:${pending.task_id}`)
       && await engine.busyCount() === 0, 'cold-start pending notification to the native isolated Owner');
     expectedStartupNotification = undefined;
     assert.deepEqual(nativeMessages.slice(beforeColdMessages), [{ sessionId: ownerId, content: recoveredCard }]);
+    assert.equal(nativeOwnerWorkflows.get(`status_changed:${pending.task_id}`).overview.status, 'cancelled');
+    assert.deepEqual(nativeOwnerCalls.filter(call => call.key === `status_changed:${pending.task_id}`)
+      .map(call => [call.name, call.input.view]), [['task_read', 'overview'], ['task_read', 'subscriptions']],
+    'A recovered cancellation notice does not fabricate an outcome or attempt a terminal ACK');
     assert.deepEqual(bridgeCalls.slice(beforeColdCalls).filter(call => call.name === 'prompt'), [{
       name: 'prompt', body: { sessionId: ownerId, text: recoveredCard, mode: 'enqueue' },
     }]);
@@ -686,7 +751,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(persistedActivity.json().result.items[0].text, latest.activity.text);
     assert.ok(reports.every(({ error }) => error.code === 'MODULE_VERSION_MISMATCH'), reports.map(({ error }) => String(error)).join('\n'));
     assert.deepEqual(providerErrors, []);
-    t.diagnostic('Verified packaged Task, official HTTP MCP, native role subsets/union, assigned/updated notices, one-shot Owner notifications, service-ready cold recovery without inbound requests, no accepted/unknown resend across a second cold startup, and persistence.');
+    t.diagnostic('Verified packaged Task, native role/Skill assembly, Owner MCP registration and current-evidence reads on status notices without ACK or resubscription, Executor read/ACK/report, service-ready recovery without inbound requests, and no accepted/unknown resend across a second cold startup. Synthetic provider proves wiring, not autonomous model judgment.');
   } catch (error) {
     failed = true;
     t.diagnostic(`Integration failed while ${stage}.`);
