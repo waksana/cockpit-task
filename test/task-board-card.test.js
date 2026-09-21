@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   activate,
   acknowledgementLabel,
@@ -22,6 +23,22 @@ const result = {
 const response = (data = result, error = null, status = 200) =>
   new Response(JSON.stringify({ result: data, error, definition_check: null }), { status });
 const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test('dialog delegates initial/return focus and revisions use native lazy disclosure', () => {
+  const source = readFileSync(new URL('../web/task-board/index.js', import.meta.url), 'utf8');
+  const detail = source.slice(source.indexOf('function Detail('), source.indexOf('function Card('));
+  assert.match(detail, /element\.showModal\(\)/);
+  assert.match(detail, /if \(element\.open\) element\.close\(\)/);
+  assert.match(detail, /useLayoutEffect\(\(\) =>/);
+  assert.match(detail, /onClick: \(\) => dialog.current.close\(\)/);
+  assert.doesNotMatch(detail, /onCancel:/);
+  assert.doesNotMatch(detail, /\.focus\(|trigger/);
+  const history = source.slice(source.indexOf('function Revision('), source.indexOf('function Detail('));
+  assert.match(history, /h\('details', \{ onToggle: event => setOpen\(event\.currentTarget\.open\) \}/);
+  assert.match(history, /h\('summary', null, `Read full definition/);
+  assert.match(history, /open \? h\(Revision, \{ taskId, revision \}\) : null/);
+  assert.doesNotMatch(history, /back\.current|revisionButton|returnRevision/);
+});
 
 function fixture() {
   const requests = [];
