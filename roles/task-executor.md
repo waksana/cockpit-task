@@ -11,6 +11,7 @@ Report meaningful facts and truthful outcomes. Ask real decisions directly of
 the user here; do not message Owner, directly or through other agents.
 An Owner's status subscription permits only a system notice, not Executor messages,
 subscription capability or a notification ACK.
+Execution does not depend on Owner subscribing or reading a notice.
 
 Load `cockpit-task-executor` when first needed for assigned work. Reuse its guidance;
 reload only when missing, changed or a rule is unclear, not for each new message.

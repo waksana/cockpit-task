@@ -37,8 +37,15 @@ test('assignment records uncertainty before sending exactly one assigned event r
 
 test('missing capability and busy sessions are rejected before binding', async () => {
   for (const current of [{ ready: false, idle: true }, { ready: true, idle: false }]) {
-    const f = assignment({ inspect: async () => current });
+    const details = {
+      reasons: current.ready ? [] : ['MCP unavailable'], loaded: true, status: 'idle',
+      availability_reasons: current.idle ? [] : ['queued_messages'], observed_at: '2026-09-21T00:00:00.000Z',
+    };
+    const f = assignment({ inspect: async () => ({ ...current, details }) });
     const outcome = await f.run();
+    assert.equal(outcome.error.code, current.ready ? 'EXECUTOR_NOT_READY' : 'CAPABILITY_UNAVAILABLE');
+    assert.deepEqual(outcome.result.operation.details, details);
+    assert.deepEqual(f.saved.at(-1), outcome);
     assert.equal(outcome.result.operation.assignment, 'not_applied');
     assert.equal(outcome.result.operation.message, 'not_sent');
     assert.equal(f.bindings, 0);
@@ -46,14 +53,27 @@ test('missing capability and busy sessions are rejected before binding', async (
   }
 });
 
-test('readiness lost after binding retains assignment and never sends', async () => {
-  let calls = 0;
-  const f = assignment({ inspect: async () => ({ ready: true, idle: ++calls === 1 }) });
-  const outcome = await f.run();
-  assert.equal(outcome.result.operation.assignment, 'applied');
-  assert.equal(outcome.result.operation.message, 'not_sent');
-  assert.equal(outcome.result.operation.status, 'partially_applied');
-  assert.equal(f.sent.length, 0);
+test('readiness lost after binding retains the second observation and never sends', async () => {
+  for (const ready of [true, false]) {
+    let calls = 0;
+    const details = {
+      reasons: ready ? [] : ['MCP disconnected'], loaded: true, status: 'idle',
+      availability_reasons: ready ? ['pending_user_question'] : [], observed_at: '2026-09-21T00:00:01.000Z',
+    };
+    const f = assignment({
+      inspect: async () => ++calls === 1
+        ? { ready: true, idle: true, details: { availability_reasons: [], observed_at: '2026-09-21T00:00:00.000Z' } }
+        : { ready, idle: !ready, details },
+    });
+    const outcome = await f.run();
+    assert.equal(outcome.error.code, ready ? 'EXECUTOR_NOT_READY' : 'CAPABILITY_UNAVAILABLE');
+    assert.equal(outcome.result.operation.assignment, 'applied');
+    assert.equal(outcome.result.operation.message, 'not_sent');
+    assert.equal(outcome.result.operation.status, 'partially_applied');
+    assert.deepEqual(outcome.result.operation.details, details);
+    assert.deepEqual(f.saved.at(-1), outcome);
+    assert.equal(f.sent.length, 0);
+  }
 });
 
 test('Task revision recheck prevents dispatch after a concurrent edit', async () => {

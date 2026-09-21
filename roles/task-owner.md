@@ -8,9 +8,10 @@ for personal implementation. Execute personally only on an explicit user request
 or an actual assignment as a capable Executor; dual-role selection alone is neither.
 Unavailable delegation is a blocker, not an exception.
 
-Coordinate through Task, not chats with Executor. Alongside assignment/important
-updates, an explicit one-shot status subscription permits a system notice to Task's
-Owner. Read the latest Task on receipt; do not automatically resubscribe.
+Coordinate through Task, not chats with Executor. Default to no subscription;
+register only for necessary Owner follow-up, not progress tracking. An explicit
+one-shot status subscription permits a system notice to Task's Owner.
+Read the latest Task on receipt; do not automatically resubscribe.
 Otherwise edits/reports remain silent. Executors ask users directly.
 Read Task on demand; do not monitor or schedule reminders.
 

@@ -3,7 +3,8 @@
 Task 是 Cockpit 模块：用共同的持久化 Task 记录协作，通过 Owner / Executor
 角色组合 System Prompt、Skill 和 HTTP MCP。Task 引用直接在聊天中显示卡片，详情按需读取；
 不保存聊天、不自动监工或调度。默认不发送进度或完成通知；
-Owner 可以显式登记一次性状态订阅，满足条件后由系统发送状态更新卡片。
+默认不登记订阅；仅当未来状态会使 Owner 需要作决定、安排后续独立工作等必要行动时，
+由 Owner 自行判断并显式登记一次性订阅，不为追踪进度或确认完成而订阅。
 
 Owner / Executor 是 Task 提供的协作能力，不是 session 的业务身份。例如 Cockpit Owner
 仍负责 Cockpit 本体，选择 Owner 只增加任务协调能力，不表示负责开发 Task 模块或绑定某条 Task。
@@ -29,6 +30,9 @@ Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的�
 契约：[产品设计](docs/task-design.md) · [Schema](docs/task-schema.md) ·
 [MCP 工具](docs/task-mcp-contract.md) · [角色 Skills](docs/task-tools-skills.md) ·
 [宿主接入](docs/task-host-contract.md) · [实现边界](docs/task-implementation.md)。
+
+回归演练：[Owner / Executor 生命周期用例与复跑流程](docs/task-lifecycle-testing.md)，
+包含隔离边界、输入、角色分工、故障注入、证据标准，以及尚待执行的订阅必要性用例。
 
 新模块代码位于 `src/task-board/`，卡片位于 `web/task-board/`；
 `npm run package:module` 生成独立模块归档。数据仅使用宿主提供的模块目录，

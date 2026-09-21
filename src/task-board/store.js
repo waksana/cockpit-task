@@ -123,7 +123,7 @@ export class TaskStore {
     if (editable && context.editable !== row.editable) fail('EDIT_CONFLICT', 'Task title or materials changed; read fresh write_context');
   }
   currentRevision(row, input) {
-    if (input.revision !== row.revision) fail('DESCRIPTION_UPDATED', 'description has changed; read the current definition and acknowledge it');
+    if (input.revision !== row.revision) fail('DESCRIPTION_UPDATED', 'Task description has changed; read the current definition before retrying');
   }
   executable(row) {
     if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Terminal Tasks cannot accept execution or acknowledgement');
@@ -315,7 +315,7 @@ export class TaskStore {
         ...this.effects(this.row(row.id), rejected ? (input.activity ? 'partially_applied' : 'rejected') : 'applied'), ...fields,
         ...(subscription_ids.length ? { subscription_ids } : {}),
       },
-      error: rejected ? { code: 'DESCRIPTION_UPDATED', message: 'description has changed; requested status and outcome were not saved. Read the current definition and acknowledge it', status: 409 } : null,
+      error: rejected ? { code: 'DESCRIPTION_UPDATED', message: 'Task description has changed; requested status and outcome were not saved. Read the current definition; its acknowledgement belongs to the assigned Executor', status: 409 } : null,
     };
   }
   cancel(input) {
@@ -544,7 +544,9 @@ export class TaskStore {
           const needs_ack = Boolean(row.executor) && !terminal(row.status) && row.acknowledged_revision !== row.revision;
           return {
             task_id: row.id, revision: row.revision, acknowledged_revision: row.acknowledged_revision, needs_ack,
-            ...(needs_ack ? { message: row.acknowledged_revision === null ? 'Current task description has not yet been acknowledged; read it and acknowledge it' : 'description has changed; read the latest task definition and acknowledge it' } : {}),
+            ...(needs_ack ? { message: row.acknowledged_revision === null
+              ? "Awaiting the assigned Executor's acknowledgement of the current Task description"
+              : "Task description has changed; awaiting the assigned Executor's acknowledgement of the current revision" } : {}),
           };
         }),
       };

@@ -137,6 +137,29 @@ test('own definition changes auto-ACK, no-op and metadata edits do not', t => {
   assert.equal(f.report(owner, { revision: 2, activity: { text: 'Version two work' } }).activity.status, 'saved');
 });
 
+test('definition reminders describe Executor ACK responsibility without instructing Owner to ACK', t => {
+  const f = fixture(t), task = f.bind(f.create());
+  for (const actor_session_id of ['owner', 'executor', 'observer']) {
+    const check = f.store.definitionCheck({ task_id: task.id, actor_session_id }).tasks[0];
+    assert.equal(check.needs_ack, true);
+    assert.match(check.message, /Awaiting the assigned Executor's acknowledgement/);
+  }
+  const acknowledged = f.ack(task);
+  assert.equal(f.store.definitionCheck({ task_id: task.id, actor_session_id: 'owner' }).tasks[0].message, undefined);
+  const changed = f.edit(acknowledged, { description: 'Updated requirements' });
+  const check = f.store.definitionCheck({ task_id: task.id, actor_session_id: 'owner' }).tasks[0];
+  assert.match(check.message, /changed; awaiting the assigned Executor's acknowledgement/);
+  assert.throws(() => f.edit(acknowledged, { description: 'Stale Owner edit' }), error => {
+    assert.equal(error.code, 'DESCRIPTION_UPDATED');
+    assert.match(error.message, /read the current definition before retrying/);
+    assert.doesNotMatch(error.message, /acknowledge/i);
+    return true;
+  });
+  const { revision, ...cancel } = f.input(changed, { reason: 'User cancelled' });
+  f.store.executeLocal('task_cancel', cancel);
+  assert.equal(f.store.definitionCheck({ task_id: task.id, actor_session_id: 'owner' }).tasks[0].message, undefined);
+});
+
 test('skipped ACK revision never authorizes activity, even after higher ACK', t => {
   const f = fixture(t);
   const one = f.ack(f.bind(f.create()));

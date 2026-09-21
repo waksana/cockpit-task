@@ -160,7 +160,7 @@ test('explicit one-shot subscriptions preserve silent defaults, role boundaries 
   assert.match(owner, /Owner may explicitly subscribe to specified Task states/);
   assert.match(owner, /first real matching transition ends the subscription/);
   assert.match(owner, /already matching at registration means failure, not an immediate notice/);
-  assert.match(owner, /read the latest Task and assess any follow-up/);
+  assert.match(owner, /read the latest Task and reassess the planned follow-up/);
   assert.match(owner, /card is not proof of complete delivery or an Executor definition-ACK instruction/);
   assert.match(owner, /Do not automatically resubscribe, poll or hold this turn open waiting/);
   const ownerPrompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
@@ -211,6 +211,33 @@ test('explicit one-shot subscriptions preserve silent defaults, role boundaries 
   const handoff = prose(readFileSync(join(root, skillDirectory('owner'), 'references/important-updates.md'), 'utf8'));
   assert.match(handoff, /`status_changed` subscription notice to Owner is separate/);
   assert.match(handoff, /does not trigger this Executor-directed `updated` handoff or queue intervention/);
+});
+
+test('subscription guidance requires necessary Owner follow-up without gating Executor work', () => {
+  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  assert.match(owner, /Default to no subscription/);
+  assert.match(owner, /identify the concrete, necessary Owner action that a future Task state enables/);
+  assert.match(owner, /Merely knowing progress or confirming completion is not a reason to subscribe/);
+  assert.match(owner, /Judge the need yourself; the user need not explicitly request a subscription/);
+  assert.match(owner, /Do not invent follow-up work, split a complete outcome or add an approval gate/);
+  assert.match(owner, /Choose the fewest target states that enable it/);
+  assert.match(owner, /withdraw a still-waiting subscription if the follow-up is no longer needed/);
+  assert.match(owner, /act only if it is still needed and authorized/);
+  const ownerPrompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
+  assert.match(ownerPrompt, /Default to no subscription; register only for necessary Owner follow-up, not progress tracking/);
+  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  assert.match(executor, /Do not wait for Owner to subscribe or read a notice before continuing authorized work or delivering it/);
+  const executorPrompt = prose(readFileSync(join(root, 'roles/task-executor.md'), 'utf8'));
+  assert.match(executorPrompt, /Execution does not depend on Owner subscribing or reading a notice/);
+  for (const role of ['owner', 'executor']) {
+    const writes = prose(readFileSync(join(root, skillDirectory(role), 'references/task-writes-and-recovery.md'), 'utf8'));
+    assert.match(writes, /Default to no subscription/);
+    assert.match(writes, /concrete, necessary Owner follow-up, not simply to track progress or know completion/);
+    assert.match(writes, /standalone delivery with no Owner action needs no wait/);
+    assert.match(writes, /Owner judges this need without asking the user to name or approve the subscription/);
+    assert.match(writes, /If that action is no longer needed, withdraw the still-waiting subscription/);
+    assert.match(writes, /Executor's authorized work never waits for Owner to subscribe or read a notice/);
+  }
 });
 
 test('public Skill links resolve to active resources rather than obsolete handoff anchors', () => {
