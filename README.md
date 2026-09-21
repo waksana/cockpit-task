@@ -47,8 +47,12 @@ Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的�
 旧服务派单保留自包含的绑定、授权版本、承接和最终交付指导，不读取归档，
 不再要求安装或开启这些 Skill；旧 manifest 不声明 Skill。
 新版协调型 `cockpit-task-owner` 不随旧服务发布。旧服务权限、数据库、daemon、
-`work_*` 工具和唯一最终通知规则不变。真实已安装 Skill 的移除需要另外授权，
-本次源码变化不修改个人安装。原则型新 Skill 草案尚未发布。
+`work_*` 工具和唯一最终通知规则不变。原则型新 Skill 已纳入新 Task 模块的正式源码
+及打包资源，见 [Owner](skills/cockpit-task-owner/cockpit-task-owner/SKILL.md)、
+[Executor](skills/cockpit-task-executor/cockpit-task-executor/SKILL.md) 与
+[角色说明](docs/task-tools-skills.md)。本次源码变化不修改个人安装；
+源码合并不会自动升级线上；既有 `task-board` 安装须按
+[显式离线迁移](docs/task-board.md#explicit-existing-installation-cutover)流程完成切换。
 
 ## 使用入口
 

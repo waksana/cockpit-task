@@ -1,6 +1,6 @@
 # Task implementation contract
 
-The packaged [Owner Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md#exceptional-update-handoff)
+The packaged [Owner reference](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)
 guides explicit pending-message preservation, cleanup and a single summary
 followed by a Task updated reference. The host advancement helper is retired;
 capability checks remain explicit and on demand. This simplification does not

@@ -358,17 +358,23 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     };
     await verifyAssembly(ownerId, [owner], ownerTools, ['cockpit-task-owner']);
     await verifyAssembly(unionId, [owner, executor], allTools, ['cockpit-task-executor', 'cockpit-task-owner']);
+    const verifyNativePrompts = async (sessionId, captured) => {
+      const capturedJson = JSON.stringify(captured);
+      assert.ok(capturedJson.includes(`Native session ID: ${sessionId}`));
+      for (const role of roles.read(sessionId)) {
+        assert.ok(capturedJson.includes(`Module cockpit-task / role ${role.roleId}`));
+        const source = await readFile(join(installed.root, `roles/task-${role.roleId}.md`), 'utf8');
+        assert.ok(capturedJson.includes(JSON.stringify(source).slice(1, -1)),
+          `The complete installed ${role.roleId} prompt must reach the native provider request`);
+      }
+    };
     const promptAndInspect = async (sessionId, text, expectedTools, unexpectedTools) => {
       const before = requests.length;
       await engine.prompt(sessionId, text);
       await waitFor(async () => requests.length > before && await engine.busyCount() === 0, 'synthetic native completion');
       assert.deepEqual(providerErrors, []);
       const captured = requests.slice(before);
-      assert.ok(JSON.stringify(captured).includes(`Native session ID: ${sessionId}`));
-      for (const role of roles.read(sessionId)) {
-        assert.ok(JSON.stringify(captured).includes(`Module cockpit-task / role ${role.roleId}`));
-        assert.ok(JSON.stringify(captured).includes(`Load the cockpit-task-${role.roleId} Skill`));
-      }
+      await verifyNativePrompts(sessionId, captured);
       for (const request of captured) {
         const offered = JSON.stringify(request.tools);
         for (const name of expectedTools) assert.equal(request.tools.filter(tool =>
@@ -410,9 +416,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     await waitFor(async () => requests.length > beforeDispatch && await engine.busyCount() === 0, 'Task dispatch native completion');
     assert.deepEqual(providerErrors, []);
     const dispatched = requests.slice(beforeDispatch);
-    assert.ok(JSON.stringify(dispatched).includes(`Native session ID: ${executorId}`));
-    assert.ok(JSON.stringify(dispatched).includes('Module cockpit-task / role executor'));
-    assert.ok(JSON.stringify(dispatched).includes('Load the cockpit-task-executor Skill'));
+    await verifyNativePrompts(executorId, dispatched);
     for (const request of dispatched) {
       const offered = JSON.stringify(request.tools);
       for (const name of executorTools) assert.ok(offered.includes(name), `Missing Executor tool ${name}`);

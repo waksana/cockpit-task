@@ -28,7 +28,9 @@ Cockpit Owner still owns Cockpit itself; choosing Owner does not make it respons
 for developing the Task module or bind it to a particular Task. Project instructions
 and the session name express that business identity independently.
 The module ID and MCP server key are `cockpit-task`; role IDs remain `owner` and
-`executor`. Skills are `cockpit-task-owner` and `cockpit-task-executor`.
+`executor`. The active Skills are
+[cockpit-task-owner](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md) and
+[cockpit-task-executor](../skills/cockpit-task-executor/cockpit-task-executor/SKILL.md).
 This identity change is not cosmetic: existing `task-board` installations require
 the explicit offline cutover described below to preserve data and session associations.
 
@@ -49,6 +51,21 @@ in context. New messages do not require repeated loading. Reload only for missin
 instructions after compaction/recovery, changed Skill content, or a workflow rule
 that needs clarification. This is distinct from reading mutable Task requirements
 and checking revisions/ACK at meaningful checkpoints.
+
+The short role prompts establish responsibility; the Skill bodies explain judgment
+and default information needs. Each Skill independently bundles references for
+view/field questions, writes/conflicts/recovery, and link syntax. Only Owner also
+bundles the exceptional important-update handoff. Read the relevant reference when
+needed, not all of them on each turn. No runtime reference depends on repository
+docs or the other Skill; research and evaluation artifacts are not packaged.
+This is guidance, not runtime enforcement of native Skill-loading frequency.
+
+Owner starts with `task_read(view=list, owner=<own session ID>)`, then `overview`
+for one Task; `actor_session_id` does not supply that filter. Focus on identity,
+Executor, status, latest reported activity/time, revision/ACK and
+`outcome.available/current`. An available current outcome is not proof of complete
+delivery: read its content. Use `definition` before edits and `execution` for assigned
+work; histories and outcomes are separate, not automatically attached to each read.
 
 description contains the complete current requirements. revision and changelog
 version that definition only. activity records execution facts against an actually
@@ -92,6 +109,9 @@ contains exactly one `[Task assigned to you](task:<uuid>?event=assigned)` refere
 sent by `task_assign`; Owner must not duplicate that first dispatch. Its label
 explains why it was sent even without UI rendering. The card reads current data
 from the module, not a snapshot in chat. Details and history are loaded on demand.
+Initial dispatch checks capability and idle/empty state without proactively
+interrupting. Those checks and the enqueue send are not atomic: a race may return
+queued or unconfirmed. Inspect each recorded step; do not blindly resend.
 
 Use `[Task](task:<uuid>)` for an ordinary reference. Task IDs passed to tools are
 just the UUID, not the full URI or its query. Only lowercase `assigned` and
@@ -103,10 +123,15 @@ queries are left unclaimed, not silently treated as generic Task references.
 
 Ordinary requirement changes only edit Task. Executor reads/ACKs at startup,
 checkpoints, before consequential actions, before delivery and after resuming.
-Progress, blockers and completion never produce messages to the Owner.
+Owner coordinates through Task, not chats with Executor for requirements, progress
+or confirmation. Executor asks genuine decisions directly of the user in its own
+session, not through Owner. Questions, confirmations, progress, blockers and completion
+are not sent to Owner, including through subagents. User-facing summaries are allowed;
+they are not a second maintained progress ledger. Neither role adds background
+monitoring, reminders or final notifications.
 
 For an exceptionally important update, Owner follows the Skill's
-[exceptional update handoff](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md#exceptional-update-handoff):
+[exceptional update handoff](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md):
 read and preserve pending messages, clear the preserved items by ID, then
 summarize them and append the following update notice in that same single message:
 

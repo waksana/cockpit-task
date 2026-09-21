@@ -37,10 +37,10 @@ Executor 默认工具集合不包含创建 Task 或为自己追加 Owner。本�
 - Owner 按 Skill 先读取并保留 pending 内容，再按已保存的消息 ID 清理，包括其他 session / subagent 的消息；不能盲删未知内容或并发新消息。
 - 随后总结保留的上下文，最后附上 `[Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新 revision 的要求，合为一条消息发送；不复制完整 description。
 - 必要时单次中断主轮次，不循环推进或静默取消后台工作；发送前查看真实原生状态，接受回执不等于已读取或 ACK。
-- 首次指派同样使用非排队启动。目标忙碌或不能安全接收时明确返回未发送，指派工具不擅自中断。
+- 首次指派先检查 idle / 空 queue，已知忙碌则不发送、不主动中断；检查与 enqueue 发送之间存在竞态，queued / unconfirmed 必须保留真实分步结果，不承诺绝不入队或盲重发。
 - 不通过后台巡查、定时发送或 Task 自建消息队列触发该行为，不宣称是原子排他保证。
 
-这是 Owner Skill 的例外流程，不是新的 Task 工具或自动队列机制。完整边界与模板见[正式 Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md#exceptional-update-handoff)。先前的 `cockpit_advance_queue` 已退出当前宿主契约；实现历史保留在[宿主契约](task-host-contract.md)。保留既有单次中断、按 ID 删除 pending、原生状态读取和消息发送。
+这是 Owner Skill 的例外流程，不是新的 Task 工具或自动队列机制。完整边界与模板见 [Owner 随包参考](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)。先前的 `cockpit_advance_queue` 已退出当前宿主契约；实现历史保留在[宿主契约](task-host-contract.md)。保留既有单次中断、按 ID 删除 pending、原生状态读取和消息发送。
 
 只有 Owner 判断“本次更新非常重要，不能等待正常同步”后才介入。task_edit、definition_check 和 ACK 差异都不自动触发队列清理、中断或消息发送。
 
@@ -77,7 +77,7 @@ activity.text 最长 4,000，outcome.summary 最长 8,000；每个 activity/outc
 
 ### task_read
 
-用户确认读取应按角色关注点区分，不一次返回全部内容。以下视图已实现。`view` 明确指定；Owner skill 默认调用 `overview`，Executor skill 默认调用 `execution`。不根据可信身份或 Task 归属推导权限，任何具有读取工具的 session 均可选所需视图。列表筛选使用 owner / executor 等业务字段，不限制为调用者本人。
+用户确认读取应按角色关注点区分，不一次返回全部内容。以下视图已实现。`view` 明确指定；Owner 默认用 `list` 并显式指定 `owner=自己的 session ID`，单项调用 `overview`；Executor 默认调用 `execution`。不根据可信身份或 Task 归属推导权限，任何具有读取工具的 session 均可选所需视图。列表筛选使用显式 owner / executor 等业务字段，不限制为调用者本人；`actor_session_id` 提供归因和定义提醒，不是自动列表筛选。
 
 | `view` | 其他输入 | 返回内容 |
 | --- | --- | --- |
@@ -136,7 +136,7 @@ UI 可以不提供 actor，不伪造 human session ID；定向读取仍检查该
 ```text
 确认所选 session 及执行能力可用
   → 首次绑定 Task 的 Executor，ACK 仍为空，等待明确确认和开始执行
-  → 以非排队方式仅发送一次 [Task assigned to you](task:<uuid>?event=assigned)，启动读取
+  → 确认 idle / 空 queue 后仅发送一次 [Task assigned to you](task:<uuid>?event=assigned)
 ```
 
 该引用就是完整首次派单消息，标签无需 UI 渲染也能说明原因，不复制 description。
@@ -168,7 +168,7 @@ Task 类型或状态，也不是命令或调度机制。工具的能力检查、
 
 已受理消息不等于已读、已 ACK 或已开始执行。上述 unknown 不是安全重发的依据；不能自动撤销归属后另派，以掩盖可能已经启动的工作。
 
-若宿主意外返回 queued，视为违反非排队契约的异常结果，保留真实排队事实并明确报错，不映射为派单成功或“未发送”，也不盲目重发。其处置属于接入异常恢复，不是允许的正常路径。
+若检查后的竞态使宿主返回 queued，保留真实排队事实并明确报错，不映射为派单成功或“未发送”，也不盲目重发。这是非原子检查/发送的异常结果，不是首次派单主动选择的排队策略。
 
 恢复使用新的 request_id、最新 write_context/revision、相同 Task/executor，并以 `resume_request_id` 指向原指派回执。原回执必须已 final、assignment=applied、message=not_sent 且未被其他恢复消费；仅接受同一固定 Executor。unknown/queued/accepted 或 pending 都不能授权重发。恢复不撤销归属、不替换 Executor，不恢复 done/cancelled。
 
