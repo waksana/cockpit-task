@@ -21,11 +21,12 @@
 }
 
 .tb-card:focus-visible,
-.tb-dialog a:focus-visible {
+.tb-dialog :is(a, summary, [tabindex="-1"]):focus-visible {
   outline: 2px solid var(--ck-color-accent);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
+.tb-dialog summary { cursor: pointer; min-block-size: var(--ck-control-size); align-content: center; }
 .tb-card-title {
   font-weight: 600;
 }
