@@ -206,7 +206,7 @@ export function activate(context) {
   }
   const React = context.react;
   const h = React.createElement;
-  const { useEffect, useMemo, useRef, useState, useSyncExternalStore, useId } = React;
+  const { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, useId } = React;
 
   function useRead(input) {
     const key = JSON.stringify(input);
@@ -291,12 +291,9 @@ export function activate(context) {
     ));
   }
 
-  function Revision({ taskId, revision, onBack }) {
+  function Revision({ taskId, revision }) {
     const state = useRead({ view: 'changelog', task_id: taskId, revision });
-    const back = useRef(null);
-    useEffect(() => { back.current.focus(); }, []);
     return h('section', null,
-      h('button', { ref: back, type: 'button', className: 'ck-button', onClick: onBack }, 'Back to revision summaries'),
       h('h3', null, `Definition v${revision}`),
       h(ReadState, { state }, (entry) => h(React.Fragment, null,
         h('p', { className: 'ck-text-secondary' }, `Reported author: ${entry.author} · ${formatTimestamp(entry.at)}`),
@@ -308,17 +305,19 @@ export function activate(context) {
 
   function History({ taskId, view }) {
     const [cursors, setCursors] = useState([null]);
-    const [revision, setRevision] = useState(null);
-    const [returnRevision, setReturnRevision] = useState(null);
-    if (revision !== null) return h(Revision, { taskId, revision, onBack: () => { setReturnRevision(revision); setRevision(null); } });
-    return h(HistoryPage, { taskId, view, cursors, setCursors, setRevision, returnRevision });
+    return h(HistoryPage, { taskId, view, cursors, setCursors });
   }
 
-  function HistoryPage({ taskId, view, cursors, setCursors, setRevision, returnRevision }) {
+  function RevisionDisclosure({ taskId, revision }) {
+    const [open, setOpen] = useState(false);
+    return h('details', { onToggle: event => setOpen(event.currentTarget.open) },
+      h('summary', null, `Read full definition v${revision}`),
+      open ? h(Revision, { taskId, revision }) : null);
+  }
+
+  function HistoryPage({ taskId, view, cursors, setCursors }) {
     const cursor = cursors.at(-1);
     const state = useRead({ view, task_id: taskId, limit: 10, ...(cursor ? { cursor } : {}) });
-    const restored = useRef(false);
-    const revisionButton = useRef(null);
     const pageLabel = useRef(null);
     const previousCursor = useRef(cursor);
     useEffect(() => {
@@ -327,12 +326,6 @@ export function activate(context) {
         pageLabel.current.focus();
       }
     }, [cursor]);
-    useEffect(() => {
-      if (!restored.current && revisionButton.current) {
-        restored.current = true;
-        revisionButton.current.focus();
-      }
-    }, [state.phase]);
     const page = state.data;
     return h(React.Fragment, null,
       view === 'outcomes' ? h('p', { className: 'ck-text-secondary' }, 'Each outcome belongs to its recorded definition version. Older outcomes do not establish delivery of a newer definition.') : null,
@@ -343,7 +336,7 @@ export function activate(context) {
           view === 'changelog'
             ? h(React.Fragment, null,
               h('p', { className: 'tb-preserve' }, entry.reason),
-              h('button', { ref: entry.revision === returnRevision ? revisionButton : undefined, type: 'button', className: 'ck-button', onClick: () => setRevision(entry.revision) }, `Read full definition v${entry.revision}`))
+              h(RevisionDisclosure, { taskId, revision: entry.revision }))
             : h(React.Fragment, null,
               h('p', { className: 'tb-preserve' }, view === 'activity' ? entry.text : entry.summary),
               h('p', { className: 'ck-text-secondary' }, `Executor: ${entry.executor}`),
@@ -357,30 +350,26 @@ export function activate(context) {
     );
   }
 
-  function Detail({ taskId, onClose, trigger }) {
+  function Detail({ taskId, onClose }) {
     const dialog = useRef(null);
-    const close = useRef(null);
     const titleId = useId();
     const [section, setSection] = useState('execution');
-    useEffect(() => {
+    useLayoutEffect(() => {
       const element = dialog.current;
       element.showModal();
-      close.current.focus();
       return () => {
         if (element.open) element.close();
-        if (trigger?.isConnected) trigger.focus();
       };
-    }, [trigger]);
+    }, []);
     return context.createPortal(h('dialog', {
       ref: dialog,
       className: 'tb-dialog',
       'aria-labelledby': titleId,
-      onCancel: (event) => { event.preventDefault(); onClose(); },
       onClose: () => { if (!dialog.current?.open) onClose(); },
     },
     h('header', { className: 'tb-dialog-header' },
       h('h2', { id: titleId }, 'Task details'),
-      h('button', { ref: close, type: 'button', className: 'ck-button', onClick: onClose }, 'Close'),
+      h('button', { type: 'button', className: 'ck-button', onClick: () => dialog.current.close() }, 'Close'),
     ),
     h('p', { className: 'tb-task-id ck-text-secondary' }, taskId),
     h('p', { className: 'ck-text-secondary' }, 'Current Task read, not a message-time snapshot. Activity and ACK authorship are reported, not authenticated. Reading does not ACK.'),
@@ -392,14 +381,13 @@ export function activate(context) {
     h('section', { className: 'tb-detail-content', 'aria-label': section },
       section === 'execution' ? h(Execution, { taskId }) : section === 'native' ? h(NativeSession, { taskId }) : h(History, { key: section, taskId, view: section })),
     h('footer', { className: 'tb-dialog-footer' },
-      h('button', { type: 'button', className: 'ck-button', onClick: onClose }, 'Close Task details')),
+      h('button', { type: 'button', className: 'ck-button', onClick: () => dialog.current.close() }, 'Close Task details')),
     ), document.body);
   }
 
   function Card({ taskId, event }) {
     const state = useRead({ view: 'overview', task_id: taskId });
     const [open, setOpen] = useState(false);
-    const button = useRef(null);
     const task = state.data;
     const summary = state.phase === 'loading' ? 'Loading Task…'
       : state.phase === 'offline' ? 'Task · disconnected'
@@ -407,7 +395,6 @@ export function activate(context) {
           : state.phase === 'error' ? 'Task read failed · open to retry' : task.title;
     return h(React.Fragment, null,
       h('button', {
-        ref: button,
         type: 'button',
         className: 'tb-card',
         'aria-haspopup': 'dialog',
@@ -429,7 +416,7 @@ export function activate(context) {
         h('span', { className: 'tb-card-activity' }, task.activity ? `Reported activity: ${task.activity.text}${task.activity.truncated ? ' (excerpt)' : ''}` : 'No reported activity.'),
         task.activity ? h('span', { className: 'tb-card-meta' }, `v${task.activity.revision} · ${formatTimestamp(task.activity.at)}`) : null,
       ) : null),
-      open ? h(Detail, { taskId, trigger: button.current, onClose: () => { setOpen(false); void state.retry(); } }) : null,
+      open ? h(Detail, { taskId, onClose: () => { setOpen(false); void state.retry(); } }) : null,
     );
   }
 
