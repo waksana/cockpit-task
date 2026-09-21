@@ -21,7 +21,14 @@ event 只说明这条消息的原因，不是 Task 状态；卡片仍读取当�
 
 一个 Executor 完整负责一个独立 Task，可在内部使用 subagents。要求直接修改 Task，
 Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的版本。没有子任务树、
-改派或续办；Coding / Research 的具体工作方法不属于 Task 模块。
+改派或续办。角色协作与工作方法分开：随包提供独立的
+[github-coding](skills/github-coding/github-coding/SKILL.md)，指导 Git/GitHub 编码协作；
+非编码工作仍使用其自身方法。
+
+完整编码流程由 Owner 准备干净最新主线、独立 branch/worktree 和 Issue，再创建关联
+且描述完整的 Task；Executor 负责开发、验证、独立审阅及授权内的 PR 合并；
+Owner 安全清理本次已合并环境并恢复主目录。必要的收尾可使用一次性 done 订阅，
+不恢复默认通知或轮询。仅讨论、仅 PR 和非 GitHub 工作保留各自边界；合并不等于部署。
 
 **使用与打包：[Task](docs/task-board.md)**。模块需要支持模块角色和宿主
 能力接口的 Cockpit；旧版宿主不能仅靠安装这个包获得这些能力。构建、合并不等于安装
@@ -48,7 +55,10 @@ npm run package:module
 `cockpit.module.json` 是模块入口。归档输出到 `dist/cockpit-task-<version>.tgz`，
 供支持所需接口的 Cockpit 装载；Task 不提供独立服务启动命令。
 
-模块 ID、MCP key 和包名均为 `cockpit-task`；正式 Skill 为
+模块 ID、MCP key 和包名均为 `cockpit-task`；正式角色 Skill 为
 [Owner](skills/cockpit-task-owner/cockpit-task-owner/SKILL.md) 和
 [Executor](skills/cockpit-task-executor/cockpit-task-executor/SKILL.md)。
+两角色都通过现有装载机制发现同一份 `github-coding` 工作 Skill，双角色不会重复装配，
+选择角色不等于每次都加载正文。包版本为 `0.1.2`；不同内容使用新版本，
+不覆盖同版本的既有安装。源码合并、CI 归档均不会自动升级线上。
 持久化仅使用宿主提供的模块目录，不自动导入其他数据库或修改既有安装。

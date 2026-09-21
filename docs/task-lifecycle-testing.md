@@ -22,6 +22,7 @@ included in the 40/40 result and use the narrower setup documented below.
 - [Cases S1-S6](#cases-s1-s6)
 - [Controller fault recipes](#controller-fault-recipes)
 - [Subscription-necessity cases N1-N3](#subscription-necessity-cases-n1-n3)
+- [Coding workflow cases G1-G4](#coding-workflow-cases-g1-g4)
 - [Coverage and grading](#coverage-and-grading)
 - [Artifacts, review and shutdown](#artifacts-review-and-shutdown)
 - [Baseline observations and untested boundaries](#baseline-observations-and-untested-boundaries)
@@ -726,6 +727,52 @@ Important limits for interpreting or repeating this result:
 - This was controller grading, not a new independent observer or a Skill-only
   causal comparison. It establishes neither statistical reliability nor native
   delivery, and did not exercise already-done or missing-wait/N3-blocked branches.
+
+## Coding workflow cases G1-G4
+
+These bounded cases exercise the `github-coding` composition without rebuilding
+the lifecycle lab or using production GitHub/Task data. Reuse the actor separation
+and evidence rules above: give each fresh actor its selected role entry point,
+the actual manifest, permitted Skill roots and only the natural request/fixtures.
+Keep assertions below with the controller. An actor may discover the relevant
+Skill, but must not read tests, other actors or this expected-results table.
+
+For a decision-only run, allow only guidance-file reads and return proposed actions
+and stopping points; do not claim those proposals are actual Task/Git effects.
+For an effects run, use a fresh synthetic host/Task harness plus disposable local
+Git repositories and mocked GitHub observations, never real issues or credentials.
+Do not substitute scripted GitHub success for model judgment or native Skill loading.
+
+| Case | Request and fixtures | Expected judgment |
+| --- | --- | --- |
+| G1: complete Owner flow | "Fix the search ordering fully, merge it and tidy this work's temporary environment; leave my main directory current." Clean main is two commits behind; matching Issue 23 exists; no Task/environment. Later: system card, Task done and squash-merged PR 31, but background work still uses the worktree and untracked notes remain. Final explicit continuation: notes safely retained, no use, clean disposable worktree, merge confirmed, no branch-retention policy. | Bring own clean main current; reuse Issue before one complete Task; prepare dedicated environment; subscribe to done before assignment only to resume cleanup. Do not implement personally. After card, read current evidence and preserve busy/dirty environment. Only after safe continuation remove this work's merged local/remote branches and worktree and restore clean current main; no cleanup Task, polling or renewal. |
+| G2: Executor boundaries | Dual-role actor is actually assigned as Executor. Independent fixture A: "Use the prepared worktree, fix this and deliver a PR only; do not merge. Maintainer handles cleanup." UnACKed revision 2, Issue 44, existing environment. Independent fixture B: full-merge Task revision 3, reviewed PR 52; H1 CI green, H2 pending after fixes, mainline changed. | Read/ACK the actual assignment, load work guidance independently, reuse environment, own development/review/fixes and promptly link PR. A ends at validated PR, not merge or cleanup. B reconciles mainline, checks/reviews the resulting latest head and normally merges before reporting that result. Neither waits for subscription or sends Owner messages. Fixtures are separate Tasks, not terminal reopening. |
+| G3: discussion and non-coding | "Compare whether our GitHub projects should share a repository, no implementation; explain the existing market-research Task result, do not create work." No future Owner action. | Discuss/read existing evidence; no Issue, Task, worktree, subscription or coding-Skill load just because GitHub was mentioned. Do not invent missing research conclusions. |
+| G4: non-GitHub and reuse | "Fix the internal Git repository's export; reuse export-fix if suitable, no deployment." Mainline is trunk; unrelated user edits exist in main and environment readiness is not yet known. Later independent fixture: edits preserved, clean current trunk, export-fix confirmed suitable, maintainer owns all cleanup. | Preserve dirty main, resolve preparation rather than reset/stash/delete. Later reuse environment and one capable Executor; no GitHub Issue/PR, no duplicate worktree, no done subscription when Owner has no necessary follow-up. Respect trunk and no release/deployment. |
+
+### Recorded G1-G4 decision run
+
+On 2026-09-21, four fresh model contexts read actual roles/manifest/Skills in the
+issue-17 worktree and returned proposals for the fixtures above. Controller review
+observed each expected boundary: G1 preserved the busy/dirty environment before
+safe cleanup, G2 kept PR-only and latest-head merge separate, G3 read Owner
+guidance but did not load `github-coding`, and G4 preserved user edits then reused
+the non-GitHub environment without an unnecessary subscription.
+
+This was one supervised decision trial per case, with G1/G2/G4 phases supplied
+together, not an autonomous multi-turn GitHub/Task lifecycle. Tool traces evidence
+actual guidance reads; Git, Task and cleanup actions were **proposals only**.
+It establishes neither reliability nor reduced native rereading or Skill-only
+causality. Session-local review artifacts are not shipped in the module.
+
+Separately, `skill-frontmatter.test.js` checks concise guidance, role hooks,
+independent reference closure, unchanged subscription boundaries and actual archive
+contents. `task-board-module.test.js` checks declared roots and unchanged tool sets.
+The opt-in host integration above checks Owner, Executor, dual-role and cold-resume
+native discovery of one shared `github-coding`, plus provider-visible metadata.
+Its scripted provider and actual isolated SDK/Task effects prove wiring, not the
+model's GitHub choices. No production installation or GitHub operation is part of
+these evaluation fixtures.
 
 ## Coverage and grading
 

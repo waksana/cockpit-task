@@ -1,7 +1,7 @@
 # Task
 
 Task is a Cockpit module for independent work records shared by Owner and Executor.
-Its module ID and HTTP MCP key are `cockpit-task`, version `0.1.1`.
+Its module ID and HTTP MCP key are `cockpit-task`, version `0.1.2`.
 It runs in Cockpit, not a standalone daemon or dashboard.
 
 ## Requirements
@@ -33,18 +33,35 @@ and state-changing delivery by default. An outcome request is not a request for
 personal execution. Explicit personal-execution instruction or a real assignment
 as a capable Executor is an exception; dual-role selection alone is not.
 Unavailable delegation is a blocker, not permission to take over.
+For coding, Issue maintenance, preparing the isolated environment and safe
+post-merge cleanup are Owner coordination, not permission to implement code.
 
 One session can execute at most one unfinished Task, then be reused after
 completion/cancellation. Tasks are flat references: no child Tasks, dependency
 engine, reassignment or terminal reopening. Review is optional unless the Task's
 requirements demand it; Executor can complete without a default Owner approval gate.
-Coding/Research work skills are external to Task.
+Work methods remain separate from role collaboration.
 
 The active Skills are [cockpit-task-owner](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md)
 and [cockpit-task-executor](../skills/cockpit-task-executor/cockpit-task-executor/SKILL.md).
 Load when first needed, reuse guidance in context, and reload only when missing,
 changed or unclear. Each bundles its own on-demand references; stable Skill reuse
 does not replace fresh Task reads.
+
+Both roles also discover the same self-contained
+[github-coding](../skills/github-coding/github-coding/SKILL.md) work Skill through
+their declared discovery roots; selecting both deduplicates that resource.
+It is loaded for authorized coding work, not non-coding work or discussion alone.
+Owner prepares clean current mainline, a dedicated branch/worktree and environment,
+then reuses or creates an Issue before Task. Executor owns implementation, checks,
+independent review and authorized PR merge. Owner safely removes only this work's
+merged temporary resources once no longer in use and restores clean current mainline.
+Task done is code delivery, not proof cleanup is complete or the session idle.
+A one-shot done subscription before assignment can resume necessary cleanup;
+it is not progress monitoring or a reason to subscribe when no follow-up is needed.
+Reuse existing environments, preserve others' changes, respect PR-only boundaries,
+and skip GitHub-specific steps for non-GitHub repositories. No release or deployment
+is implied. Issue/PR/environment evidence uses existing Task references and metadata.
 
 Description contains the full current agreement. Revision/changelog version only
 that description. Activity records reported execution against an actually ACKed
@@ -198,8 +215,8 @@ npm test
 npm run package:module
 ```
 
-`dist/cockpit-task-0.1.1.tgz` contains runtime dependencies, backend/frontend assets,
-role prompts and both self-contained Skills. Its `.sha256` sidecar identifies the
+`dist/cockpit-task-0.1.2.tgz` contains runtime dependencies, backend/frontend assets,
+role prompts, two role Skills and the shared coding Skill. Its `.sha256` sidecar identifies the
 archive. [Task CI](https://github.com/waksana/cockpit-task/blob/main/.github/workflows/task-board-ci.yml) retains these as the
 `cockpit-task-module` artifact; an artifact is not an installation or deployment.
 
@@ -207,13 +224,15 @@ Installation is an explicit operator action on a compatible host. From the host
 checkout, stage the local artifact using the host's module installer:
 
 ```sh
-pnpm module install /absolute/path/to/cockpit-task-0.1.1.tgz --trust-local-code
+pnpm module install /absolute/path/to/cockpit-task-0.1.2.tgz --trust-local-code
 ```
 
 This command deliberately omits automatic enablement. Follow that host's documented
 module-management procedure to inspect and explicitly enable the installed module;
 the host does not run npm during installation. Do not bypass compatibility guards.
 These are instructions, not a claim that cleanup or packaging installed anything.
+Changed package contents require a new version; do not overwrite an installed
+same-version archive. Merging this source does not upgrade an existing installation.
 
 ## Further contracts and validation
 

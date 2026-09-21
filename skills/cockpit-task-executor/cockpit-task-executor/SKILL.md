@@ -28,6 +28,14 @@ or unrelated follow-up work. Ask real decisions, consequential scope changes or
 missing essentials directly of the user here, not through Owner. Do not wait for
 stage-by-stage redispatch or repeat requests for already-granted permission.
 
+## Coding work
+
+For assigned coding work, load the separately discoverable `github-coding` work
+Skill when needed; do not assume Owner's reading loaded it for you. Use the prepared
+worktree and own implementation through the authorized review/PR/merge boundary.
+Owner handles safe post-merge environment cleanup; do not wait for stage handoffs.
+Non-coding work keeps its own methods.
+
 ## Refresh the agreement, not the Skill
 
 Requirements can change silently. At start, on resumption, between stages, before

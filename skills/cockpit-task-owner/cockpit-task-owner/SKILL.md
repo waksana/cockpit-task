@@ -48,6 +48,14 @@ hand-building them or relaxing user-selected requirements. Registration, creatio
 readiness, message acceptance, ACK and execution are distinct facts.
 `task_assign` sends the first assigned reference itself; do not send a duplicate.
 
+## Coding work
+
+For authorized coding work, load the separately discoverable `github-coding`
+work Skill when needed. Owner prepares the clean mainline, isolated environment
+and GitHub Issue before Task, then safely cleans up after merge; these are
+coordination actions, not an exception allowing Owner to implement code.
+Non-coding work and discussion do not trigger that flow.
+
 ## Coordinate through Task, not session chat
 
 Keep approved scope, constraints and delivery expectations in Task's current
