@@ -224,6 +224,21 @@ test('role prompts stay short while the Skills preserve delegation, communicatio
   assert.match(executor, /Do not send Owner questions, confirmations, progress, blockers or completion messages, directly or via subagents/);
 });
 
+test('preparation guidance keeps professional selection and Skill body loading explicit', () => {
+  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  assert.match(owner, /Exclude every Executor bound to an unfinished Task, even if native idle/);
+  assert.match(owner, /existing discoverable Skill\/MCP names, not guesses from Task text/);
+  assert.match(owner, /`task_session_create` with selections or `task_session_prepare`/);
+  assert.match(owner, /Neither new nor reuse is mandatory; backlog does not dispatch/);
+  assert.match(owner, /`task_assign` once: it checks, never repairs/);
+  assert.match(owner, /Unknown effects need inspection, not blind retry\/replacement/);
+  assert.match(executor, /Preparation\/readiness is not assignment, authorization, ACK or execution/);
+  assert.match(executor, /Skill enabled is not body loaded; load relevant Skill bodies when first needed/);
+  assert.match(executor, /MCP connected is not tool offered/);
+  assert.match(executor, /initialized tool metadata is not final readiness/);
+});
+
 test('record guidance preserves the task-specific agreement and evidence without copying prior context', () => {
   for (const role of ['owner', 'executor']) {
     const source = prose(readFileSync(join(root, skillDirectory(role), 'SKILL.md'), 'utf8'));

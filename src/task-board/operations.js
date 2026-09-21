@@ -15,10 +15,79 @@ function cancellation(signal) {
   return signal?.aborted ? fault('REQUEST_CANCELLED', 'Request stopped before the next external action') : null;
 }
 
-export async function createExecutor({ input, create, inspect, save, signal }) {
+const selectedResources = input => input.skills !== undefined || input.mcp_servers !== undefined;
+const unsupportedPreparation = () => fault(
+  'PREPARATION_UNSUPPORTED',
+  'Host resource preparation v1 is required; no session or resource mutation was attempted',
+);
+
+async function prepareSelected({ input, operation, inspect, prepare, preflight, save, signal }) {
+  const initialCancellation = cancellation(signal);
+  if (initialCancellation) return initialCancellation;
+  preflight(operation.session_id);
+  const current = await inspect(operation.session_id);
+  operation.capability = current.ready ? 'ready' : 'unavailable';
+  if (current.details !== undefined) operation.details = current.details;
+  if (!current.idle) return fault('EXECUTOR_NOT_READY', 'Preparation requires an already loaded idle Executor');
+  if (!current.executor) return fault('EXECUTOR_ROLE_REQUIRED', 'The Executor role must already be applied without a pending role reload');
+  const cancelled = cancellation(signal);
+  if (cancelled) return cancelled;
+  preflight(operation.session_id);
+  operation.preparation = 'unknown';
+  operation.capability = 'unchecked';
+  // A lost host response must never replay native effects with this request ID.
+  save({ result: { operation: { ...operation } }, error: null });
+  const resources = await prepare(operation.session_id, input);
+  if (resources?.sessionId !== operation.session_id || typeof resources.ok !== 'boolean'
+    || !Array.isArray(resources.skills) || !Array.isArray(resources.mcpServers)
+    || !['not_attempted', 'unchanged', 'initialized', 'unconfirmed'].includes(resources.tools)) {
+    return fault('PREPARATION_UNCONFIRMED', 'Host returned no confirmed resource preparation receipt; inspect the session before further action');
+  }
+  operation.resources = resources;
+  operation.preparation = resources.ok ? 'prepared' : 'unavailable';
+  save({ result: { operation: { ...operation } }, error: null });
+  if (!resources.ok) return fault('RESOURCE_PREPARATION_FAILED', resources.error || 'Selected resources were not confirmed; inspect per-step effects before any new request');
+  const afterPreparationCancellation = cancellation(signal);
+  if (afterPreparationCancellation) return afterPreparationCancellation;
+  const after = await inspect(operation.session_id);
+  operation.capability = after.ready ? 'ready' : 'unavailable';
+  if (after.details !== undefined) operation.details = after.details;
+  else delete operation.details;
+  if (!after.ready) return fault('CAPABILITY_UNAVAILABLE', 'Resources were prepared, but Executor capability is not ready');
+  if (!after.idle) return fault('EXECUTOR_NOT_READY', 'Resources were prepared, but the Executor is no longer idle');
+  preflight(operation.session_id);
+  delete operation.details;
+  return null;
+}
+
+function preparationFailureStatus(operation) {
+  if (operation.preparation === 'unknown'
+    || operation.resources?.tools === 'unconfirmed'
+    || [...(operation.resources?.skills ?? []), ...(operation.resources?.mcpServers ?? [])]
+      .some(resource => resource.effect === 'unconfirmed')) return 'unconfirmed';
+  if (operation.creation === 'created' || operation.preparation === 'prepared'
+    || operation.resources?.tools === 'initialized'
+    || [...(operation.resources?.skills ?? []), ...(operation.resources?.mcpServers ?? [])]
+      .some(resource => resource.effect === 'enabled')) return 'partially_applied';
+  return 'rejected';
+}
+
+async function runPreparation(options, finish) {
+  options.save({ result: { operation: { ...options.operation } }, error: null });
+  let error;
+  try {
+    error = await options.guard(options.operation.session_id, () => prepareSelected(options));
+  } catch (cause) {
+    error = errorDetail(cause, 'PREPARATION_UNCONFIRMED');
+  }
+  return error ? finish(preparationFailureStatus(options.operation), error) : finish('applied');
+}
+
+export async function prepareExecutor(options) {
+  const { input, preparationSupported, save, signal } = options;
   const operation = {
-    request_id: input.request_id, status: 'running',
-    creation: 'not_created', session_id: null, capability: 'unchecked',
+    request_id: input.request_id, status: 'running', session_id: input.session_id,
+    preparation: 'not_prepared', capability: 'unchecked',
   };
   const finish = (status, error = null) => {
     operation.status = status;
@@ -28,6 +97,26 @@ export async function createExecutor({ input, create, inspect, save, signal }) {
   };
   const cancelled = cancellation(signal);
   if (cancelled) return finish('rejected', cancelled);
+  if (!preparationSupported) return finish('rejected', unsupportedPreparation());
+  return runPreparation({ ...options, operation }, finish);
+}
+
+export async function createExecutor(options) {
+  const { input, create, inspect, save, signal, preparationSupported } = options;
+  const operation = {
+    request_id: input.request_id, status: 'running',
+    creation: 'not_created', session_id: null, capability: 'unchecked',
+    ...(selectedResources(input) ? { preparation: 'not_prepared' } : {}),
+  };
+  const finish = (status, error = null) => {
+    operation.status = status;
+    const outcome = { result: { operation: { ...operation } }, error };
+    save(outcome);
+    return outcome;
+  };
+  const cancelled = cancellation(signal);
+  if (cancelled) return finish('rejected', cancelled);
+  if (selectedResources(input) && !preparationSupported) return finish('rejected', unsupportedPreparation());
   operation.creation = 'unknown';
   save({ result: { operation: { ...operation } }, error: null });
   let created;
@@ -48,6 +137,9 @@ export async function createExecutor({ input, create, inspect, save, signal }) {
   operation.session_id = created.sessionId;
   operation.creation = 'created';
   save({ result: { operation: { ...operation } }, error: null });
+  if (selectedResources(input)) {
+    return runPreparation({ ...options, operation }, finish);
+  }
   let capability;
   try {
     capability = await inspect(created.sessionId);

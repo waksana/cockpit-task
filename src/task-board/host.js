@@ -39,6 +39,11 @@ export function createHostAdapter(host) {
   return {
     ownerExists: async sessionId => (await get(sessionId)) !== null,
     create: cwd => host.call('session/new', { cwd, roles: executorRoles }),
+    preparationSupported: host.resourcePreparationVersion === 1,
+    prepare: (sessionId, { skills, mcp_servers }) => host.call('session/resources-prepare', {
+      sessionId, ...(skills !== undefined ? { skills } : {}),
+      ...(mcp_servers !== undefined ? { mcpServers: mcp_servers } : {}),
+    }),
     async inspect(sessionId) {
       const capability = await host.call('roles/readiness', { sessionId, roles: executorRoles });
       if (capability?.sessionId !== sessionId || typeof capability.ready !== 'boolean'
@@ -50,6 +55,8 @@ export function createHostAdapter(host) {
       return {
         ready: capability.ready && capability.loaded && meta?.loaded === true,
         idle: availability_reasons.length === 0,
+        executor: capability.rolesNeedReload === false && Array.isArray(capability.appliedRoles)
+          && capability.appliedRoles.some(role => role.moduleId === 'cockpit-task' && role.roleId === 'executor'),
         details: {
           reasons: capability.reasons, loaded: meta?.loaded ?? null, status: meta?.status ?? null,
           availability_reasons, observed_at: new Date().toISOString(),

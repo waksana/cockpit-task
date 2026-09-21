@@ -14,10 +14,10 @@ Task 提供 [Owner Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.
 
 | 角色 | 常驻指令 | 注入的 Task 工具 |
 | --- | --- | --- |
-| Owner | [task-owner.md](../roles/task-owner.md) | `task_read`、`task_create`、`task_session_create`、`task_assign`、`task_edit`、`task_cancel`、`task_subscribe`、`task_unsubscribe` |
+| Owner | [task-owner.md](../roles/task-owner.md) | `task_read`、`task_create`、`task_session_create`、`task_session_prepare`、`task_assign`、`task_edit`、`task_cancel`、`task_subscribe`、`task_unsubscribe` |
 | Executor | [task-executor.md](../roles/task-executor.md) | `task_read`、`task_edit`、`task_ack`、`task_report`、`task_cancel` |
 
-共十个工具。宿主可组合两种角色，工具取并集、相同资源去重；角色管理由宿主负责。
+共十一个工具。宿主可组合两种角色，工具取并集、相同资源去重；角色管理由宿主负责。
 Task 不提供给已有 session 追加角色的工具，指派也不补能力。角色是协作能力，
 不是项目身份、实际承接或逐 Task ACL；自报 actor 只是归因。
 
@@ -72,12 +72,22 @@ Task 是共同工作记录，不是原始证据仓库：详细证据用可访问
 
 正常流程：
 
-1. `task_create` 登记完整要求；不启动 session。
-2. 需要新 Executor 时用 `task_session_create`；也可明确选择已有能力的 session。
+1. 选择已授权工作环境及现有可发现的 Skill/MCP，`task_create` 登记完整要求；
+   不从 Task 正文猜资源，backlog 登记不派单。
+2. 用 `task_session_create` 显式选择资源，或以 `task_session_prepare` 准备符合条件的
+   既有 Executor。排除任何绑定未结束 Task 的 session，即使 native idle；
+   目标须已加载空闲、Executor 角色已应用且无待重载角色。检查 operation 回执，
+   不强制优先新建/复用，未知效果不盲重试或替换。
 3. 用 `task_assign` 进行能力/原生状态检查、绑定和一次 assigned 派单。
    不另发首条消息，不把角色标签当成就绪证明。
 4. 按需读取 Task，修改要求而非向 Executor 聊天追进度、澄清或索要确认。
 5. 读取 outcome 判断实际交付及未执行边界，不把 idle 或成果可用性当成完成证明。
+
+准备不安装、认证、改全局默认值、改角色/模型、重载或发送初始化消息；
+未选资源保持不变。Skill enabled 不等于正文加载，MCP connected 不等于工具 offered，
+初始化不等于最终 ready；就绪也不等于授权、绑定、消息接受、ACK 或执行。
+Executor 在首次需要时自行加载相关 Skill 正文，不继承 Owner 已读的上下文。
+参数、支持标记和失败恢复见工具 schema 与按需参考，不在角色 Skill 重复底层操作序列。
 
 Owner 默认用 `task_read(view=list, owner=<自己的 session ID>)`，单项用 overview。
 关注 id/title、Executor、状态、最新 activity 及时间、revision/ACK、

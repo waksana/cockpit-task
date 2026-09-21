@@ -173,7 +173,7 @@ export class TaskStore {
   }
   reserveOperation(name, rawInput) {
     const input = parseInput(name, rawInput);
-    if (!['task_assign', 'task_session_create'].includes(name)) fail('INVALID_OPERATION', 'Only external operations require reservation', 400);
+    if (!['task_assign', 'task_session_create', 'task_session_prepare'].includes(name)) fail('INVALID_OPERATION', 'Only external operations require reservation', 400);
     return this.transaction(() => {
       if (this.receipt(name, input)) {
         const receipt = this.operation(input.request_id);
@@ -445,6 +445,10 @@ export class TaskStore {
         .run(this.context(task), JSON.stringify({ operation: { request_id: input.request_id, status: 'running', task_id: task.id, executor: task.executor, assignment: 'applied', message: 'not_sent', write_context: this.context(task) } }), now(), input.request_id);
       return this.summary(task);
     });
+  }
+  preparationPreflight(sessionId) {
+    const task = this.db.prepare("SELECT id FROM tasks WHERE executor=? AND status NOT IN ('done','cancelled')").get(sessionId);
+    if (task) fail('EXECUTOR_OCCUPIED', 'Select an Executor without an unfinished Task; preparation does not repair an existing assignment');
   }
   dispatchPreflight(rawInput) {
     const input = parseInput('task_assign', rawInput);

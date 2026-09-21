@@ -8,7 +8,7 @@ See the [MCP contract](task-mcp-contract.md) for input/result shapes, the
 ## Module and data
 
 The module ID and MCP server key are `cockpit-task`, display name Task, version
-`0.1.5` (source preparation; no deployment implied). Its manifest is [cockpit.module.json](../cockpit.module.json).
+`0.1.6` (source preparation; no deployment implied). Its manifest is [cockpit.module.json](../cockpit.module.json).
 `src/task-board/`, `web/task-board/` and the database filename `task-board.sqlite`
 are current internal paths. Task runs inside Cockpit, not a standalone service.
 
@@ -31,6 +31,10 @@ Activation requires Module API v1, the exact module identity,
 `context.serviceReadyVersion === 1` and `context.host.call` before storage opens
 or migrates. Do not remove these guards or silently skip recovery on an
 unsupported host. Web activation separately requires API v2, UI v1 and a portal.
+Resource-aware create and explicit prepare additionally require
+`context.host.resourcePreparationVersion === 1` before any external effect.
+This operation-level guard does not disable legacy creation or module activation
+on an otherwise compatible older host.
 
 ## Business context, not authentication
 
@@ -49,6 +53,9 @@ The host controls role management, including changes to existing sessions.
 Task itself exposes no such mutation: session creation selects Executor for
 the new session, while assignment checks existing capabilities without adding
 roles, enabling resources or repairing the target.
+Explicit preparation is separate: only loaded idle sessions with an applied
+Executor role, no pending role reload and no unfinished Task are eligible.
+There is no bound-Task repair mode or automatic resource selection from Task text.
 
 ## Concurrency and replay
 
@@ -91,7 +98,7 @@ revision; overview marks whether the latest outcome matches the current definiti
 
 ## External operation receipts
 
-Session creation and assignment persist a pending receipt before host calls.
+Session creation, preparation and assignment persist a pending receipt before host calls.
 Step results are updated durably. A crash during an external action leaves
 unconfirmed evidence; startup does not automatically repeat creation or dispatch.
 `task_read(view=operation,request_id)` exposes the known result without host refresh.
@@ -99,6 +106,45 @@ unconfirmed evidence; startup does not automatically repeat creation or dispatch
 Creation retains a confirmed session ID even if capability inspection fails.
 It does not bind a Task or send an initialization prompt, and replay never
 creates a replacement.
+
+Omitting `skills` and `mcp_servers` preserves legacy creation and its receipt.
+Either field, including an empty array, requests the shared resource preparation
+path after creation. `task_session_prepare` uses that path without creating,
+renaming, changing model/roles, binding or sending. Same-target prepare/assign
+calls are mutually excluded for their call lifetime within the loaded Task service,
+not through a new durable lock or recovery workflow. The unfinished-Task unique
+constraint still applies.
+
+The host's narrow `session/resources-prepare` holds an idle lifecycle guard across
+native resource validation, enablement, tool initialization and readback. It
+preserves unrelated choices and checks requested raw MCP tool names against the
+actual filtered offered table. It never installs, authenticates, changes global
+defaults, bypasses policy, reloads/cold-loads or prompts. Task business eligibility
+is checked by Task, not encoded in this generic host intent.
+Initialize once when tool metadata is null or a selected resource enablement was
+confirmed in this call, even if metadata remains non-null. This handles the stale
+empty table retained after MCP enable as a confirmed configuration change, not a
+filter bypass. An already-enabled/no-op selection with non-null metadata and genuinely
+missing tools still fails without speculative rebuilding. Preserve confirmed effects.
+MCP receipts return one actual offered raw-name witness for omitted/empty selections,
+or only requested offered names for explicit selections, never a tool catalogue.
+Error strings are bounded to 2,000 characters with an explicit truncation marker.
+
+Preparation persists its known target and `preparation:not_prepared` before passive
+inspection, then `preparation:unknown` before the native preparation call.
+Cancellation is checked before starting the next Task-to-host call. Once the single
+guarded `session/resources-prepare` call has been submitted, it may complete its
+selected native steps despite caller cancellation. There is no per-inner-RPC
+interruption, rollback or retry; the receipt records the actual result when available.
+
+Preparation receipts retain `preparation=not_prepared|unknown|prepared|unavailable`,
+the host `resources` receipt when available, and separate final Executor `capability`.
+Per-resource enablement and tool initialization effects survive partial failure;
+final readiness and idle checks still must pass. An initialized tool table is not
+readiness, and readiness is not authorization, assignment or execution.
+Read the durable receipt and current state before explicit continued preparation
+under a new request after a known failure. Unknown effects cannot justify blind
+retry/recreation. Replay never repeats resource effects or silently repairs assignment.
 
 Assignment proceeds as follows:
 

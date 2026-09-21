@@ -89,3 +89,26 @@ test('official MCP tools/call retains strict per-view requirements despite the p
   }
   assert.equal(calls.length, valid.length, 'Invalid inputs never reach the tool handler');
 });
+
+test('official MCP publishes optional selections for both preparation entrypoints', async t => {
+  const { client } = await fixture(t);
+  const listed = await client.listTools();
+  for (const [name, target] of [['task_session_create', 'cwd'], ['task_session_prepare', 'session_id']]) {
+    const schema = listed.tools.find(tool => tool.name === name).inputSchema;
+    assert.deepEqual(schema.required, ['actor_session_id', 'request_id', target]);
+    assert.deepEqual(Object.keys(schema.properties).sort(), [
+      'actor_session_id', 'request_id', target, 'skills', 'mcp_servers',
+    ].sort());
+    assert.equal(schema.additionalProperties, false);
+    assert.equal(schema.properties.skills.maxItems, 64);
+    assert.equal(schema.properties.mcp_servers.maxItems, 64);
+    assert.equal(schema.properties.mcp_servers.items.properties.tools.maxItems, 256);
+    const input = {
+      actor_session_id: 'owner', request_id: name, [target]: 'synthetic',
+      skills: ['synthetic-work'], mcp_servers: [{ name: 'synthetic-tools', tools: ['read'] }],
+    };
+    const response = await client.callTool({ name, arguments: input });
+    assert.notEqual(response.isError, true);
+    assert.deepEqual(JSON.parse(response.content[0].text), input);
+  }
+});

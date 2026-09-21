@@ -1,12 +1,19 @@
 # Task 宿主接入契约
 
-当前源码的精确宿主支持基线为
+当前 UI 的精确宿主支持基线为
 `9fd5204bda99a8bd65b2c5ef152cc47ce87837d5`（Cockpit 源码，未宣称已发行）。
 卡片复用 `ck-button`，详情使用 `ck-surface`、`ck-modal`、`ck-heading`、
 `ck-actions` 与公共字体 tokens。激活在注册贡献前检查
 `context.uiVersion === 1` 与独立的 `context.uiSurfaceVersion === 1`，
 缺少或不支持时明确拒绝；历史 UI v1 主机不会自动获得新增样式。
 原生 dialog 的 portal、打开、关闭、焦点和业务几何不变；不引入 React SDK 或私有宿主依赖。
+
+资源准备是独立的后端支持契约，由 [waksana/cockpit#100](https://github.com/waksana/cockpit/pull/100)
+实现；完整后端源码支持基线为 `d9952cb6060ef6d573431dd4778d6cd221311ece`，
+并须有 `context.host.resourcePreparationVersion === 1`。UI 基线和 `uiSurfaceVersion: 1`
+不证明该能力存在，也不因本次后端变更而改变。源码合并不等于部署；
+调查时运行的宿主 0.2.7 / 源码 `1dd38c6` 尚无此能力及相关 #97 工具初始化支持，
+不据此虚构最低宿主发行版本。
 
 Task 是运行于 Cockpit 的模块，不启动独立 daemon 或监听端口。
 宿主提供通用模块、角色和原生 session 能力；Task 维护自己的记录、工具和卡片。
@@ -22,6 +29,7 @@ Task 是运行于 Cockpit 的模块，不启动独立 daemon 或监听端口。
 | 后端模块 | API v1，module ID 为 `cockpit-task` |
 | 服务就绪生命周期 | `context.serviceReadyVersion === 1`，支持返回 `onReady` 回调 |
 | 宿主操作 | `context.host.call(name, body)`，支持下文公开 intents |
+| 显式资源准备 | 仅资源感知 create / prepare 要求 `context.host.resourcePreparationVersion === 1`；缺失在副作用前拒绝，旧创建不受影响 |
 | HTTP | 命名空间 routes，保留 headers、JSON body、取消 signal、响应状态与流 |
 | 角色 | 模块角色声明、所选角色资源装配、持久记录、冷恢复及按需 readiness |
 | MCP | 模块 HTTP 配置、准确的声明 key `cockpit-task`、角色工具子集与版本绑定 |
@@ -64,9 +72,9 @@ HTTP MCP 配置和工具选择。Web 与 MCP 创建共用宿主角色选择流�
 
 | 选择 | Skill | Task MCP 工具（省略 `task_` 前缀） |
 | --- | --- | --- |
-| Owner | `cockpit-task-owner`、`github-coding` | read、create、session_create、assign、edit、cancel、subscribe、unsubscribe |
+| Owner | `cockpit-task-owner`、`github-coding` | read、create、session_create、session_prepare、assign、edit、cancel、subscribe、unsubscribe |
 | Executor | `cockpit-task-executor`、`github-coding` | read、edit、ack、report、cancel |
-| 两者 | 两份角色 Skill 与一份 `github-coding` | 十个工具的并集，共用 `cockpit-task` HTTP MCP 配置 |
+| 两者 | 两份角色 Skill 与一份 `github-coding` | 十一个工具的并集，共用 `cockpit-task` HTTP MCP 配置 |
 
 两角色都声明同一个 `skills/github-coding` 发现根；宿主复用同来源工作 Skill，
 不复制到各角色目录，不新增装载接口。它仅在编码工作需要时读取，非编码不触发；
@@ -98,12 +106,48 @@ Host API 使用 camelCase，Task MCP 使用 snake_case。Task adapter 仅依赖�
 | --- | --- |
 | `session/new` | `{cwd,roles:[{moduleId:"cockpit-task",roleId:"executor"}]}` → `{sessionId}` |
 | `session/get` | `{sessionId}` → `{meta}`；未知 session 为 `meta:null` |
+| `session/resources-prepare` | `{sessionId,skills?,mcpServers?:[{name,tools?}]}` → `{sessionId,ok,skills,mcpServers,tools,error?}`；严格验证、分步回执 |
 | `roles/readiness` | `{sessionId,roles:[{moduleId:"cockpit-task",roleId:"executor"}]}` → 含 `sessionId,loaded,ready,roles,reasons` 的显式检查结果 |
 | `prompt` | `{sessionId,text,mode:"enqueue"}` → `{ok,queued?}` |
 
-`task_session_create` 创建后显式检查能力及原生观察，返回创建/能力结果，不绑定 Task
-或发消息。只创建成功不保证可立即接单；之后的指派仍重新检查。
+`task_session_create` 省略资源字段时保持旧创建及能力检查路径；提供任一资源字段
+（包括空数组）时，在创建前检查准备 v1 标记，创建后与 `task_session_prepare`
+共用资源准备路径。两者不绑定 Task 或发消息，最终分别确认 readiness 和原生空闲。
+只创建/准备成功不保证之后可立即接单；指派仍重新检查。
 未知创建不重试，已知 ID 即使能力失败也保留，不自动新建替代者。
+
+### 窄的原生资源准备接口
+
+`session/resources-prepare` 在整个原生验证、enable、工具元数据初始化和读回期间
+持有 idle 生命周期保护。只处理已加载空闲目标上的现有可发现资源，保留无关选择；
+不安装、认证、改全局默认值、绕过策略、加载/重载、改模型/角色或发送 prompt。
+原始 MCP 工具名对照实际过滤后的 offered table，拒绝 `*`；
+省略 tools 或传空数组也须至少一个实际 raw `mcpToolName` offered。
+资源/工具数量限制及完整 receipt 形状见
+[MCP 契约](task-mcp-contract.md#两个入口共用的资源选择与回执)。
+
+工具元数据为 `null`，或本次已确认启用所选资源时，初始化一次。后者即使元数据
+非 `null` 也适用，修复 MCP enable 可能保留的旧空表；这是配置变化后的初始化，
+不是工具过滤绕过。资源已启用、无实际变更且元数据非 `null` 时，真正缺少工具仍失败，
+不猜测性重建，不借自动重连/重载或无关 Skill toggle 修复。已确认步骤不因后续失败抹去。
+省略/空工具选择仅回传一个实际 offered 原始名称作为证据，而非目录；
+显式选择仅回传所请求且实际 offered 的名称。错误字符串最多 2,000 字符，截断有标记。
+
+宿主接口不理解 Task 业务占用。Task 自身拒绝任何绑定未结束 Task 的目标，
+要求已应用 Executor、无待重载角色，并在已加载 Task 服务的调用存续期间保护
+同目标 prepare/assign 互斥；这不是新增持久锁或锁恢复协议。
+`roles/readiness` 的已应用角色和待重载信息用于这项检查；保存的角色标签不能替代。
+准备回执与最后的 Executor readiness 分开；任何失败保留分步效果和有界观察，
+不使用成功形状的 fallback。
+
+Task 在下一次宿主调用开始前检查取消。单次受保护的 `session/resources-prepare`
+提交后，所选内部原生步骤可能继续完成；不逐 RPC 中断、回滚或重试。
+实际结果可得时写入回执，不能把调用者取消当作准备没有生效的证明。
+
+既有 `session/new`、`session/get`、`roles/readiness`、`prompt` 契约不变。
+Task adapter 不单独调用 [Cockpit #97](https://github.com/waksana/cockpit/pull/97)
+的 `session/tools-initialize`：它是相关宿主内部支持，不是 Task 的第二套修复路径。
+不暴露任意 `host.call` 透传或访问私有 SDK handle。
 
 `task_assign` 在绑定前检查能力和原生可接单状态，绑定后再次检查并核对 Task，
 然后发送一次 assigned 引用。缺能力不安装、启用、补角色、重载或自动换人。
@@ -161,7 +205,8 @@ Task 普通 HTTP API 和 HTTP MCP 共用业务服务及 SQLite。宿主只负责
 
 transport 按 MCP session 隔离，后续 POST 的 cancellation 能关联原在途调用。
 HTTP request ID、协议 session ID 与持久 request_id 的业务幂等是不同层次。
-取消阻止后续外部动作，不回滚已经创建、绑定或发送的效果。
+取消在下一次 Task 到宿主调用前检查，不回滚已经创建、准备、绑定或发送的效果，
+也不保证中断已提交准备调用内的原生步骤。
 
 协议连接最多 256 个；无请求、执行或打开流的连接空闲五分钟后释放。
 容量不足可回收空闲连接，不挤掉活跃连接；全忙时拒绝新初始化。

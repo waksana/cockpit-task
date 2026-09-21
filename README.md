@@ -30,6 +30,12 @@ Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的�
 Owner 安全清理本次已合并环境并恢复主目录。必要的收尾可使用一次性 done 订阅，
 不恢复默认通知或轮询。仅讨论、仅 PR 和非 GitHub 工作保留各自边界；合并不等于部署。
 
+Owner 明确选择现有可发现的 Skill/MCP 资源，以 `task_session_create` 新建并准备，
+或用 `task_session_prepare` 准备已加载空闲、无未结束 Task 的既有 Executor；
+检查分步回执后，由 `task_assign` 最终检查、绑定并发送一次派单。登记 backlog 不派单，
+准备也不发送初始化消息。就绪不等于授权、ACK 或执行，Skill 启用不等于正文已加载。
+显式资源准备要求宿主 `resourcePreparationVersion: 1`；省略资源选择的旧创建保持兼容。
+
 **使用与打包：[Task](docs/task-board.md)**。模块需要支持模块角色和宿主
 能力接口的 Cockpit；旧版宿主不能仅靠安装这个包获得这些能力。构建、合并不等于安装
 或升级，部署须由操作者另行决定。
@@ -59,6 +65,6 @@ npm run package:module
 [Owner](skills/cockpit-task-owner/cockpit-task-owner/SKILL.md) 和
 [Executor](skills/cockpit-task-executor/cockpit-task-executor/SKILL.md)。
 两角色都通过现有装载机制发现同一份 `github-coding` 工作 Skill，双角色不会重复装配，
-选择角色不等于每次都加载正文。准备包版本为 `0.1.5`；不同内容使用新版本，
+选择角色不等于每次都加载正文。准备包版本为 `0.1.6`；不同内容使用新版本，
 不覆盖同版本的既有安装。源码合并、CI 归档均不会自动升级线上。
 持久化仅使用宿主提供的模块目录，不自动导入其他数据库或修改既有安装。

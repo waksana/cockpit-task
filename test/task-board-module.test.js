@@ -18,7 +18,8 @@ function fixture() {
     sessionId: 'executor', status: 'idle', loaded: true, nativeProcessing: false,
     activeOperations: 0, queue: [], ask: null,
   };
-  let capability = { sessionId: 'executor', ready: true, loaded: true, roles: [], reasons: [] };
+  let capability = { sessionId: 'executor', ready: true, loaded: true, roles: [], reasons: [],
+    rolesNeedReload: false, appliedRoles: [{ moduleId: 'cockpit-task', roleId: 'executor' }] };
   const host = {
     async call(name, body) {
       calls.push({ name, body });
@@ -72,7 +73,7 @@ test('module roles retain tool subsets and share one coding Skill alongside the 
     { id: 'executor', name: 'Executor' },
   ]);
   for (const role of manifest.roles) assert.deepEqual(Object.keys(role.mcpServers), ['cockpit-task']);
-  assert.deepEqual(owner.mcpServers['cockpit-task'].tools, ['task_read', 'task_create', 'task_session_create', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe']);
+  assert.deepEqual(owner.mcpServers['cockpit-task'].tools, ['task_read', 'task_create', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe']);
   assert.deepEqual(executor.mcpServers['cockpit-task'].tools, ['task_read', 'task_edit', 'task_ack', 'task_report', 'task_cancel']);
   assert.deepEqual([...new Set([...owner.mcpServers['cockpit-task'].tools, ...executor.mcpServers['cockpit-task'].tools])].sort(), [...TOOL_NAMES].sort());
   assert.deepEqual(owner.skillDirectories, ['skills/cockpit-task-owner', 'skills/github-coding']);
