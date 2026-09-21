@@ -8,8 +8,9 @@
 缺少或不支持时明确拒绝；历史 UI v1 主机不会自动获得新增样式。
 原生 dialog 的 portal、打开、关闭、焦点和业务几何不变；不引入 React SDK 或私有宿主依赖。
 
-资源准备是独立的后端支持契约，见 [waksana/cockpit#98](https://github.com/waksana/cockpit/issues/98)
-及 `context.host.resourcePreparationVersion === 1`。UI 基线和 `uiSurfaceVersion: 1`
+资源准备是独立的后端支持契约，由 [waksana/cockpit#100](https://github.com/waksana/cockpit/pull/100)
+实现；完整后端源码支持基线为 `d9952cb6060ef6d573431dd4778d6cd221311ece`，
+并须有 `context.host.resourcePreparationVersion === 1`。UI 基线和 `uiSurfaceVersion: 1`
 不证明该能力存在，也不因本次后端变更而改变。源码合并不等于部署；
 调查时运行的宿主 0.2.7 / 源码 `1dd38c6` 尚无此能力及相关 #97 工具初始化支持，
 不据此虚构最低宿主发行版本。
