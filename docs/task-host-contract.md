@@ -145,14 +145,14 @@ create/resume 参数转发代码及 GitHub 官方文档核对。结论是：
 | 角色 System Prompt | `systemMessage: {mode: "append", content}` | 追加角色身份、适用 Skill 名称和同步原则，不覆盖基础指令、不发送初始化 prompt |
 | 冷恢复 | `ResumeSessionConfig` 同样继承上述配置；client 恢复路径转发对应字段 | 本体保存角色选择并在冷恢复时重新解析和传入，不能依赖连接或目录自然留存 |
 
-例如，Task 的一个 HTTP MCP 可以实现全部八个工具，角色配置决定 agent 获得的
+例如，Task 的一个 HTTP MCP 可以实现全部十个工具，角色配置决定 agent 获得的
 工具子集，无需仅为 Owner / Executor 分别启动服务：
 
 | 选择 | Skill | Task MCP 工具 |
 | --- | --- | --- |
-| Owner | `cockpit-task-owner` | read、create、session_create、assign、edit、cancel |
+| Owner | `cockpit-task-owner` | read、create、session_create、assign、edit、cancel、subscribe、unsubscribe |
 | Executor | `cockpit-task-executor` | read、edit、ack、report、cancel |
-| Owner + Executor | 两份 Skill | 八个工具的并集，同一个连接配置 |
+| Owner + Executor | 两份 Skill | 十个工具的并集，同一个连接配置 |
 
 上表省略工具的 `task_` 前缀；正式 schema / Skill 使用完整名称。
 工具选择是 SDK 的 agent 工具配置，不是 Task 数据访问 ACL，
@@ -524,14 +524,35 @@ helper 不能写成忙循环：需观察原生状态/轮次变化，区分尚未
 和消息来源。Task 模块据此请求自己的后端并渲染，不需要新宿主协议。
 通用引用仍为 `[Task](task:<uuid>)`；首次指派为
 `[Task assigned to you](task:<uuid>?event=assigned)`，Owner 显式重要更新为
-`[Task updated](task:<uuid>?event=updated)`。两份正式 Skill 与此对齐。
+`[Task updated](task:<uuid>?event=updated)`。显式一次性状态订阅给 Owner 的通知为
+`[Task status updated](task:<uuid>?event=status_changed)`。两份正式 Skill 与此对齐。
 
-event 仅接受小写 assigned / updated，是消息/引用的固定原因，不是 Task
+event 仅接受小写 assigned / updated / status_changed，是消息/引用的固定原因，不是 Task
 类型、状态、命令或事件总线。标签无需 UI 也能向模型解释原因，但 renderer 必须
 读取 URL 显式 event，不从 label 或当前 Task status 推断。Task ID 仍仅为 UUID。
 通用及历史引用没有事件标题，保持兼容；未知事件或畸形 query 不认领，
-不能静默降级成通用 Task。该模块本地扩展不改变能力检查、普通 busy 状态或队列行为，
-不恢复自动推进 helper，不增加 MCP 工具或 Task schema 字段。
+不能静默降级成通用 Task。引用格式本身不改变能力检查、普通 busy 状态或队列行为，
+不恢复自动推进 helper。状态订阅使用模块自己的持久记录及订阅工具，通过已有公开
+prompt enqueue 入口通知 Owner，不给宿主增加 Task 专用状态或调度规则。
+
+### 状态通知恢复所需的通用就绪回调
+
+宿主原有 `agent/status:up` 发生在 HTTP listen 之前，不能用于恢复可能需要
+连接模块 MCP 的 Owner session。显式订阅的持久 pending 通知需要在重启后自动
+恢复，不能等下一次 Task 请求或靠轮询猜测服务已启动。
+
+因此新增通用 `ModuleBackend.onReady(): void | Promise<void>` 可选回调，
+并由 `context.serviceReadyVersion === 1` 明确声明支持。Task 在打开或迁移
+SQLite 前检查该能力，旧宿主明确拒绝，不降级为不完整的恢复方案。
+宿主实现见 [waksana/cockpit#74](https://github.com/waksana/cockpit/pull/74)。
+宿主只在 runtime 已启动且 HTTP 已监听后，对每次成功激活调用一次；
+已进入关闭则跳过，不自动重试。回调不阻塞启动/关闭，通过已有
+`context.signal` 取消，并通过模块错误通道公开失败。
+
+Task 只从该回调恢复明确未尝试发送的 pending 通知；unknown 不重发。
+这是通用模块生命周期入口，不是 Task 事件总线、调度器或宿主内置消息队列。
+
+### 引用与渲染边界
 
 File 兼容性已按 cockpit-file main
 `e58761b5831de2065aac09d4ae17efd829153b3c` 和 v0.1.7 核实：

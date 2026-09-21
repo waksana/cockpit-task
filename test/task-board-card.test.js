@@ -61,6 +61,7 @@ test('Task references claim only exact link targets with canonical UUIDs', () =>
   assert.equal(parseTaskReference({ kind: 'link', target: `task:${taskId.toUpperCase()}` }), taskId);
   assert.equal(parseTaskReference({ kind: 'link', target: `task:${taskId}?event=assigned` }), taskId);
   assert.equal(parseTaskReference({ kind: 'link', target: `task:${taskId}?event=updated` }), taskId);
+  assert.equal(parseTaskReference({ kind: 'link', target: `task:${taskId}?event=status_changed` }), taskId);
   for (const target of [
     `TASK:${taskId}`, `Task:${taskId}`, `task:${taskId}#revision`, `task:${taskId}?view=execution`,
     `task://${taskId}`, ` task:${taskId}`, `task:${taskId}\n`, `task:${taskId}/`, 'task:not-an-id',
@@ -113,7 +114,7 @@ test('activation requires public compatibility and preserves native fallback on 
   const rendered = renderer.component({ node: { kind: 'link', target: `task:${taskId}` }, fallback });
   assert.equal(rendered.props.taskId, taskId);
   assert.equal(rendered.props.event, null);
-  for (const event of ['assigned', 'updated']) {
+  for (const event of ['assigned', 'updated', 'status_changed']) {
     const node = { kind: 'link', target: `task:${taskId}?event=${event}`, label: 'An unrelated label' };
     assert.equal(renderer.matches(node), true);
     assert.equal(renderer.component({ node, fallback }).props.event, event);
@@ -146,12 +147,20 @@ test('card event headings come from the message and survive loading, failure and
   };
   const heading = card => card.children.find(child => child?.props?.className === 'tb-card-event');
   assert.deepEqual(heading(render('assigned')).children, ['Task assigned to you']);
+  assert.deepEqual(heading(render('status_changed')).children, ['Task status updated']);
   snapshot = { phase: 'ready', data: { ...result, status: 'done', revision: 4 }, error: null };
   assert.deepEqual(heading(render('assigned', 'Task updated')).children, ['Task assigned to you']);
   assert.deepEqual(heading(render('updated', 'Task assigned to you')).children, ['Task updated']);
+  const notification = render('status_changed', 'Task updated');
+  assert.deepEqual(heading(notification).children, ['Task status updated']);
+  assert.match(heading(notification).props.title, /not an Executor requirement update/);
+  assert.ok(notification.children.some(child => child?.children?.includes('Owner subscription triggered · current state shown below')));
+  snapshot = { phase: 'ready', data: { ...result, status: 'in_progress', revision: 5 }, error: null };
+  assert.deepEqual(heading(render('status_changed')).children, ['Task status updated']);
   assert.equal(heading(render(null, 'Task updated')), undefined);
   snapshot = { phase: 'missing', data: null, error: new Error('Missing Task') };
   assert.deepEqual(heading(render('updated')).children, ['Task updated']);
+  assert.deepEqual(heading(render('status_changed')).children, ['Task status updated']);
 });
 
 test('HTTP reads use the scoped POST contract, without reported actor or chat requests', async () => {

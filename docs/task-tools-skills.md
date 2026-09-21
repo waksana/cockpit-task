@@ -28,6 +28,13 @@
 
 **普通更新不积累 queue：** 普通要求只更新 Task，不排队发送 cue、提醒或追加要求。非常重要的更新由 Owner 按 Skill 主动处理 pending 队列，再发送一条包含上下文摘要和 Task updated 引用的消息。首次派单仍不擅自中断忙碌目标，不把这项例外变成普通指派默认行为。
 
+**显式一次性状态订阅（2026-09-21）：** Owner 可以登记等待 Task 进入指定状态，
+但登记时已经满足则明确失败，不创建订阅或立即通知。首次匹配后由系统向 Task Owner
+发送 `status_changed` 卡片并结束订阅；这不是 Executor 的反向消息，也不是要求修订。
+Owner 收到后读取最新状态与结果，不自动再次订阅、不轮询或以订阅创建依赖调度。
+忙时使用正常 enqueue，不打断或清空队列；一次性触发不等于外部 exactly-once 投递。
+等待期间不保持当前模型轮次，卡片到达是新的 prompt 输入。
+
 **节点 3 的角色决定：** 前端与 MCP 新建 session 共用角色选择和装配；系统按角色注入工具。有相应 MCP 就可调用，包括操作其他 Task，不按 owner / executor 归属鉴权。后续队列决策改为 Owner Skill 指导，不再推荐自动推进 MCP，也不宣称原子控制或排除其他来源的新消息。
 
 **创建时角色组合：** 同一模块也可多选，Owner / Executor 可同时具备；
@@ -42,9 +49,10 @@
 
 **消息事件：** 通用 `[Task](task:<uuid>)` 保持不变；`task_assign` 的完整首次消息
 仅为一次 `[Task assigned to you](task:<uuid>?event=assigned)`，Owner 不重复发送。
-两种事件标签都无需 UI 渲染即可说明消息原因。仅接受小写 `assigned` / `updated`；
+状态订阅消息为 `[Task status updated](task:<uuid>?event=status_changed)`。
+三种事件标签都无需 UI 渲染即可说明消息原因。仅接受小写 `assigned` / `updated` / `status_changed`；
 Task 工具的 ID 仍为纯 UUID，不带 URI 或 query。event 是该条消息固定的引用元数据，
-不是 Task 类型/状态、命令、事件总线或调度器，不新增工具或 Task 字段。
+不是 Task 类型/状态、命令、事件总线或调度器；订阅的登记、取消和投递另有持久记录。
 卡片按 URL 显式 event 展示原因，不从标签或当前状态推断；Task 数据仍重新读取当前记录，
 通用及历史引用无事件标题。未知 event 或畸形 query 不认领，不退化为通用 Task。
 不使用可能被 File 捕获的相对 `task/<id>` 路径；既有宿主 raw target/label 接口已足够，
@@ -75,8 +83,10 @@ Owner 修改定义不自动添加 Executor activity；Executor 报告进度不�
 | 明确指派 | Owner | Task ID、Owner 已创建或选定的 Executor session ID | 确保目标具备执行能力，更新 Task 的执行归属，再发送一次 assigned 引用；不新建或自动选择 session，不代表已承接 |
 | 修订定义 | Owner / 当前 Executor | Task ID、所读 revision、完整新 description、原因 | 原子更新 description、revision 和 changelog；Executor 本人成功修订同时 ack |
 | 确认定义 | 当前 Executor | Task ID、已读 revision | 只更新 acknowledged_revision；首次和后续 ACK 都不改变 status，不生成 activity |
-| 报告执行 | 当前 Executor | Task ID、所依据 revision、活动内容、必要的状态或成果 | 追加执行 activity；完成时保存 outcome 并进入 done；不改定义或发消息 |
+| 报告执行 | 当前 Executor | Task ID、所依据 revision、活动内容、必要的状态或成果 | 追加执行 activity；完成时保存 outcome 并进入 done；不改定义；仅匹配显式订阅时由系统发状态通知 |
 | 取消 | Owner / 收到用户要求的当前 Executor | Task ID、原因 | 标记 cancelled；不冒充 session 已停止，不由 Owner 生成执行者 activity |
+| 订阅状态 | Owner | Task ID、目标状态、幂等请求 | 原子检查并登记一次性订阅；已是目标状态则失败，接收者固定为 Task Owner |
+| 取消订阅 | Owner | Task ID、subscription ID、幂等请求 | 只取消未触发的订阅，不撤回已触发或已投递消息 |
 
 系统按角色提供工具；后端不按调用者与 Task 的关系限制读写。角色分工由 skill 指导，工具仍校验版本、状态、ACK 与幂等。操作者标识用于业务追溯，不作为访问凭据；不另建通用可信 caller 协议。
 

@@ -5,7 +5,7 @@ requirements, duplicating effects or mistaking partial success for completion.
 It is not a general implementation-safety guide.
 
 Read the relevant section for unfamiliar write rules, a version conflict, a partial
-report or an uncertain creation/dispatch. Reuse understood guidance; exact arguments
+report, status subscriptions or uncertain effects. Reuse understood guidance; exact arguments
 belong in tool schemas, not a per-turn checklist.
 
 ## Identity and concurrency
@@ -19,8 +19,8 @@ Use a stable `request_id` for one intended mutation. An exact replay retains bot
 that ID and the complete original input; a different intent uses a new ID.
 Do not change IDs merely because the previous response was lost.
 
-For a new mutation, use fresh returned `write_context` and the definition `revision`
-where the tool requires it; `task_cancel` does not require a revision or ACK.
+For a new mutation, supply fresh returned `write_context` or definition `revision`
+only where required by the tool schema; `task_cancel` does not require a revision or ACK.
 The context protects assignment/lifecycle and editable materials, while revision
 protects the definition. Do not construct contexts or increment revisions yourself.
 Read current state on conflict. A corrected request with new inputs is a new intent,
@@ -84,6 +84,45 @@ eligible for that initial dispatch; recovery neither reopens it nor reassigns it
 Pending, unknown, queued or accepted sends cannot use that path.
 Do not create a second Executor or resend to manufacture a successful receipt.
 An accepted message is not an ACK or evidence of actual work.
+
+## One-shot status subscriptions
+
+Owner can explicitly register with `task_subscribe`, withdraw with `task_unsubscribe`,
+and inspect records with `task_read(view=subscriptions)`. Use current tool schemas
+for inputs, not inferred fields. At most one subscription may be waiting per Task.
+Its recipient is derived from Task's `owner`, not an arbitrary addressee or the
+reported actor. This adds no subscription capability to Executor.
+Unsubscribe cancels only a waiting subscription; it cannot retract a triggered
+notification. If Task enters a terminal status outside the selected targets,
+the waiting subscription expires without notification.
+
+Only a real transition into a selected Task status satisfies the subscription,
+on the first match, after which the subscription ends. It does not listen to
+activity, definition changes or native busy/idle state, and requires no polling.
+If the Task already has a selected status at registration, registration fails
+because it is already in that state: no subscription is created and no notice sent.
+Do not toggle status or replace the Task to manufacture a future transition.
+
+The system sends a separate `status_changed` card to the Owner as a new prompt.
+It does not keep the subscribing turn suspended; host enqueue queues it when busy
+without interrupting. This is not the `updated` handoff to Executor: do not clear
+queues, interrupt work or request a notification ACK for a status subscription.
+Read the current Task on receipt and decide whether any follow-up is needed;
+do not automatically resubscribe or turn this into ongoing monitoring.
+
+For a triggering `task_report` or `task_cancel`, distinguish saved Task effects
+from notification delivery. The original `result`, including `subscription_ids`,
+is retained alongside `notifications` and an independent `notification_error`.
+A notification failure can set MCP `isError=true` while `error` remains null;
+saved Task status and outcome are not rolled back. Read the actual subscription
+facts with `task_read(view=subscriptions)`. Do not repeat a saved report, redo
+delivery or manually send a replacement notice to Owner because notification failed.
+
+Preserve request identity and inspect subscription/operation records on uncertain
+effects. Queued or accepted does not mean read. Without host prompt idempotency,
+do not claim exactly-once delivery. An unknown send does not authorize a blind
+resend, replacement Task or another subscription. The system exception neither
+restores default progress/final notifications nor permits Executor-to-Owner messages.
 
 ## Ending and preserving work
 

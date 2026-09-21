@@ -65,13 +65,17 @@ when the work requires it, not as a mandatory Owner acceptance gate.
 
 Communicate with the user here, not with Owner. Do not send Owner questions,
 confirmations, progress, blockers or completion messages, directly or via subagents.
-Reports/ordinary edits are silent; do not request reminders or service notifications.
+Reports/ordinary edits are silent without an explicit Owner status subscription.
+Only the system sends that one-shot notice to Task's Owner; this gives Executor
+no subscription capability or permission to notify Owner. A `status_changed` card
+is not an instruction to execute or ACK a notification; `updated` remains the
+Executor's cue to read and ACK the current definition. Do not request reminders.
 Owner reads Task. Normal user-facing replies are allowed, not a second maintained ledger.
 
 ## Preserve facts through conflicts and uncertainty
 
 Use actual Task/session IDs, your own `actor_session_id` on reads/writes, stable
-mutation request IDs and fresh returned `write_context`. Identity is attribution,
+mutation request IDs and fresh returned `write_context` where required. Identity is attribution,
 not authentication or a per-Task ACL. Preserve newer requirements and replay identity.
 Old activity may save while stale status/outcome are rejected; inspect actual effects,
 not a blanket success/failure. If reporting is unavailable, say so and preserve

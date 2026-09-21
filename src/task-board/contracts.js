@@ -60,6 +60,7 @@ const existing = { ...mutation, task_id: id, write_context: text(1000) };
 const pagination = { limit: z.number().int().min(1).max(LIMITS.history).optional(), cursor: text(2000).optional() };
 const readActor = { actor_session_id: session.optional() };
 const taskRead = view => z.strictObject({ ...readActor, view: z.literal(view), task_id: id });
+export const TASK_STATUSES = Object.freeze(['todo', 'in_progress', 'blocked', 'in_review', 'done', 'cancelled']);
 export const schemas = {
   task_read: z.discriminatedUnion('view', [
     z.strictObject({
@@ -70,7 +71,7 @@ export const schemas = {
     ...['overview', 'execution', 'definition'].map(taskRead),
     z.strictObject({ ...readActor, view: z.literal('changelog'), task_id: id, ...pagination, revision: revision.optional() })
       .refine(x => x.revision === undefined || (x.cursor === undefined && x.limit === undefined), 'A revision selector cannot be paginated'),
-    ...['activity', 'outcomes'].map(view => z.strictObject({ ...readActor, view: z.literal(view), task_id: id, ...pagination })),
+    ...['activity', 'outcomes', 'subscriptions'].map(view => z.strictObject({ ...readActor, view: z.literal(view), task_id: id, ...pagination })),
     z.strictObject({ ...readActor, view: z.literal('operation'), request_id: request }),
   ]),
   task_create: z.strictObject({
@@ -93,12 +94,18 @@ export const schemas = {
   }).refine(x => x.activity !== undefined || x.status !== undefined || x.outcome !== undefined, 'A report field is required')
     .refine(x => x.status !== 'done' || x.outcome !== undefined, 'done requires a new outcome in this request'),
   task_cancel: z.strictObject({ ...existing, reason: text(2000) }),
+  task_subscribe: z.strictObject({
+    ...existing,
+    statuses: z.array(z.enum(TASK_STATUSES)).min(1).max(TASK_STATUSES.length)
+      .refine(values => new Set(values).size === values.length, 'Target statuses must be unique'),
+  }),
+  task_unsubscribe: z.strictObject({ ...mutation, task_id: id, subscription_id: id }),
 };
 // The MCP SDK publishes properties only for object roots, not discriminated unions.
 const readToolSchema = z.strictObject({
   ...readActor,
-  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'operation']),
-  task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity and outcomes'),
+  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'subscriptions', 'operation']),
+  task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes and subscriptions'),
   request_id: request.optional().describe('Required only for the operation view'),
   owner: session.optional().describe('List filter only'),
   executor: session.optional().describe('List filter only'),

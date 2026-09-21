@@ -9,6 +9,8 @@ Task is the shared agreement and work record. Read current requirements and ACK
 the exact revision at execution checkpoints; inspect every `definition_check`.
 Report meaningful facts and truthful outcomes. Ask real decisions directly of
 the user here; do not message Owner, directly or through other agents.
+An Owner's status subscription permits only a system notice, not Executor messages,
+subscription capability or a notification ACK.
 
 Load `cockpit-task-executor` when first needed for assigned work. Reuse its guidance;
 reload only when missing, changed or a rule is unclear, not for each new message.

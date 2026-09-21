@@ -8,6 +8,9 @@ export function activate(context) {
   if (context.apiVersion !== 1 || context.moduleId !== 'cockpit-task') {
     throw new Error('Task requires Cockpit Module API v1 and module ID cockpit-task; task-board requires explicit offline migration');
   }
+  if (context.serviceReadyVersion !== 1) {
+    throw new Error('Task requires Cockpit service-ready lifecycle v1 before opening storage');
+  }
   const host = createHostAdapter(context.host);
   const store = new TaskStore(context.dataRoot);
   const controller = new AbortController();
@@ -19,9 +22,10 @@ export function activate(context) {
     const body = await execute(name, request.body, {
       signal: AbortSignal.any([request.signal, signal]),
     });
-    return { status: body.error?.status ?? (body.error ? 409 : 200), body };
+    return { status: body.error?.status ?? (body.error ? 409 : body.notification_error ? 502 : 200), body };
   };
   return {
+    onReady: () => service.recoverNotifications({ signal }),
     routes: [
       { method: 'POST', path: '/read', body: 'json', bodyLimit: 262144, handler: request => json('task_read', request) },
       { method: 'POST', path: '/tools/:name', body: 'json', bodyLimit: 262144, handler: request => json(request.params.name, request) },

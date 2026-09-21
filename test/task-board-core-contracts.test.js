@@ -37,7 +37,7 @@ test('official MCP tools/list publishes all Task read selectors and a required v
     'request_id', 'revision', 'status', 'task_id', 'view',
   ].sort());
   assert.deepEqual(schema.properties.view.enum, [
-    'list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'operation',
+    'list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'subscriptions', 'operation',
   ]);
   assert.equal(schema.properties.task_id.type, 'string');
   assert.equal(schema.properties.task_id.format, 'uuid');
@@ -56,6 +56,7 @@ test('official MCP tools/call retains strict per-view requirements despite the p
     { view: 'changelog', task_id, revision: 2 },
     { view: 'activity', task_id, limit: 10 },
     { view: 'outcomes', task_id, limit: 10 },
+    { view: 'subscriptions', task_id, limit: 10, cursor: 'opaque-cursor' },
     { view: 'operation', request_id: 'operation-id' },
   ];
   for (const input of valid) {
@@ -75,6 +76,8 @@ test('official MCP tools/call retains strict per-view requirements despite the p
     { view: 'changelog', task_id, revision: 1, cursor: 'cursor' },
     { view: 'activity', task_id, limit: 11 },
     { view: 'outcomes', task_id, revision: 1 },
+    { view: 'subscriptions', task_id, limit: 11 }, { view: 'subscriptions' },
+    { view: 'subscriptions', task_id, status: 'done' },
     { view: 'operation' }, { view: 'operation', request_id: 'id', task_id },
     { view: 'list', actor_session_id: '' },
   ];

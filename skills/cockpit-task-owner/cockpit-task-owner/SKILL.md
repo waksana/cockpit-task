@@ -61,13 +61,23 @@ request confirmation; read or update Task instead. Executor communicates with th
 user in its own session, not back to you, directly or through other agents.
 This keeps requirements and decisions out of a second conversation channel.
 
-There are only two cross-session notices: the initial assignment sent by
-`task_assign`, and an explicit important-update handoff when normal checkpoints
-cannot wait. Ordinary edits/reports are silent: `task_edit` does not send an
-updated notice, and there are no reminders or service final notifications.
+Executor-facing notices remain the initial assignment sent by `task_assign`
+and an explicit important-update handoff when normal checkpoints cannot wait.
+Ordinary edits/reports are silent without an explicit status subscription;
+`task_edit` does not send an updated notice. Subscriptions do not restore default
+progress/final notifications or permit Executor-to-Owner messages.
 For the exceptional handoff, read [important updates](references/important-updates.md)
 before handling pending messages or interrupting; preserve context rather than
 starting a monitoring or conversation loop.
+
+Owner may explicitly subscribe to specified Task states for a one-shot system
+notice to that Task's Owner. The first real matching transition ends the subscription;
+already matching at registration means failure, not an immediate notice.
+On `[Task status updated](task:<uuid>?event=status_changed)`, read the latest Task
+and assess any follow-up; the card is not proof of complete delivery or an Executor
+definition-ACK instruction. Do not automatically resubscribe, poll or hold this
+turn open waiting. See [subscription handling](references/task-writes-and-recovery.md#one-shot-status-subscriptions)
+for registration, withdrawal and uncertain delivery.
 
 ## Follow bounded evidence
 
@@ -94,7 +104,7 @@ scan chats routinely or schedule monitoring.
 ## Preserve state; reuse stable guidance
 
 Use actual Task/session IDs, stable mutation request IDs and fresh returned
-`write_context`; inspect errors and `definition_check` as well as the result.
+`write_context` where required; inspect errors and `definition_check` as well as the result.
 Unknown effects do not justify a blind retry or replacement Task/session; preserve
 request identity and known effects. Cancel only on an explicit decision: record
 changes neither stop native work nor undo external effects. Do not reassign a bound

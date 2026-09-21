@@ -6,14 +6,16 @@ import { CallToolRequestSchema, CancelledNotificationSchema, ErrorCode, JSONRPCM
 import { z } from 'zod/v4';
 
 const descriptions = {
-  task_read: 'Read bounded Task views. For list, explicitly filter by owner or executor; actor_session_id checks your current assigned Task too but is not an automatic list filter or authentication. Use overview for one Task, definition before edits and execution for complete current requirements. Histories and outcomes are separate. Reads never acknowledge.',
+  task_read: 'Read bounded Task views. For list, explicitly filter by owner or executor; actor_session_id checks your current assigned Task too but is not an automatic list filter or authentication. Use overview for one Task, definition before edits and execution for complete current requirements. Histories, outcomes and subscriptions are separate; subscriptions include durable notification evidence even for terminal Tasks. Reads never acknowledge.',
   task_create: 'Register an independent unassigned Task with complete requirements. Does not create a session or send a message. Keep request_id stable on retry.',
   task_session_create: 'Create a real Executor session with the Task role, Skill and MCP through Cockpit. Does not bind a Task or send a prompt. Inspect readiness and any partial result; never recreate on an unknown result.',
   task_assign: 'Assign an unassigned Task to an existing capable Executor and send one assigned reference. Checks capability and idle/empty state without installing capability or proactively interrupting. The checks and enqueue send are not atomic: a race may return queued or unconfirmed. Inspect durable per-step results; never blindly resend.',
   task_edit: 'Replace the complete description or edit Task metadata. Description changes keep a changelog. Only an actual description change by the assigned Executor on an unfinished Task automatically acknowledges that revision; unchanged text and metadata-only edits do not. Does not send messages or change execution status.',
   task_ack: 'Record that the assigned Executor has read the current description revision. Does not start work, add activity or send messages. Report authorship truthfully; actor_session_id is attribution, not verified identity.',
-  task_report: 'Report activity against an acknowledged revision, explicit status and/or an outcome. done requires a new outcome in the same request. Stale activity may save while stale status/outcome are rejected. Inspect per-field results; never relabel old work as a new revision.',
-  task_cancel: 'Cancel an unfinished Task with a reason. Does not interrupt its session, clear messages or notify anyone. Terminal Tasks cannot reopen.',
+  task_report: 'Report activity against an acknowledged revision, explicit status and/or an outcome. done requires a new outcome in the same request. Stale activity may save while stale status/outcome are rejected; never relabel old work as a new revision. Only an actual transition matching an explicit subscription notifies the Task Owner. Inspect notification_error separately from saved Task effects; never blindly resend.',
+  task_cancel: 'Cancel an unfinished Task with a reason. Does not interrupt its session or clear messages. Only an explicit subscription targeting cancelled notifies its Task Owner. Terminal Tasks cannot reopen. Inspect notification_error separately from saved Task effects.',
+  task_subscribe: 'Explicitly register one waiting, one-shot subscription for this Task Owner, derived from the Task, not the actor. Rejects an already-matching status, terminal Task or duplicate waiting subscription. The first actual transition into any target status consumes it and enqueues one status-update card. Read subscriptions for durable delivery evidence; acceptance does not mean read.',
+  task_unsubscribe: 'Cancel a still-waiting Task status subscription using its subscription_id and a stable request_id. Cannot recall a consumed notification. Read subscriptions to inspect the recorded transition and notification result. Actor attribution is not authentication.',
 };
 
 export function createMcpRoutes({ execute, schemas, signal, report }) {
@@ -23,7 +25,7 @@ export function createMcpRoutes({ execute, schemas, signal, report }) {
     name, description: descriptions[name], inputSchema: z.toJSONSchema(schema, { target: 'draft-7' }),
     annotations: {
       readOnlyHint: name === 'task_read', destructiveHint: name !== 'task_read',
-      idempotentHint: true, openWorldHint: ['task_assign', 'task_session_create'].includes(name),
+      idempotentHint: true, openWorldHint: ['task_assign', 'task_session_create', 'task_report', 'task_cancel'].includes(name),
     },
   }));
   let stopped = false;
@@ -86,7 +88,7 @@ export function createMcpRoutes({ execute, schemas, signal, report }) {
           return {
             content: [{ type: 'text', text: JSON.stringify(result) }],
             structuredContent: result,
-            ...(result.error ? { isError: true } : {}),
+            ...(result.error || result.notification_error ? { isError: true } : {}),
           };
         } finally {
           request.executing = false;

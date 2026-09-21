@@ -131,7 +131,9 @@ test('role prompts stay short while the Skills preserve delegation, communicatio
   assert.match(owner, /A result request is not permission for personal implementation, even for small work/);
   assert.match(owner, /Split independent outcomes, not tightly coupled stages, resources or specialties/);
   assert.match(owner, /Do not chat with Executor to ask for progress, clarify requirements, chase work or request confirmation/);
-  assert.match(owner, /only two cross-session notices/);
+  assert.match(owner, /Executor-facing notices remain the initial assignment.*important-update handoff/);
+  assert.match(owner, /Ordinary edits\/reports are silent without an explicit status subscription/);
+  assert.doesNotMatch(owner, /only two cross-session notices|there are no reminders or service final notifications/);
   assert.match(owner, /`task_assign` sends the first assigned reference itself; do not send a duplicate/);
   assert.match(owner, /task_read\(view=list, owner=<your session ID>\)/);
   assert.match(owner, /view=overview/);
@@ -151,6 +153,58 @@ test('role prompts stay short while the Skills preserve delegation, communicatio
   assert.match(executor, /report `done` with a new outcome in the same request/);
   assert.match(executor, /not as a mandatory Owner acceptance gate/);
   assert.match(executor, /Do not send Owner questions, confirmations, progress, blockers or completion messages, directly or via subagents/);
+});
+
+test('explicit one-shot subscriptions preserve silent defaults, role boundaries and uncertain delivery guidance', () => {
+  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  assert.match(owner, /Owner may explicitly subscribe to specified Task states/);
+  assert.match(owner, /first real matching transition ends the subscription/);
+  assert.match(owner, /already matching at registration means failure, not an immediate notice/);
+  assert.match(owner, /read the latest Task and assess any follow-up/);
+  assert.match(owner, /card is not proof of complete delivery or an Executor definition-ACK instruction/);
+  assert.match(owner, /Do not automatically resubscribe, poll or hold this turn open waiting/);
+  const ownerPrompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
+  assert.match(ownerPrompt, /explicit one-shot status subscription permits a system notice to Task's Owner/);
+  assert.match(ownerPrompt, /Read the latest Task on receipt; do not automatically resubscribe/);
+  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  assert.match(executor, /Only the system sends that one-shot notice/);
+  assert.match(executor, /no subscription capability or permission to notify Owner/);
+  assert.match(executor, /not an instruction to execute or ACK a notification/);
+  const executorPrompt = prose(readFileSync(join(root, 'roles/task-executor.md'), 'utf8'));
+  assert.match(executorPrompt, /only a system notice, not Executor messages, subscription capability or a notification ACK/);
+  for (const role of ['owner', 'executor']) {
+    const reference = name => prose(readFileSync(join(root, skillDirectory(role), 'references', name), 'utf8'));
+    const writes = reference('task-writes-and-recovery.md');
+    for (const name of ['task_subscribe', 'task_unsubscribe', 'task_read(view=subscriptions)']) {
+      assert.ok(writes.includes(`\`${name}\``), `Missing subscription interface ${name}`);
+    }
+    assert.match(writes, /At most one subscription may be waiting per Task/);
+    assert.match(writes, /recipient is derived from Task's `owner`, not an arbitrary addressee or the reported actor/);
+    assert.match(writes, /no subscription capability to Executor/);
+    assert.match(writes, /Only a real transition.*first match, after which the subscription ends/);
+    assert.match(writes, /does not listen to activity, definition changes or native busy\/idle state/);
+    assert.match(writes, /already has a selected status at registration, registration fails/);
+    assert.match(writes, /no subscription is created and no notice sent/);
+    assert.match(writes, /does not keep the subscribing turn suspended; host enqueue queues it when busy without interrupting/);
+    assert.match(writes, /do not clear queues, interrupt work or request a notification ACK/);
+    assert.match(writes, /Queued or accepted does not mean read/);
+    assert.match(writes, /do not claim exactly-once delivery/);
+    assert.match(writes, /unknown send does not authorize a blind resend, replacement Task or another subscription/);
+    assert.match(writes, /neither restores default progress\/final notifications nor permits Executor-to-Owner messages/);
+    const reading = reference('reading-tasks.md');
+    assert.match(reading, /`subscriptions` with `task_id`/);
+    assert.match(reading, /do not poll while waiting/);
+    const links = reference('task-links.md');
+    assert.ok(links.includes('[Task status updated](task:<uuid>?event=status_changed)'));
+    assert.match(links, /System notice to Task's Owner after an explicit status subscription matches/);
+    assert.match(links, /not an Executor instruction or a request to ACK a notification/);
+    assert.match(links, /distinct from `updated`, which asks Executor to read and ACK the current definition/);
+    assert.match(links, /Only lowercase `assigned`, `updated` and `status_changed`/);
+    assert.match(links, /A link alone neither creates a subscription nor authorizes editing or scheduling/);
+  }
+  const handoff = prose(readFileSync(join(root, skillDirectory('owner'), 'references/important-updates.md'), 'utf8'));
+  assert.match(handoff, /`status_changed` subscription notice to Owner is separate/);
+  assert.match(handoff, /does not trigger this Executor-directed `updated` handoff or queue intervention/);
 });
 
 test('public Skill links resolve to active resources rather than obsolete handoff anchors', () => {

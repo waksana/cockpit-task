@@ -4,6 +4,15 @@
 
 讨论跟踪：[cockpit-task#1](https://github.com/waksana/cockpit-task/issues/1)
 
+**后续状态订阅决定（2026-09-21，覆盖下文无条件禁止系统状态通知的表述）：**
+Owner 可显式登记 Task 进入特定状态的一次性订阅。登记时已是目标状态则失败，
+说明当前状态，不创建订阅也不立即通知。首次匹配后系统给 Task Owner 发送
+`[Task status updated](task:<uuid>?event=status_changed)` 并结束订阅。
+这与发给 Executor 的要求更新 `event=updated` 分开，不要求 Owner ACK，
+不由 Executor 主动回报、不自动续订，也不引入轮询、任务依赖或自动监工。
+普通修订、活动报告及未订阅的状态变化仍然静默。以下 2026-09-20 的两种消息
+事件是此前范围，当前支持这第三种明确事件；实际契约见 [MCP](task-mcp-contract.md)。
+
 **后续决定（2026-09-20，覆盖下文旧队列方案）：** 重要更新的队列处理写入
 [Owner 随包参考](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)，
 不再推荐自动推进 MCP。Owner 先读取并保留 pending 内容，再按已保存 ID 清理，
