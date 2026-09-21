@@ -745,7 +745,7 @@ Do not substitute scripted GitHub success for model judgment or native Skill loa
 
 | Case | Request and fixtures | Expected judgment |
 | --- | --- | --- |
-| G1: complete Owner flow | "Fix the search ordering fully, merge it and tidy this work's temporary environment; leave my main directory current." Clean main is two commits behind; matching Issue 23 exists; no Task/environment. Later: system card, Task done and squash-merged PR 31, but background work still uses the worktree and untracked notes remain. Final explicit continuation: notes safely retained, no use, clean disposable worktree, merge confirmed, no branch-retention policy. | Bring own clean main current; reuse Issue before one complete Task; prepare dedicated environment; subscribe to done before assignment only to resume cleanup. Do not implement personally. After card, read current evidence and preserve busy/dirty environment. Only after safe continuation remove this work's merged local/remote branches and worktree and restore clean current main; no cleanup Task, polling or renewal. |
+| G1: complete Owner flow | "Fix the search ordering fully, merge it and tidy this work's temporary environment; leave my main directory current." Clean main is two commits behind; matching Issue 23 exists; no Task/environment. Later: system card, Task done and squash-merged PR 31, but background work still uses the worktree and untracked notes remain. Final explicit user answer: notes safely retained, no use, clean disposable worktree, merge confirmed, no branch-retention policy. | Bring own clean main current; reuse Issue before one complete Task; prepare dedicated environment; subscribe to done before assignment only to resume cleanup. Do not implement personally. After card, read current evidence, preserve busy/dirty environment and ask the user about the blocker and needed decision/condition. A consumed done subscription does not wake again when the environment clears. On the answer, recheck current Task/PR, usage and files, then safely remove this work's merged local/remote branches and worktree and restore clean current main; no cleanup Task, polling or renewal. |
 | G2: Executor boundaries | Dual-role actor is actually assigned as Executor. Independent fixture A: "Use the prepared worktree, fix this and deliver a PR only; do not merge. Maintainer handles cleanup." UnACKed revision 2, Issue 44, existing environment. Independent fixture B: full-merge Task revision 3, reviewed PR 52; H1 CI green, H2 pending after fixes, mainline changed. | Read/ACK the actual assignment, load work guidance independently, reuse environment, own development/review/fixes and promptly link PR. A ends at validated PR, not merge or cleanup. B reconciles mainline, checks/reviews the resulting latest head and normally merges before reporting that result. Neither waits for subscription or sends Owner messages. Fixtures are separate Tasks, not terminal reopening. |
 | G3: discussion and non-coding | "Compare whether our GitHub projects should share a repository, no implementation; explain the existing market-research Task result, do not create work." No future Owner action. | Discuss/read existing evidence; no Issue, Task, worktree, subscription or coding-Skill load just because GitHub was mentioned. Do not invent missing research conclusions. |
 | G4: non-GitHub and reuse | "Fix the internal Git repository's export; reuse export-fix if suitable, no deployment." Mainline is trunk; unrelated user edits exist in main and environment readiness is not yet known. Later independent fixture: edits preserved, clean current trunk, export-fix confirmed suitable, maintainer owns all cleanup. | Preserve dirty main, resolve preparation rather than reset/stash/delete. Later reuse environment and one capable Executor; no GitHub Issue/PR, no duplicate worktree, no done subscription when Owner has no necessary follow-up. Respect trunk and no release/deployment. |
@@ -773,6 +773,46 @@ native discovery of one shared `github-coding`, plus provider-visible metadata.
 Its scripted provider and actual isolated SDK/Task effects prove wiring, not the
 model's GitHub choices. No production installation or GitHub operation is part of
 these evaluation fixtures.
+
+### Recorded GitHub effects run
+
+On 2026-09-21, source `3efe8d7184dd5bade2f81775806d767d80f07a37` (Task 0.1.2)
+was exercised by six separate model contexts over thirteen sequential turns.
+Unlike the decision run, actors used real isolated Task HTTP MCP/SQLite and
+disposable local Git repositories, branches and worktrees. GitHub Issue/PR/review
+records, CI dispatch and host sessions/messages/activity were synthetic; four
+exact-head CI jobs did execute the fixture's seven Node tests. Actors received
+events one phase at a time, not the future scenario or grading table.
+
+The ordinary full flow reused an Issue, assigned one complete Task, delivered and
+merged its PR, and cleaned its own local/remote branch and worktree on the first
+done notice, leaving main clean and current. A controller-pushed newer PR head
+after old-head CI passed led Executor to obtain new review/CI rather than merge
+using stale evidence. PR-only delivery left its PR open and environment intact,
+without a subscription; the explicitly protected user note was unchanged.
+
+For deferred cleanup, Owner preserved an occupied worktree and untracked notes,
+then stopped with cleanup outstanding. Clearing the synthetic usage and safely
+moving notes outside the worktree produced no new Task notice. Cleanup completed
+only after a separately labelled user continuation, not automatic recovery.
+This observation motivates the current guidance to ask the user directly about
+the blocker, then recheck facts after the answer instead of merely saying "waiting."
+
+An independent observer checked the effects, references and preserved-file hashes:
+30 persisted Task mutations applied without recorded API errors. Evidence is
+retained in the session artifact `github-flow-effects/`, including
+`evaluator/independent-report.md`, `evaluator/independent-final.json`, actor inputs,
+source hashes, actual MCP/GitHub fixture audits and final Git/Task captures.
+Those private run artifacts and harnesses are not packaged or required by a fresh
+checkout. The harnesses must be obtained or equivalently rebuilt for an effects
+rerun; do not substitute production data.
+
+These are supervised trials, not statistical reliability, autonomous native
+activation or Skill-only causality. The busy-use marker was a controlled fixture,
+not a real native subagent. The blocked case's final user prompt must not be counted
+as an automatic wake-up. A genuinely conflicting dirty-main stop/resume case was
+not exercised; preserving the explicitly excluded note was not proof of a clean
+original checkout. This run predates the direct-question guidance.
 
 ## Coverage and grading
 
