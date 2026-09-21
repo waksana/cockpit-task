@@ -97,6 +97,14 @@ merged and the worktree is no longer used by Executor, subagents or other work.
 Neither Task done nor an idle label alone establishes that. If use is uncertain,
 preserve the environment and explain the remaining cleanup instead of deleting it.
 
+If cleanup is blocked, ask the user directly in this session about the specific
+blocker and the decision or condition needed to continue, using `ask_user` when
+available. Ask one focused question at a time. Do not merely say you are waiting or imply you will wake automatically:
+the consumed done subscription does not notify again when the environment clears.
+On the user's answer or explicit continuation, reread Task/PR and recheck workspace
+use and files before resuming cleanup; an answer alone does not prove it is safe.
+Do not create another Task, resubscribe to done or start polling.
+
 Inspect for uncommitted, untracked, ignored or otherwise needed artifacts and
 unmerged work. Preserve anything that must survive; do not force removal to obtain
 a clean result. Verify merge against the PR and target branch, including squash or
