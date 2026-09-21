@@ -58,6 +58,8 @@ any new report. Do not re-submit the activity or simply re-label the old result.
 `definition_check` describes the response checkpoint, independently of the original
 effects, and is refreshed even on replay. A newer revision in that check does not
 undo an already-saved report. An unavailable check is not evidence of alignment.
+An ACK reminder describes the assigned Executor's responsibility, not an instruction
+for Owner or another reader to ACK on their behalf.
 
 ## Creating and assigning
 
@@ -76,6 +78,10 @@ Creation or dispatch can partially apply. Read the operation receipt using its
 `request_id` before deciding what remains to do. Preserve a confirmed created
 session even when readiness failed. A timeout or error is not proof that no
 session was created or no message was sent.
+For capability/availability rejections, inspect `operation.details.reasons` and
+`availability_reasons`. They describe the recorded `observed_at` checkpoint, not
+current live state; receipt reads do not refresh it. Missing diagnostics do not
+justify guessing a busy reason, repairing capability or retrying automatically.
 
 Only an unused, finalized receipt proving `assignment=applied` and `message=not_sent`
 allows explicit dispatch recovery with `resume_request_id`, the same Task and
@@ -86,6 +92,17 @@ Do not create a second Executor or resend to manufacture a successful receipt.
 An accepted message is not an ACK or evidence of actual work.
 
 ## One-shot status subscriptions
+
+Default to no subscription. Owner registers only when a future state enables a
+concrete, necessary Owner follow-up, not simply to track progress or know completion.
+For example, evidence may be needed for an Owner decision or another authorized
+independent Task; a standalone delivery with no Owner action needs no wait.
+Owner judges this need without asking the user to name or approve the subscription.
+Do not invent follow-up work, split an outcome or add an approval gate to justify it.
+Choose the fewest target states that enable the needed action. If that action is
+no longer needed, withdraw the still-waiting subscription instead of retaining a
+completion reminder. Executor's authorized work never waits for Owner to subscribe
+or read a notice.
 
 Owner can explicitly register with `task_subscribe`, withdraw with `task_unsubscribe`,
 and inspect records with `task_read(view=subscriptions)`. Use current tool schemas
@@ -107,8 +124,9 @@ The system sends a separate `status_changed` card to the Owner as a new prompt.
 It does not keep the subscribing turn suspended; host enqueue queues it when busy
 without interrupting. This is not the `updated` handoff to Executor: do not clear
 queues, interrupt work or request a notification ACK for a status subscription.
-Read the current Task on receipt and decide whether any follow-up is needed;
-do not automatically resubscribe or turn this into ongoing monitoring.
+Read the current Task on receipt and reassess the planned follow-up; act only if
+it is still needed and authorized; do not automatically resubscribe or turn this
+into ongoing monitoring.
 
 For a triggering `task_report` or `task_cancel`, distinguish saved Task effects
 from notification delivery. The original `result`, including `subscription_ids`,

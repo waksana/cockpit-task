@@ -158,27 +158,100 @@ test('on-demand capability checks remain separate from native idle evidence and 
   const f = fixture();
   try {
     const adapter = createHostAdapter(f.host);
-    assert.deepEqual(await adapter.inspect('executor'), {
-      ready: true, idle: true, details: { reasons: [], loaded: true, status: 'idle' },
+    const initial = await adapter.inspect('executor');
+    assert.equal(initial.ready, true);
+    assert.equal(initial.idle, true);
+    assert.ok(Number.isFinite(Date.parse(initial.details.observed_at)));
+    assert.deepEqual(initial.details, {
+      reasons: [], loaded: true, status: 'idle', availability_reasons: [], observed_at: initial.details.observed_at,
     });
-    for (const patch of [
-      { nativeProcessing: true }, { nativeProcessing: undefined }, { queue: undefined },
-      { queue: [{ id: 'waiting' }] }, { activeOperations: 1 }, { activeOperations: undefined },
-      { activeSubagents: 1 }, { ask: { requestId: 'question' } }, { closing: true },
+    for (const [patch, reason] of [
+      [{ status: 'running' }, 'session_not_idle'],
+      [{ nativeProcessing: true }, 'native_processing'],
+      [{ nativeProcessing: undefined }, 'native_processing_unconfirmed'],
+      [{ queue: undefined }, 'queue_unconfirmed'],
+      [{ queue: [{ id: 'waiting', text: 'private pending message' }] }, 'queued_messages'],
+      [{ activeOperations: 1 }, 'active_operations'],
+      [{ activeOperations: undefined }, 'active_operations_unconfirmed'],
+      [{ activeSubagents: 1 }, 'active_subagents'],
+      [{ activeMcpOperations: 1 }, 'active_mcp_operations'],
+      [{ ask: { requestId: 'question', question: 'private user question' } }, 'pending_user_question'],
+      [{ planRequest: { requestId: 'plan', text: 'private plan' } }, 'pending_plan'],
+      [{ elicitation: { requestId: 'elicitation', message: 'private elicitation' } }, 'pending_elicitation'],
+      [{ loading: true }, 'loading'],
+      [{ closing: true }, 'closing'],
+      [{ cancelling: true }, 'cancelling'],
     ]) {
       const original = f.meta;
       f.meta = { ...original, ...patch };
       const inspected = await adapter.inspect('executor');
       assert.equal(inspected.ready, true);
       assert.equal(inspected.idle, false);
+      assert.deepEqual(inspected.details.availability_reasons, [reason]);
+      assert.doesNotMatch(JSON.stringify(inspected.details), /private|requestId/);
       f.meta = original;
     }
     f.capability = { sessionId: 'executor', loaded: true, ready: false, roles: [], reasons: ['Missing role Skill'] };
     const unavailable = await adapter.inspect('executor');
     assert.equal(unavailable.ready, false);
     assert.equal(unavailable.idle, true);
+    assert.deepEqual(unavailable.details.reasons, ['Missing role Skill']);
+    assert.deepEqual(unavailable.details.availability_reasons, []);
+    f.meta = { ...f.meta, loaded: false, status: 'unloaded' };
+    const unloaded = await adapter.inspect('executor');
+    assert.equal(unloaded.ready, false);
+    assert.equal(unloaded.idle, false);
+    assert.deepEqual(unloaded.details.availability_reasons, ['session_not_loaded', 'session_not_idle']);
+    f.meta = null;
+    const missing = await adapter.inspect('executor');
+    assert.equal(missing.ready, false);
+    assert.equal(missing.idle, false);
+    assert.deepEqual(missing.details.availability_reasons, ['session_not_found']);
     assert.ok(f.calls.every(call => ['session/get', 'roles/readiness'].includes(call.name)));
   } finally { f.close(); }
+});
+
+test('HTTP dispatch failures retain bounded native reasons before and after binding across restart', async () => {
+  for (const afterBinding of [false, true]) {
+    const f = fixture();
+    try {
+      const created = await f.write('task_create', { owner: 'owner', title: 'Dispatch evidence', description: 'Complete this Task' });
+      const task = (await f.read(created.body.result.task_id)).body.result;
+      const idle = f.meta;
+      const call = f.host.call;
+      let inspections = 0;
+      f.host.call = async (name, body) => {
+        if (name === 'session/get' && ++inspections === (afterBinding ? 2 : 1)) {
+          f.meta = {
+            ...idle, queue: [{ id: 'pending', text: 'private queued content' }],
+            ask: { requestId: 'ask', question: 'private question content' },
+          };
+        }
+        return call(name, body);
+      };
+      const input = {
+        request_id: 'busy-dispatch', task_id: task.id, executor: 'executor',
+        revision: task.revision, write_context: task.write_context,
+      };
+      const failed = await f.write('task_assign', input);
+      assert.equal(failed.body.error.code, 'EXECUTOR_NOT_READY');
+      assert.equal(failed.body.result.operation.assignment, afterBinding ? 'applied' : 'not_applied');
+      assert.equal(failed.body.result.operation.message, 'not_sent');
+      assert.deepEqual(failed.body.result.operation.details.availability_reasons, ['queued_messages', 'pending_user_question']);
+      assert.doesNotMatch(JSON.stringify(failed.body), /private|requestId/);
+      assert.equal((await f.read(task.id)).body.result.executor, afterBinding ? 'executor' : null);
+      assert.equal(f.calls.filter(entry => entry.name === 'prompt').length, 0);
+      f.meta = idle;
+      f.restart();
+      const count = f.calls.length;
+      const replay = await f.write('task_assign', input);
+      assert.deepEqual(replay.body.result, failed.body.result);
+      const receipt = await f.write('task_read', { view: 'operation', request_id: input.request_id });
+      assert.deepEqual(receipt.body.result.result, failed.body.result);
+      assert.equal(f.calls.length, count, 'Historical reads/replays do not inspect or resend');
+      assert.deepEqual(f.errors, []);
+    } finally { f.close(); }
+  }
 });
 
 test('native observations do not collect capabilities and explicit checks do not reuse old readiness', async () => {

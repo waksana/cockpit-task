@@ -118,6 +118,8 @@ UI 可以不提供 actor，不伪造 human session ID；定向读取仍检查该
 视图只决定返回内容，不限制读取权限。Owner 并非不能读定义，Executor 也并非不能读历史，只是不默认塞入。活动、修订、成果分别分页，操作结果只返回指定操作，不查询聊天或冒充 native 动态。读取不 ACK。
 
 `definition_check` 仍适用于 Executor 的每次调用，只附必要版本提醒，不借提醒返回整份 Task。写入响应也只返回明确效果、相关版本/状态及新 write_context，不因一次 ACK 或报告而重新附上完整 description 和历史。读取缺失或不可访问的记录明确报错。
+其中 ACK 提醒描述的是指定 Executor 尚未确认当前要求，不指示 Owner 或其他读取者代为 ACK；
+一般的修订冲突要求读取当前定义，不把修订要求与 Executor 的确认责任混为一谈。
 
 ### task_create
 
@@ -185,6 +187,30 @@ Task 类型或状态，也不是命令或调度机制。工具的能力检查、
 
 已受理消息不等于已读、已 ACK 或已开始执行。上述 unknown 不是安全重发的依据；不能自动撤销归属后另派，以掩盖可能已经启动的工作。
 
+当能力或可接单检查拒绝目标时，`result.operation.details` 保留该次检查的诊断，
+绑定前拒绝和绑定后 `partially_applied` 均适用：
+
+```text
+reasons                宿主公开 roles/readiness 返回的能力缺失原因
+loaded, status         当次公开 session/get 返回的加载状态和原生状态
+availability_reasons   从同一次原生观察生成的固定原因码，不附队列/问题正文
+observed_at            该次观察完成的 ISO 时间；回执重放不刷新它
+```
+
+| availability_reasons | 含义 |
+| --- | --- |
+| `session_not_found`, `session_not_loaded`, `session_not_idle` | 会话不存在、未加载或原生状态不是 idle；具体状态见 status |
+| `native_processing`, `active_operations` | 主轮次或宿主操作仍在进行 |
+| `queued_messages` | 存在待处理消息，只报告存在性，不保存消息内容 |
+| `loading`, `closing`, `cancelling` | 会话处于加载、关闭或取消过程 |
+| `pending_user_question`, `pending_plan`, `pending_elicitation` | 存在待用户处理的决定，不附问题、计划或 elicitation 内容 |
+| `active_subagents`, `active_mcp_operations` | 存在活动的后台 subagent 或 MCP 操作 |
+| `native_processing_unconfirmed`, `active_operations_unconfirmed`, `queue_unconfirmed` | 无法确认原有空闲前提，不把缺失信息当空闲 |
+
+这些诊断只解释当次失败，不是实时状态或持续监控；读取 operation 不调用宿主刷新它们。
+能力原因与可接单原因分开，前者不通过角色标签猜测，后者不改变既有空闲判断或发送规则。
+若宿主调用失败、没有有效观察，仍返回明确错误，不伪造诊断。成功指派不附加这些失败诊断。
+
 若检查后的竞态使宿主返回 queued，保留真实排队事实并明确报错，不映射为派单成功或“未发送”，也不盲目重发。这是非原子检查/发送的异常结果，不是首次派单主动选择的排队策略。
 
 恢复使用新的 request_id、最新 write_context/revision、相同 Task/executor，并以 `resume_request_id` 指向原指派回执。原回执必须已 final、assignment=applied、message=not_sent 且未被其他恢复消费；仅接受同一固定 Executor。unknown/queued/accepted 或 pending 都不能授权重发。恢复不撤销归属、不替换 Executor，不恢复 done/cancelled。
@@ -248,6 +274,10 @@ activity 只能引用当前执行归属下本人已经 ACK 过的版本；本人
 只取消未结束任务；已 cancelled 返回 unchanged，done 不能通过 cancel 重写已完成事实。取消后恢复未获当前范围授权。
 
 ### task_subscribe
+
+可选能力，默认不调用。Owner 仅在未来状态会使自己需要采取具体、必要的后续行动时
+自行登记，不为追踪进度或确认完成而注册。选择最少必要目标；后续行动不再需要时，
+取消仍在等待的订阅。不新增必要性字段或服务端规则，Executor 执行不依赖是否订阅。
 
 完整输入：`actor_session_id, request_id, task_id, write_context, statuses`。
 `statuses` 是 1–6 个互不重复的 Task 状态：`todo`、`in_progress`、`blocked`、
@@ -343,7 +373,7 @@ Owner:
   或 Owner 明确选择已有 session                   → 不隐式新建
   task_read(view=overview, task_id)               → 状态与归属概览、write_context
   task_assign(task_id, executor, ...)             → 确保能力、关联、一次发送 assigned 引用
-  task_subscribe(task_id, statuses=[done], ...)   → 可选：登记一次性的未来状态通知
+  task_subscribe(task_id, statuses=[done], ...)   → 仅当 done 后有必要的 Owner 行动时登记；否则省略
 
 Executor:
   task_read(view=execution, task_id)              → 完整 description v1 与当前工作资料

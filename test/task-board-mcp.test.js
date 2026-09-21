@@ -92,7 +92,7 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     assert.match(descriptions.task_assign, /send one assigned reference/);
     assert.match(descriptions.task_assign, /without installing capability or proactively interrupting/);
     assert.match(descriptions.task_assign, /not atomic.*queued or unconfirmed/);
-    assert.match(descriptions.task_assign, /per-step results; never blindly resend/);
+    assert.match(descriptions.task_assign, /per-step results and failure-time availability_reasons; never blindly resend/);
     assert.doesNotMatch(descriptions.task_assign, /Does not interrupt or queue instructions/);
     assert.match(descriptions.task_edit, /actual description change.*unfinished Task/);
     assert.match(descriptions.task_edit, /unchanged text and metadata-only edits do not/);
@@ -101,7 +101,10 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     assert.match(descriptions.task_report, /Stale activity may save while stale status\/outcome are rejected/);
     assert.match(descriptions.task_subscribe, /Rejects an already-matching status/);
     assert.match(descriptions.task_subscribe, /derived from the Task, not the actor/);
+    assert.match(descriptions.task_subscribe, /Optional: default to no subscription/);
+    assert.match(descriptions.task_subscribe, /only when a target state enables necessary Owner follow-up, not progress tracking/);
     assert.match(descriptions.task_unsubscribe, /Cannot recall a consumed notification/);
+    assert.match(descriptions.task_unsubscribe, /planned Owner follow-up is no longer needed/);
   } finally { await f.close(); }
 });
 

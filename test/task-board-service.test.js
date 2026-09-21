@@ -42,6 +42,8 @@ test('Task service integrates assignment, ACK, revision reminders and partial re
     });
     assert.equal(assigned.error, null);
     assert.equal(assigned.result.operation.message, 'accepted');
+    assert.match(assigned.definition_check.tasks[0].message, /Awaiting the assigned Executor's acknowledgement/);
+    assert.doesNotMatch(assigned.definition_check.tasks[0].message, /read it and acknowledge it/);
     assert.equal(f.sent.length, 1);
     const bound = f.store.task(task.id);
     const ack = await f.write('task_ack', { task_id: task.id, revision: 1, write_context: bound.write_context }, 'executor');
@@ -56,7 +58,9 @@ test('Task service integrates assignment, ACK, revision reminders and partial re
     };
     const partial = await f.service.execute('task_report', report);
     assert.equal(partial.error.code, 'DESCRIPTION_UPDATED');
+    assert.match(partial.error.message, /acknowledgement belongs to the assigned Executor/);
     assert.equal(partial.definition_check.tasks[0].needs_ack, true);
+    assert.match(partial.definition_check.tasks[0].message, /changed; awaiting the assigned Executor's acknowledgement/);
     assert.equal(f.store.task(task.id).status, 'in_progress');
     const updated = f.store.task(task.id);
     await f.write('task_ack', { task_id: task.id, revision: 2, write_context: updated.write_context }, 'executor');
@@ -67,6 +71,40 @@ test('Task service integrates assignment, ACK, revision reminders and partial re
     assert.equal(f.sent.length, 1);
     assert.deepEqual(f.reports, []);
   } finally { f.close(); }
+});
+
+test('failed dispatch observations survive restart and replay without becoming live status', async () => {
+  const details = {
+    reasons: [], loaded: true, status: 'idle', availability_reasons: ['queued_messages', 'pending_plan'],
+    observed_at: '2026-09-21T00:00:00.000Z',
+  };
+  const f = fixture({ inspect: async () => ({ ready: true, idle: false, details }) });
+  let replacement;
+  try {
+    const task = await f.create();
+    const request = {
+      request_id: 'busy-receipt', actor_session_id: 'owner', task_id: task.id,
+      revision: 1, executor: 'executor', write_context: task.write_context,
+    };
+    const first = await f.service.execute('task_assign', request);
+    assert.equal(first.error.code, 'EXECUTOR_NOT_READY');
+    assert.deepEqual(first.result.operation.details, details);
+    assert.equal(first.result.operation.assignment, 'not_applied');
+    assert.equal(first.result.operation.message, 'not_sent');
+    assert.equal(f.store.task(task.id).executor, null);
+    f.service.close();
+    replacement = new TaskService(new TaskStore(f.directory), {
+      inspect: () => assert.fail('Receipt replay must not inspect current availability'),
+      send: () => assert.fail('Receipt replay must not send'),
+    });
+    const replay = await replacement.execute('task_assign', request);
+    assert.deepEqual(replay.result, first.result);
+    const read = await replacement.execute('task_read', {
+      view: 'operation', request_id: request.request_id, actor_session_id: 'owner',
+    });
+    assert.deepEqual(read.result.result.operation.details, details);
+    assert.equal(f.sent.length, 0);
+  } finally { replacement?.close(); f.close(); }
 });
 
 test('unknown dispatch stays unknown across service restart and cannot be resent', async () => {

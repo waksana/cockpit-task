@@ -66,6 +66,8 @@ when the work requires it, not as a mandatory Owner acceptance gate.
 Communicate with the user here, not with Owner. Do not send Owner questions,
 confirmations, progress, blockers or completion messages, directly or via subagents.
 Reports/ordinary edits are silent without an explicit Owner status subscription.
+Do not wait for Owner to subscribe or read a notice before continuing authorized
+work or delivering it.
 Only the system sends that one-shot notice to Task's Owner; this gives Executor
 no subscription capability or permission to notify Owner. A `status_changed` card
 is not an instruction to execute or ACK a notification; `updated` remains the

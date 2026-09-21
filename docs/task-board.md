@@ -120,6 +120,11 @@ from the module, not a snapshot in chat. Details and history are loaded on deman
 Initial dispatch checks capability and idle/empty state without proactively
 interrupting. Those checks and the enqueue send are not atomic: a race may return
 queued or unconfirmed. Inspect each recorded step; do not blindly resend.
+Capability/availability rejections preserve failure-time `operation.details` before
+or after binding: capability reasons, native loaded/status, fixed
+`availability_reasons` and `observed_at`. These distinguish pending messages,
+decisions and active work without retaining their contents. Receipt reads/replays
+do not refresh this historical observation or turn it into live monitoring.
 
 Use `[Task](task:<uuid>)` for an ordinary reference. Task IDs passed to tools are
 just the UUID, not the full URI or its query. Only lowercase `assigned`,
@@ -169,6 +174,16 @@ Task cancellation does not cancel native work, and editing a terminal definition
 does not reopen execution.
 
 ### One-shot status subscriptions
+
+Default to no subscription. Owner should register only when a future state enables
+a concrete, necessary Owner action, such as deciding from the result or arranging
+another authorized independent Task, not simply tracking progress or completion.
+Owner judges the need without requiring the user to request the subscription.
+Do not invent follow-up work, split a complete outcome or add an approval gate to
+justify a wait. Choose the fewest useful targets and cancel a still-waiting
+subscription when that follow-up is no longer needed. Executor execution/delivery
+does not depend on Owner subscribing or reading a notice. This is collaboration
+guidance, not a new required field or server-side rule engine.
 
 Owner can use `task_subscribe` to explicitly await entry into one or more chosen
 Task statuses. This does not keep a model turn or tool call waiting. Registration

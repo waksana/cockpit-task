@@ -68,8 +68,9 @@ export async function assignExecutor({ input, inspect, bind, recheck, send, save
     request_id: input.request_id, task_id: input.task_id, status: 'running', executor: input.executor,
     capability: 'unchecked', assignment: 'not_applied', message: 'not_sent',
   };
-  const finish = (status, error = null) => {
+  const finish = (status, error = null, details) => {
     operation.status = status;
+    if (details !== undefined) operation.details = details;
     const outcome = { result: { operation: { ...operation } }, error };
     save(outcome);
     return outcome;
@@ -88,11 +89,10 @@ export async function assignExecutor({ input, inspect, bind, recheck, send, save
   }
   operation.capability = current.ready ? 'ready' : 'unavailable';
   if (!current.ready) {
-    operation.details = current.details;
-    return finish('rejected', fault('CAPABILITY_UNAVAILABLE', 'Selected session lacks ready Executor capability'));
+    return finish('rejected', fault('CAPABILITY_UNAVAILABLE', 'Selected session lacks ready Executor capability'), current.details);
   }
   if (!current.idle) {
-    return finish('rejected', fault('EXECUTOR_NOT_READY', 'Selected Executor is not idle and available; nothing sent'));
+    return finish('rejected', fault('EXECUTOR_NOT_READY', 'Selected Executor is not idle and available; nothing sent'), current.details);
   }
   const beforeBind = stopped();
   if (beforeBind) return beforeBind;
@@ -115,7 +115,7 @@ export async function assignExecutor({ input, inspect, bind, recheck, send, save
     return finish('partially_applied', fault(
       current.ready ? 'EXECUTOR_NOT_READY' : 'CAPABILITY_UNAVAILABLE',
       'Assignment was saved, but the target cannot receive a dispatch; nothing sent',
-    ));
+    ), current.details);
   }
   const beforeSend = stopped();
   if (beforeSend) return beforeSend;

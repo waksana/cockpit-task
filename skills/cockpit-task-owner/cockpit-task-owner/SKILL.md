@@ -70,13 +70,23 @@ For the exceptional handoff, read [important updates](references/important-updat
 before handling pending messages or interrupting; preserve context rather than
 starting a monitoring or conversation loop.
 
-Owner may explicitly subscribe to specified Task states for a one-shot system
-notice to that Task's Owner. The first real matching transition ends the subscription;
-already matching at registration means failure, not an immediate notice.
+Default to no subscription. Before registering, identify the concrete, necessary
+Owner action that a future Task state enables, such as making a decision from the
+result or arranging another authorized independent Task. Merely knowing progress
+or confirming completion is not a reason to subscribe. Judge the need yourself;
+the user need not explicitly request a subscription. Do not invent follow-up work,
+split a complete outcome or add an approval gate to justify a wait.
+
+Owner may explicitly subscribe to specified Task states only for that necessary
+follow-up. Choose the fewest target states that enable it; withdraw a still-waiting
+subscription if the follow-up is no longer needed. The first real matching transition
+ends the subscription; already matching at registration means failure, not an
+immediate notice.
 On `[Task status updated](task:<uuid>?event=status_changed)`, read the latest Task
-and assess any follow-up; the card is not proof of complete delivery or an Executor
-definition-ACK instruction. Do not automatically resubscribe, poll or hold this
-turn open waiting. See [subscription handling](references/task-writes-and-recovery.md#one-shot-status-subscriptions)
+and reassess the planned follow-up; act only if it is still needed and authorized.
+The card is not proof of complete delivery or an Executor definition-ACK instruction.
+Do not automatically resubscribe, poll or hold this turn open waiting.
+See [subscription handling](references/task-writes-and-recovery.md#one-shot-status-subscriptions)
 for registration, withdrawal and uncertain delivery.
 
 ## Follow bounded evidence

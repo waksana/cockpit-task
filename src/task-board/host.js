@@ -2,6 +2,26 @@ import { TaskError } from './contracts.js';
 
 const executorRoles = [{ moduleId: 'cockpit-task', roleId: 'executor' }];
 
+function availabilityReasons(meta) {
+  if (meta === null) return ['session_not_found'];
+  return [
+    [!meta.loaded, 'session_not_loaded'],
+    [meta.status !== 'idle', 'session_not_idle'],
+    [meta.nativeProcessing !== false, meta.nativeProcessing === true ? 'native_processing' : 'native_processing_unconfirmed'],
+    [meta.activeOperations !== 0, meta.activeOperations > 0 ? 'active_operations' : 'active_operations_unconfirmed'],
+    [!Array.isArray(meta.queue), 'queue_unconfirmed'],
+    [Array.isArray(meta.queue) && meta.queue.length > 0, 'queued_messages'],
+    [meta.loading, 'loading'],
+    [meta.closing, 'closing'],
+    [meta.cancelling, 'cancelling'],
+    [meta.ask, 'pending_user_question'],
+    [meta.planRequest, 'pending_plan'],
+    [meta.elicitation, 'pending_elicitation'],
+    [meta.activeSubagents > 0, 'active_subagents'],
+    [meta.activeMcpOperations > 0, 'active_mcp_operations'],
+  ].filter(([blocked]) => blocked).map(([, reason]) => reason);
+}
+
 export function createHostAdapter(host) {
   if (typeof host?.call !== 'function') {
     throw new Error('Task requires the Cockpit module host intents and session roles contract');
@@ -26,15 +46,14 @@ export function createHostAdapter(host) {
         throw new TaskError('CAPABILITY_UNAVAILABLE', 'Host returned no confirmed Executor readiness');
       }
       const meta = await get(sessionId);
+      const availability_reasons = availabilityReasons(meta);
       return {
         ready: capability.ready && capability.loaded && meta?.loaded === true,
-        idle: meta?.loaded === true && meta.status === 'idle'
-          && meta.nativeProcessing === false && meta.activeOperations === 0
-          && Array.isArray(meta.queue) && meta.queue.length === 0
-          && !meta.loading && !meta.closing && !meta.cancelling
-          && !meta.ask && !meta.planRequest && !meta.elicitation
-          && !(meta.activeSubagents > 0) && !(meta.activeMcpOperations > 0),
-        details: { reasons: capability.reasons, loaded: meta?.loaded ?? null, status: meta?.status ?? null },
+        idle: availability_reasons.length === 0,
+        details: {
+          reasons: capability.reasons, loaded: meta?.loaded ?? null, status: meta?.status ?? null,
+          availability_reasons, observed_at: new Date().toISOString(),
+        },
       };
     },
     send: (sessionId, text) => host.call('prompt', { sessionId, text, mode: 'enqueue' }),
