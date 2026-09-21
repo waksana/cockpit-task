@@ -8,8 +8,9 @@ a checklist every Task must follow.
 The baseline used Task source
 `da55eb4bf034b2940f90eac6d2cbff51dde95cd4`, four model actors and five Tasks.
 All 40 assertions in cases S1-S6 were evidenced by an independent observer.
-The subscription-necessity cases N1-N3 below were added after that exercise:
-**they have not been run and are not included in the 40/40 result.**
+The subscription-necessity cases N1-N3 were subsequently run separately:
+**18/18 scoped assertions passed in one supervised trial per case.** They are not
+included in the 40/40 result and use the narrower setup documented below.
 
 ## Contents
 
@@ -629,9 +630,9 @@ No real attachments or concurrent-arrival races were exercised in the baseline.
 
 ## Subscription-necessity cases N1-N3
 
-**New, not yet executed.** These test the user's clarified policy, not the number
-of subscription tools invoked. The subscription guidance has since been revised
-to express this policy; these behavioral cases still require a new model run.
+These test the user's clarified policy, not the number of subscription tools
+invoked. The revised guidance was exercised in a separate follow-up; preserve
+the following natural requests and record the actual model choices on each rerun.
 
 Use fresh Owner contexts so explicit subscription instructions from S1-S6 do not
 prime the answer. Give only the natural requests below, not the assertions or
@@ -669,6 +670,42 @@ Record the Owner's stated follow-up, selected states, subscription effects, actu
 post-card action and any unjustified additional waits. Count unnecessary
 subscriptions as a judgment failure even if every MCP call technically succeeds.
 Repeat with fresh contexts if evaluating reliability; one success is not a rate.
+
+### Recorded N1-N3 follow-up
+
+Run `necessity-20260921-1250` exercised real isolated Task service/SQLite/MCP with
+independent initial Owner model contexts, scripted Executor MCP calls and a
+synthetic host. Controller-authored evidence grading recorded 18/18 scoped
+assertions, separate from the independently observed S1-S6 baseline.
+
+| Case | Observed behavior |
+| --- | --- |
+| N1 | One complete report Task; no subscription, invented review gate, extra Task or Owner completion card. Scripted Executor finished normally. |
+| N2 | Owner registered one `done` wait before completion. The Task transition produced one system card accepted by the synthetic host. A continuation model read the card, current overview and complete outcome, then recommended Option B using the missing provenance/collection evidence. |
+| N3 | A separate fresh setup registered its own `done` wait. On withdrawal, a continuation model read and cancelled that wait without cancelling the Task. Scripted Executor finished with no Owner card. |
+
+The session archive `subscription-necessity-evaluation/` retains exact prompts,
+guidance bodies and hashes, source snapshot, audit, model outputs, subscription
+effects, grading and shutdown evidence. It is not included in a repository clone.
+Source file hashes in `environment.json`, rather than its base-commit label,
+identify the exercised working-tree snapshot. The Owner role, Skill and recovery
+reference fingerprints match the guidance delivered with this change.
+
+Important limits for interpreting or repeating this result:
+
+- Owner choices were model-driven; Executor execution and user-facing report
+  delivery were explicitly scripted. Host acceptance is not native SDK delivery.
+- N2 completion and N3 withdrawal used fresh contexts rehydrated from their own
+  original requests and actor-authored notes after an unsupported child-resume
+  attempt. Initial Skill-body reads are evidenced; the continuations did not
+  reread the body, so continuous Skill context is not established.
+- The artifact directory name exposed the evaluation topic. Natural request
+  prose did not name subscription tools or expected choices. An initial grader
+  misclassified the pathname as an explicit instruction; the original grades
+  and correction are retained without editing actor decisions or effects.
+- This was controller grading, not a new independent observer or a Skill-only
+  causal comparison. It establishes neither statistical reliability nor native
+  delivery, and did not exercise already-done or missing-wait/N3-blocked branches.
 
 ## Coverage and grading
 
