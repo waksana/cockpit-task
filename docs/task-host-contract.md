@@ -1,5 +1,13 @@
 # Task 宿主接入契约
 
+当前源码的精确宿主支持基线为
+`9fd5204bda99a8bd65b2c5ef152cc47ce87837d5`（Cockpit 源码，未宣称已发行）。
+卡片复用 `ck-button`，详情使用 `ck-surface`、`ck-modal`、`ck-heading`、
+`ck-actions` 与公共字体 tokens。激活在注册贡献前检查
+`context.uiVersion === 1` 与独立的 `context.uiSurfaceVersion === 1`，
+缺少或不支持时明确拒绝；历史 UI v1 主机不会自动获得新增样式。
+原生 dialog 的 portal、打开、关闭、焦点和业务几何不变；不引入 React SDK 或私有宿主依赖。
+
 Task 是运行于 Cockpit 的模块，不启动独立 daemon 或监听端口。
 宿主提供通用模块、角色和原生 session 能力；Task 维护自己的记录、工具和卡片。
 两者通过公开契约连接，不访问 Engine、SDK handle、私有 store、凭据或聊天。
@@ -17,7 +25,7 @@ Task 是运行于 Cockpit 的模块，不启动独立 daemon 或监听端口。
 | HTTP | 命名空间 routes，保留 headers、JSON body、取消 signal、响应状态与流 |
 | 角色 | 模块角色声明、所选角色资源装配、持久记录、冷恢复及按需 readiness |
 | MCP | 模块 HTTP 配置、准确的声明 key `cockpit-task`、角色工具子集与版本绑定 |
-| 前端 | Web API v2、UI v1、Markdown link renderer、模块 request、事件和 portal |
+| 前端 | Web API v2、UI v1、shared-surfaces v1 (`uiSurfaceVersion: 1`)、Markdown link renderer、模块 request、事件和 portal |
 | 运行时 | Node.js 24 或以上 |
 
 API-v1 或某个宿主发行版本标签本身不证明上述能力齐备。Task 在打开或迁移

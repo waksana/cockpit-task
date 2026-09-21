@@ -129,9 +129,12 @@ test('status, revision and time helpers keep unknown and stale state explicit', 
 test('activation requires public compatibility and preserves native fallback on nonmatch', () => {
   assert.throws(() => activate({ apiVersion: 1, uiVersion: 1 }), /Web API v2/);
   assert.throws(() => activate({ apiVersion: 2, uiVersion: 0 }), /Module UI v1/);
-  assert.throws(() => activate({ apiVersion: 2, uiVersion: 1 }), /createPortal/);
+  for (const uiSurfaceVersion of [undefined, 0, 2]) {
+    assert.throws(() => activate({ apiVersion: 2, uiVersion: 1, uiSurfaceVersion }), /uiSurfaceVersion v1/);
+  }
+  assert.throws(() => activate({ apiVersion: 2, uiVersion: 1, uiSurfaceVersion: 1 }), /createPortal/);
   const module = activate({
-    apiVersion: 2, uiVersion: 1, createPortal() {},
+    apiVersion: 2, uiVersion: 1, uiSurfaceVersion: 1, createPortal() {},
     react: { createElement: (type, props) => ({ type, props }) },
   });
   assert.equal(module.apiVersion, 2);
@@ -156,7 +159,7 @@ test('activation requires public compatibility and preserves native fallback on 
 test('card event headings come from the message and survive loading, failure and Task updates', () => {
   let snapshot = { phase: 'loading', data: null, error: null };
   const context = {
-    apiVersion: 2, uiVersion: 1, createPortal() {},
+    apiVersion: 2, uiVersion: 1, uiSurfaceVersion: 1, createPortal() {},
     signal: new AbortController().signal,
     react: {
       Fragment: 'fragment',
