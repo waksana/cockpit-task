@@ -201,6 +201,9 @@ export function activate(context) {
   if (context.apiVersion !== 2 || context.uiVersion !== 1) {
     throw new Error('Task requires Cockpit Web API v2 and Module UI v1.');
   }
+  if (context.uiSurfaceVersion !== 1) {
+    throw new Error('Task requires Cockpit uiSurfaceVersion v1; upgrade the paired host first.');
+  }
   if (typeof context.createPortal !== 'function') {
     throw new Error('Task requires the host createPortal capability.');
   }
@@ -363,12 +366,12 @@ export function activate(context) {
     }, []);
     return context.createPortal(h('dialog', {
       ref: dialog,
-      className: 'tb-dialog',
+      className: 'ck-surface ck-modal tb-dialog',
       'aria-labelledby': titleId,
       onClose: () => { if (!dialog.current?.open) onClose(); },
     },
-    h('header', { className: 'tb-dialog-header' },
-      h('h2', { id: titleId }, 'Task details'),
+    h('header', { className: 'ck-actions tb-dialog-header' },
+      h('h2', { id: titleId, className: 'ck-heading' }, 'Task details'),
       h('button', { type: 'button', className: 'ck-button', onClick: () => dialog.current.close() }, 'Close'),
     ),
     h('p', { className: 'tb-task-id ck-text-secondary' }, taskId),
@@ -380,7 +383,7 @@ export function activate(context) {
     ),
     h('section', { className: 'tb-detail-content', 'aria-label': section },
       section === 'execution' ? h(Execution, { taskId }) : section === 'native' ? h(NativeSession, { taskId }) : h(History, { key: section, taskId, view: section })),
-    h('footer', { className: 'tb-dialog-footer' },
+    h('footer', { className: 'ck-actions tb-dialog-footer' },
       h('button', { type: 'button', className: 'ck-button', onClick: () => dialog.current.close() }, 'Close Task details')),
     ), document.body);
   }
@@ -396,7 +399,7 @@ export function activate(context) {
     return h(React.Fragment, null,
       h('button', {
         type: 'button',
-        className: 'tb-card',
+        className: 'ck-button tb-card',
         'aria-haspopup': 'dialog',
         'aria-expanded': open,
         onClick: () => setOpen(true),

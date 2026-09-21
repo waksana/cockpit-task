@@ -1,26 +1,19 @@
 .tb-card {
-  display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
   max-inline-size: 100%;
-  min-block-size: var(--ck-control-size);
   padding: calc(var(--ck-space) * 1.5);
   margin-block: 4px;
   border: 1px solid var(--ck-color-border);
   border-radius: var(--ck-radius);
   background: var(--ck-color-surface);
-  color: var(--ck-color-text);
-  font: inherit;
-  line-height: 1.5;
   text-align: start;
   vertical-align: middle;
   white-space: normal;
   overflow-wrap: anywhere;
-  cursor: pointer;
 }
 
-.tb-card:focus-visible,
 .tb-dialog :is(a, summary, [tabindex="-1"]):focus-visible {
   outline: 2px solid var(--ck-color-accent);
   outline-offset: -2px;
@@ -33,39 +26,27 @@
 
 .tb-card-event {
   color: var(--ck-color-accent);
-  font-size: 12px;
+  font-size: var(--ck-text-meta);
   font-weight: 600;
 }
 
 .tb-card-meta {
   color: var(--ck-color-muted);
-  font-size: 12px;
+  font-size: var(--ck-text-meta);
 }
 
 .tb-card-activity {
-  font-size: 14px;
+  font-size: var(--ck-text-body);
 }
 
 .tb-dialog {
   box-sizing: border-box;
   inline-size: min(760px, calc(100vw - 32px));
   max-block-size: calc(100dvh - 32px);
-  padding: calc(var(--ck-space) * 3);
-  border: 1px solid var(--ck-color-border);
-  border-radius: var(--ck-radius);
-  color: var(--ck-color-text);
-  background: var(--ck-color-surface);
-  font: 14px/1.5 system-ui, sans-serif;
   overflow: auto;
   overflow-wrap: anywhere;
 }
 
-.tb-dialog::backdrop {
-  background: rgb(0 0 0 / 45%);
-}
-
-.tb-dialog-header,
-.tb-dialog-footer,
 .tb-sections,
 .tb-page-controls {
   display: flex;
@@ -78,13 +59,8 @@
   justify-content: space-between;
 }
 
-.tb-dialog h2 {
-  margin: 0;
-  font-size: 18px;
-}
-
 .tb-dialog h3 {
-  font-size: 16px;
+  font-size: var(--ck-text-title);
   margin-block: 20px 8px;
 }
 
@@ -93,7 +69,7 @@
 }
 
 .tb-dialog .tb-task-id {
-  font-size: 12px;
+  font-size: var(--ck-text-meta);
 }
 
 .tb-sections {
@@ -131,7 +107,7 @@
 }
 
 .tb-metadata {
-  font-size: 12px;
+  font-size: var(--ck-text-meta);
 }
 
 .tb-history {
@@ -157,15 +133,10 @@
 }
 
 .tb-dialog-footer {
-  justify-content: flex-end;
   margin-block-start: 16px;
 }
 
 @media (max-width: 480px) {
-  .tb-dialog {
-    padding: calc(var(--ck-space) * 1.5);
-  }
-
   .tb-facts {
     grid-template-columns: 1fr;
     gap: 4px;
