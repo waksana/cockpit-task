@@ -4,8 +4,11 @@ The packaged [Owner reference](../skills/cockpit-task-owner/cockpit-task-owner/r
 guides explicit pending-message preservation, cleanup and a single summary
 followed by a Task updated reference. The host advancement helper is retired;
 capability checks remain explicit and on demand. This simplification does not
-add readiness badges. The subsequent Task message-event extension below is
-module-local and needs no further host changes.
+add readiness badges. The Task message-event link grammar remains module-local;
+durable status-notification recovery additionally uses the host's public
+service-ready lifecycle callback.
+The companion lifecycle change is
+[waksana/cockpit#74](https://github.com/waksana/cockpit/pull/74).
 
 This document closes the technical choices left by the design drafts. The user
 has authorized continuous implementation and delivery of both Task and the
@@ -31,7 +34,12 @@ open or migrate the old service database.
 
 Task HTTP API and HTTP MCP share one application service. SQLite transactions
 protect local changes. Description snapshots, activity, outcomes, acknowledgements
-and operation receipts have distinct tables. Executor has a partial unique index
+and operation receipts have distinct tables. Schema version 2 adds a distinct
+subscriptions table with a partial unique index for one waiting subscription per
+Task Owner, and an index for known-unsent notifications. Startup upgrades version 1
+transactionally without changing existing Task or receipt rows. Older binaries
+reject the newer schema rather than opening it with incomplete semantics.
+Executor has a partial unique index
 across unfinished Tasks. Acknowledgements retain each confirmed revision, not just
 the greatest number. Database timestamps are assigned by the service.
 HTTP MCP uses the official stateful Streamable HTTP transport so cancellation
@@ -67,7 +75,10 @@ Assignment and state changes advance lifecycle generation. Title/references/meta
 changes advance editable generation. Description has its own revision. Activity and
 ACK do not invalidate unrelated writes.
 
-Every existing-Task write checks lifecycle context. Definition edits also check
+Every existing-Task write except subscription cancellation checks lifecycle context.
+`task_unsubscribe` instead checks the specified subscription's waiting state in
+the transaction; it cannot alter Task state or recall a consumed notice.
+Definition edits also check
 editable generation and supplied revision. ACK checks the current revision.
 Reports permit activity against an actually ACKed older revision, but reject stale
 status/outcome. No other report validation error partially writes activity.
@@ -104,6 +115,47 @@ Session creation with a known ID but failed readiness returns that ID and capabi
 details; it never creates a replacement on retry. Ordinary host reload/recovery is
 explicit, not performed by Task assignment.
 
+## One-shot status notifications
+
+`task_subscribe` checks lifecycle context, current status and the one-waiting
+constraint in the registration transaction. Already matching rejects without
+registering or notifying. Targets are explicit Task statuses, not expressions;
+recipient is the saved Task Owner, never a caller-supplied destination.
+
+An actual status transition atomically saves the Task effects, operation receipt,
+subscription consumption, transition event and `pending` notification. Same-status
+reports and failed transitions do not trigger. An unmatched terminal transition
+expires the wait. Cancelling a waiting subscription races through the same SQLite
+transaction boundary; it cannot revoke a triggered event.
+
+The notification record serves as a small durable outbox, not a scheduler or a
+second native message queue. Before sending, a passive Owner lookup must confirm
+the original session exists. Missing/unavailable Owners produce visible `not_sent`
+evidence without creating another session. A compare-and-set claim persists
+`unknown` before the host send. Accepted/queued responses update that record;
+an interrupted or ambiguous send remains unknown and is never automatically retried.
+Host enqueue may normally queue behind an active Owner; no interruption or
+queue-clearing action is involved, and acceptance does not prove reading.
+
+Task effects and delivery evidence remain separate: triggering writes return
+stable `result.subscription_ids`, plus current `notifications` and any
+`notification_error`. A failed notification must not erase committed outcomes or
+encourage repeating the Task report. Subscriptions retain their event snapshot
+and bounded delivery error even after terminal state; `task_read(view=subscriptions)`
+pages them independently. Cards show current data, not this historical event.
+
+Activation checks `context.serviceReadyVersion === 1` before opening or migrating
+storage; API-v1 alone does not prove support. The returned `onReady` callback
+starts recovery only after the host runtime has started and HTTP is listening,
+so resumed native sessions can connect the module's MCP. Activation, pre-listen
+`agent/status` events and inbound reads do not start recovery.
+
+Recovery sends only durable `pending` entries, in bounded batches through a fixed
+high-water mark. It does not wait for new Task traffic. Waiting subscriptions survive restart; unknown/accepted/queued
+and known failed attempts do not replay. Shutdown prevents new claims and keeps
+storage open until in-flight work has recorded its outcome. There is no polling,
+automatic re-subscription, or exactly-once claim for the non-idempotent host prompt.
+
 ## Read boundaries and reference
 
 The generic Markdown link remains `[Task](task:<uuid>)`. Task IDs are bare UUIDs;
@@ -114,8 +166,9 @@ the scheme and query are not part of `task_id`. Message reasons use these forms:
 | Ordinary reference, including old messages | `[Task](task:<uuid>)` |
 | Entire automatic first dispatch from `task_assign` | `[Task assigned to you](task:<uuid>?event=assigned)` |
 | Owner's explicit important-update notice | `[Task updated](task:<uuid>?event=updated)` |
+| System notification from an explicit one-shot Owner status subscription | `[Task status updated](task:<uuid>?event=status_changed)` |
 
-Only lowercase `assigned` and `updated` are accepted event values. Claim only
+Only lowercase `assigned`, `updated` and `status_changed` are accepted event values. Claim only
 valid Task-scheme UUID references and the supported query forms. Unknown events
 and malformed queries stay unclaimed; never strip a bad query and reinterpret it
 as a generic Task reference. Labels explain the message to the model without UI,
@@ -124,12 +177,15 @@ Generic references have no event header. Historical generic messages remain vali
 
 The event reason belongs immutably to that message/reference while card data is
 read fresh. It is not a Task entity type/status, a command, or an event bus or
-scheduler. No Task schema fields or MCP tools are added. `task_assign` owns its
+scheduler. Subscription records and tools are separate from this link grammar. `task_assign` owns its
 single first dispatch; Owner must not send a duplicate. `task_edit` never sends
 an automatic notification. Only Owner decides whether an important update needs
 the Skill's explicit handoff: one preserved-context summary followed by the
 updated reference and an instruction to read/ACK the latest revision. Neither
 message copies the description; the updated notice replaces the old text prefix.
+`status_changed` instead identifies an Owner's explicitly requested state notification.
+It never asks Executor to ACK and must not imply that a delayed card's currently
+rendered state is the state which originally triggered the subscription.
 
 The existing host renderer passes raw target and label, so no host protocol
 change is required. Verified cockpit-file main
@@ -176,7 +232,9 @@ revision/ACK. An accessible detail dialog loads current definition and independe
 paged histories on demand. The card reads current data, not the historical state
 when the reference was sent. Host events invalidate visible reads; reconnect refetches.
 Native session state, if available through the public API, is labelled separately.
-No chat scanning, fabricated live progress, independent dashboard or automatic notifications.
+No chat scanning, fabricated live progress, independent dashboard or unsolicited
+automatic notifications. Only explicit one-shot status subscriptions can request
+system-generated status notices to Owner.
 
 ## Packaging and integration
 
@@ -198,7 +256,7 @@ contracts (camelCase is the host API, unlike Task tool snake_case):
 - `prompt({sessionId,text,mode:"enqueue"})` returns `{ok,queued?}`.
 
 Role injection is exactly Owner `task_read/task_create/task_session_create/
-task_assign/task_edit/task_cancel` and Executor `task_read/task_edit/task_ack/
+task_assign/task_edit/task_cancel/task_subscribe/task_unsubscribe` and Executor `task_read/task_edit/task_ack/
 task_report/task_cancel`. Combined roles take the union. Coding/Research work
 skills are not part of this module or the `task_session_create` input.
 

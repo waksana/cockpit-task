@@ -46,6 +46,7 @@ combine its actual text with Task status and requirements before claiming delive
 | Why requirements changed | `changelog` |
 | Complete text of one past definition | `changelog` with `revision` |
 | Whether a failed or uncertain request had an effect | `operation` with `request_id` |
+| Records for an explicit one-shot status subscription | `subscriptions` with `task_id` |
 
 `definition` and `execution` currently return the same complete Task projection:
 identity, responsibility, status, revisions, timestamps, write context, description,
@@ -57,6 +58,13 @@ or the definition itself. Selecting a specific revision retrieves its full text.
 `outcomes` and `activity` are separate paginated histories, not session transcripts.
 Read the next page only if needed, using the returned cursor unchanged with the
 same view, Task and filters.
+
+Use `task_read(view=subscriptions)` only for a concrete subscription question.
+Follow its schema and returned pagination cursor; do not poll while waiting.
+A subscription/delivery record is not proof the Owner read a notice or the Task
+is now complete. Re-read current Task state and actual outcomes to assess delivery.
+See [subscription handling](task-writes-and-recovery.md#one-shot-status-subscriptions)
+for the one-shot lifecycle and uncertain effects.
 
 List defaults to 20 items, maximum 50, with `status=unfinished` unless specified.
 Use an explicit terminal status or `all` when the question includes finished work;

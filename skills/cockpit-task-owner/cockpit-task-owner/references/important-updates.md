@@ -3,6 +3,8 @@
 Owner only: read this when an important requirement change cannot wait for the
 Executor's normal checkpoints. Ordinary edits, delayed ACKs and routine progress
 do not trigger this procedure. This is an explicit judgment, not a background loop.
+The system's `status_changed` subscription notice to Owner is separate: receiving
+it does not trigger this Executor-directed `updated` handoff or queue intervention.
 
 ## Preserve before changing the queue
 

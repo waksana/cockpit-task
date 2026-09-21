@@ -3,6 +3,7 @@ const taskId = new RegExp(`^${idPattern}$`);
 export const TASK_EVENTS = Object.freeze({
   assigned: 'Task assigned to you',
   updated: 'Task updated',
+  status_changed: 'Task status updated',
 });
 const taskTarget = new RegExp(`^task:(${idPattern})(?:\\?event=(${Object.keys(TASK_EVENTS).join('|')}))?$`);
 

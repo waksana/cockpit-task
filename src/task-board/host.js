@@ -17,6 +17,7 @@ export function createHostAdapter(host) {
     return meta;
   };
   return {
+    ownerExists: async sessionId => (await get(sessionId)) !== null,
     create: cwd => host.call('session/new', { cwd, roles: executorRoles }),
     async inspect(sessionId) {
       const capability = await host.call('roles/readiness', { sessionId, roles: executorRoles });

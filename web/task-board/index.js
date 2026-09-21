@@ -416,8 +416,12 @@ export function activate(context) {
       },
       event ? h('span', {
         className: 'tb-card-event',
-        title: 'Why this message was sent; current Task data is shown below.',
+        title: event === 'status_changed'
+          ? 'An explicit Owner subscription matched a status change. This is not an Executor requirement update; current Task data is shown below.'
+          : 'Why this message was sent; current Task data is shown below.',
       }, TASK_EVENTS[event]) : null,
+      event === 'status_changed' ? h('span', { className: 'tb-card-meta' },
+        'Owner subscription triggered · current state shown below') : null,
       h('span', { className: 'tb-card-title' }, summary),
       task ? h(React.Fragment, null,
         h('span', { className: 'tb-card-meta' }, `${statusLabel(task.status)} · Executor: ${task.executor ?? 'Unassigned'}`),

@@ -17,7 +17,8 @@
 **访问模型更新（节点 3）：** 系统按所选角色注入 MCP，有对应工具即可操作其他 Task，不按 owner / executor 归属限制读写。以下角色行为表示协作分工，不是访问控制；作者来源、当前工作上下文和 ACK 的业务记录不依赖新的通用可信身份服务。版本、状态、幂等与绑定不可替换等数据规则继续保留。
 
 **消息事件不改变 Schema：** 通用引用仍为 `[Task](task:<uuid>)`，首次派单和 Owner
-显式重要更新分别使用 `?event=assigned` / `?event=updated`。event 仅是该条消息
+显式重要更新分别使用 `?event=assigned` / `?event=updated`；
+Owner 显式一次性状态订阅使用独立的 `?event=status_changed`。event 仅是该条消息
 固定的引用元数据，不是 Task 实体字段、类型、状态、命令或调度事件。Task ID 始终
 是纯 UUID，不含 URI/query。卡片保留消息原因并读取当前 Task 数据；事件不改变
 revision、ACK、activity 或生命周期。完整语法见[实现契约](task-implementation.md#read-boundaries-and-reference)。
@@ -35,6 +36,7 @@ revision、ACK、activity 或生命周期。完整语法见[实现契约](task-i
 | 登记 | 允许先登记 Task，不创建 Executor；之后由 Owner 明确派单，同一 Task ID 保持不变 |
 | 执行 session 创建 | Owner 通过独立 Task MCP 入口创建并配置能力；不与 Task 登记或指派合并，不要求 Owner 自行拼装底层能力 |
 | 进度读取 | Owner 主动读取 Task；执行者不发送进度、阻塞、完成等反向消息 |
+| 状态订阅 | Owner 显式登记一次性订阅，登记时已匹配则失败；首次进入目标状态后由系统给 Task Owner 发送状态更新卡片，不由 Executor 发消息、不自动续订 |
 | 要求修订 | Owner 和当前 Executor 都可修订；Executor 可直接与用户澄清后写回 |
 | 修订确认 | Executor 自己成功修订时直接确认新版本；Owner 修订由 Executor 之后读取并确认 |
 | ACK 与状态 | ACK 只更新 acknowledged_revision，不改变 status 或生成 activity；首次确认也不等于开始执行 |
@@ -147,7 +149,11 @@ acknowledged_revision          当前 Executor 确认的 description 版本
 
 例如，任务明确要求代码审阅时，Executor 应完成该工作步骤；不能把“可直接标记 done”理解为跳过 description 里的要求。任务是否需要部署同样由 description 决定，不能把代码合并自动视为已部署。
 
-进入 `blocked`、`in_review` 或 `done` 都不产生反向消息。Owner 通过主动读取了解变化。
+默认进入 `blocked`、`in_review` 或 `done` 不产生反向消息，Owner 通过主动读取了解变化。
+唯一新增例外是 Owner 事先登记的一次性状态订阅：首次进入目标状态时系统发送
+`status_changed` 卡片。订阅与状态写入采用同一事务确认触发；登记时已是目标状态则
+明确失败，不补发通知。Executor 不手工发送、确认或重复该消息；通知不是新的 ACK，
+也不改变完成条件、已有 Task 状态或原生 session 状态。
 
 ### 已确认：当前不做续办或改派
 
@@ -165,7 +171,7 @@ acknowledged_revision          当前 Executor 确认的 description 版本
 | 开始执行 | 当前 Executor | 明确更新为 `in_progress`，与 ACK 分开 |
 | 报告阻塞 / 恢复处理 | 当前 Executor | `in_progress`、`blocked` 之间按实际情况更新；保存动态，不改变要求版本 |
 | 执行约定中的评审步骤 | 当前 Executor | 按需进入或离开 `in_review`；不存在统一 Owner 批准门槛 |
-| 完成交付 | 当前 Executor | 确认当前要求后写入 outcome，进入 `done`；不发反向通知 |
+| 完成交付 | 当前 Executor | 确认当前要求后写入 outcome，进入 `done`；Executor 不发反向消息，匹配显式订阅时由系统通知 |
 | 取消 | Owner，或收到用户取消要求的当前 Executor | 进入 `cancelled`，记录原因；拒绝继续以普通报告进入执行或完成状态 |
 
 done / cancelled 不接受普通报告恢复执行；指派只用于未分配的 todo。Executor 自己修订后的自动 ACK 也不能改变执行状态。

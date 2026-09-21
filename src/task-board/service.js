@@ -1,5 +1,6 @@
 import { TaskError, parseInput } from './contracts.js';
 import { assignExecutor, createExecutor } from './operations.js';
+import { deliverNotification } from './notifications.js';
 
 export class TaskService {
   constructor(store, host, { invalidate = () => {}, report = () => {} } = {}) {
@@ -71,6 +72,26 @@ export class TaskService {
         };
       }
     }
+    let notifications;
+    let notification_error;
+    if (outcome.result?.subscription_ids?.length) {
+      notifications = [];
+      for (const id of outcome.result.subscription_ids) {
+        try {
+          notifications.push(await this.deliver(id, signal));
+        } catch (error) {
+          this.report(error);
+          notification_error = {
+            code: 'NOTIFICATION_STORAGE_UNCONFIRMED',
+            message: 'Task mutation was saved, but notification persistence could not be confirmed; inspect subscriptions before any manual action',
+          };
+        }
+      }
+      const incomplete = notifications.find(item => !['accepted', 'queued'].includes(item.notification.status));
+      if (incomplete && !notification_error) notification_error = incomplete.notification.error ?? {
+        code: 'NOTIFICATION_PENDING', message: 'Task mutation was saved; the known-unsent notification remains pending recovery',
+      };
+    }
     const target = input?.task_id ?? outcome.result?.task_id
       ?? outcome.result?.operation?.task_id ?? outcome.result?.result?.task_id
       ?? outcome.result?.result?.operation?.task_id;
@@ -81,7 +102,47 @@ export class TaskService {
     };
     const definition_check = this.store.definitionCheck(context);
     if (name !== 'task_read' && outcome.result !== null) this.invalidate();
-    return { ...outcome, definition_check };
+    return {
+      ...outcome, definition_check,
+      ...(notifications ? { notifications, notification_error: notification_error ?? null } : {}),
+    };
+  }
+
+  deliver(id, signal) {
+    return deliverNotification({
+      store: this.store, host: this.host, id,
+      stopped: () => this.closing || signal?.aborted,
+    });
+  }
+
+  recoverNotifications({ signal } = {}) {
+    if (this.closing || signal?.aborted) return Promise.resolve();
+    if (this.recovery) return this.recovery;
+    // A fixed high-water mark bounds this startup pass. New transitions deliver themselves.
+    const through = this.store.pendingNotificationBoundary();
+    if (!through) return Promise.resolve();
+    this.active++;
+    this.recovery = (async () => {
+      let after = 0;
+      while (!this.closing && !signal?.aborted) {
+        const batch = this.store.pendingNotifications(after, through);
+        if (!batch.length) break;
+        for (const entry of batch) {
+          if (this.closing || signal?.aborted) return;
+          const subscription = await this.deliver(entry.id, signal);
+          if (subscription.notification.error) this.report(new TaskError(
+            subscription.notification.error.code, subscription.notification.error.message, 502, subscription,
+          ));
+          this.invalidate();
+          after = entry.seq;
+        }
+      }
+    })().catch(error => this.report(error)).finally(() => {
+      this.recovery = null;
+      this.active--;
+      this.finishClose();
+    });
+    return this.recovery;
   }
 
   close() {

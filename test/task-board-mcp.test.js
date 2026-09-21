@@ -94,6 +94,25 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     assert.match(descriptions.task_edit, /Does not send messages or change execution status/);
     assert.match(descriptions.task_report, /done requires a new outcome in the same request/);
     assert.match(descriptions.task_report, /Stale activity may save while stale status\/outcome are rejected/);
+    assert.match(descriptions.task_subscribe, /Rejects an already-matching status/);
+    assert.match(descriptions.task_subscribe, /derived from the Task, not the actor/);
+    assert.match(descriptions.task_unsubscribe, /Cannot recall a consumed notification/);
+  } finally { await f.close(); }
+});
+
+test('notification failure is a surfaced MCP error without erasing successful Task effects', async () => {
+  const expected = {
+    result: { status: 'applied', task_status: 'cancelled' }, error: null,
+    notifications: [{ notification: { status: 'unknown' } }],
+    notification_error: { code: 'NOTIFICATION_UNCONFIRMED', message: 'Task is saved; do not blindly resend' },
+    definition_check: { status: 'checked', tasks: [] },
+  };
+  const f = fixture(async () => expected);
+  try {
+    await f.connect();
+    const response = await f.client.callTool({ name: 'task_read', arguments: { task_id: 'synthetic' } });
+    assert.equal(response.isError, true);
+    assert.deepEqual(response.structuredContent, expected);
   } finally { await f.close(); }
 });
 

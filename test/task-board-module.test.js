@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { activate } from '../src/task-board/module.js';
 import { createHostAdapter } from '../src/task-board/host.js';
 import { TOOL_NAMES } from '../src/task-board/contracts.js';
@@ -29,7 +30,7 @@ function fixture() {
     },
   };
   const context = {
-    apiVersion: 1, moduleId: 'cockpit-task', dataRoot: root, host, signal: controller.signal,
+    apiVersion: 1, serviceReadyVersion: 1, moduleId: 'cockpit-task', dataRoot: root, host, signal: controller.signal,
     invalidate: () => { invalidations++; }, report: error => errors.push(error),
   };
   let module = activate(context);
@@ -71,7 +72,7 @@ test('module roles contain exactly the agreed tool subsets and only two role ski
     { id: 'executor', name: 'Executor' },
   ]);
   for (const role of manifest.roles) assert.deepEqual(Object.keys(role.mcpServers), ['cockpit-task']);
-  assert.deepEqual(owner.mcpServers['cockpit-task'].tools, ['task_read', 'task_create', 'task_session_create', 'task_assign', 'task_edit', 'task_cancel']);
+  assert.deepEqual(owner.mcpServers['cockpit-task'].tools, ['task_read', 'task_create', 'task_session_create', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe']);
   assert.deepEqual(executor.mcpServers['cockpit-task'].tools, ['task_read', 'task_edit', 'task_ack', 'task_report', 'task_cancel']);
   assert.deepEqual([...new Set([...owner.mcpServers['cockpit-task'].tools, ...executor.mcpServers['cockpit-task'].tools])].sort(), [...TOOL_NAMES].sort());
   assert.deepEqual(manifest.roles.flatMap(role => role.skillDirectories), ['skills/cockpit-task-owner', 'skills/cockpit-task-executor']);
@@ -90,8 +91,32 @@ test('old module identity is rejected before opening storage instead of silently
 test('module fails before opening storage when the host bridge is absent', () => {
   const root = mkdtempSync(join(tmpdir(), 'task-board-no-host-'));
   try {
-    assert.throws(() => activate({ apiVersion: 1, moduleId: 'cockpit-task', dataRoot: root }), /requires.*host intents/);
+    assert.throws(() => activate({ apiVersion: 1, serviceReadyVersion: 1, moduleId: 'cockpit-task', dataRoot: root }), /requires.*host intents/);
     assert.equal(existsSync(join(root, 'task-board.sqlite')), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('unsupported service-ready capability rejects before creating or migrating SQLite storage', () => {
+  const root = mkdtempSync(join(tmpdir(), 'task-board-no-service-ready-'));
+  const file = join(root, 'task-board.sqlite');
+  const context = { apiVersion: 1, moduleId: 'cockpit-task', dataRoot: root, host: { call() { assert.fail('No host calls before capability validation'); } } };
+  try {
+    for (const serviceReadyVersion of [undefined, null, 0, 2, true, '1']) {
+      assert.throws(() => activate({ ...context, serviceReadyVersion }), /requires.*service-ready lifecycle v1/);
+      assert.equal(existsSync(file), false);
+    }
+    const prior = new DatabaseSync(file);
+    prior.exec("CREATE TABLE sentinel(value TEXT); INSERT INTO sentinel VALUES('preserved'); PRAGMA user_version=1");
+    prior.close();
+    const bytes = readFileSync(file);
+    assert.throws(() => activate(context), /requires.*service-ready lifecycle v1/);
+    assert.deepEqual(readFileSync(file), bytes, 'Unsupported activation cannot mutate an existing database');
+    const untouched = new DatabaseSync(file, { readOnly: true });
+    try {
+      assert.equal(untouched.prepare('PRAGMA user_version').get().user_version, 1);
+      assert.equal(untouched.prepare('SELECT value FROM sentinel').get().value, 'preserved');
+      assert.equal(untouched.prepare("SELECT count(*) AS count FROM sqlite_master WHERE name='subscriptions'").get().count, 0);
+    } finally { untouched.close(); }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

@@ -9,8 +9,13 @@ The companion host change is [waksana/cockpit#68](https://github.com/waksana/coc
 merged at [`3eddcf1abe671d0e3b54bda5a951cc6b0d1ed5a6`](https://github.com/waksana/cockpit/commit/3eddcf1abe671d0e3b54bda5a951cc6b0d1ed5a6).
 The follow-up simplification is [waksana/cockpit#69](https://github.com/waksana/cockpit/pull/69):
 capability checks are on demand, without automatic queue advancement or projected
-readiness. Use a host build containing both changes. The existing 0.2.6 release
-label alone does not establish compatibility with these capabilities.
+readiness. Status subscriptions additionally require
+[waksana/cockpit#74](https://github.com/waksana/cockpit/pull/74), the generic backend
+`onReady` callback, advertised by `context.serviceReadyVersion === 1` and merged at
+[`f64662e5d77f5b3e3e0f701d9975dbf75ae496d5`](https://github.com/waksana/cockpit/commit/f64662e5d77f5b3e3e0f701d9975dbf75ae496d5). Use a host
+build containing these capabilities. The existing 0.2.6 release label alone does
+not establish compatibility; an older host is rejected before Task storage opens
+or upgrades.
 
 ## Roles and records
 
@@ -85,6 +90,8 @@ An Executor's own definition change also acknowledges the new revision.
 | task_ack | Acknowledge the current definition separately from work status |
 | task_report | Record activity, status and/or outcome explicitly |
 | task_cancel | Cancel the Task without stopping its native session |
+| task_subscribe | Register one explicit, one-shot Owner notification for target statuses |
+| task_unsubscribe | Cancel a still-waiting status subscription |
 
 Owner and Executor receive role-specific subsets; selecting both takes their union.
 Having a tool allows operating other Tasks: owner/executor fields are responsibility,
@@ -92,7 +99,8 @@ not per-record authorization. All writes still enforce data consistency.
 actor_session_id is reported provenance, not verified identity.
 
 Use the host-provided session ID for actor_session_id. Writes include request_id;
-writes to existing Tasks also send back the read's opaque write_context. A description
+writes to existing Tasks also send back the read's opaque write_context, except
+`task_unsubscribe`, which checks the specified subscription's waiting state directly. A description
 revision is not a concurrency token for unrelated state changes.
 Repeated requests preserve their original ID and exact input. After a response is
 lost, inspect the operation before doing anything with an external side effect.
@@ -114,8 +122,8 @@ interrupting. Those checks and the enqueue send are not atomic: a race may retur
 queued or unconfirmed. Inspect each recorded step; do not blindly resend.
 
 Use `[Task](task:<uuid>)` for an ordinary reference. Task IDs passed to tools are
-just the UUID, not the full URI or its query. Only lowercase `assigned` and
-`updated` are accepted event values. The event is immutable message/reference
+just the UUID, not the full URI or its query. Only lowercase `assigned`,
+`updated` and `status_changed` are accepted event values. The event is immutable message/reference
 metadata, not a Task type, status, command or event bus. The renderer uses the
 explicit URL event, never the label or current Task status; generic and old
 references remain compatible without an event header. Unknown events or malformed
@@ -128,7 +136,9 @@ or confirmation. Executor asks genuine decisions directly of the user in its own
 session, not through Owner. Questions, confirmations, progress, blockers and completion
 are not sent to Owner, including through subagents. User-facing summaries are allowed;
 they are not a second maintained progress ledger. Neither role adds background
-monitoring, reminders or final notifications.
+monitoring, reminders or unsolicited final notifications. An explicit Owner
+status subscription is the opt-in system-notification exception described below;
+Executor does not send or duplicate that notification.
 
 For an exceptionally important update, Owner follows the Skill's
 [exceptional update handoff](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md):
@@ -147,9 +157,8 @@ If necessary, interrupt the main turn once; do not use Stop to blindly discard
 unread arrivals or silently cancel subagents. Confirm native readiness before
 handoff, and distinguish sending acceptance from current-revision ACK.
 This is Owner Skill guidance, not an automatic queue advancement mechanism.
-`task_edit` never automatically sends this notice. Message events add no MCP tools,
-Task schema fields or host changes; capability checks and ordinary busy state are
-unchanged.
+`task_edit` never automatically sends this notice. The `assigned` and `updated`
+link events do not themselves add Task fields or change capability/busy checks.
 It replaces the retired `cockpit_advance_queue` helper. The host retains single
 interrupt, per-item queue removal, native-state reads and sending; it does not
 maintain an advancement loop or its operation receipts.
@@ -158,6 +167,41 @@ Missing capability rejects assignment; it does not install a role or repair an
 existing session. Uncertain creation or dispatch is never automatically replayed.
 Task cancellation does not cancel native work, and editing a terminal definition
 does not reopen execution.
+
+### One-shot status subscriptions
+
+Owner can use `task_subscribe` to explicitly await entry into one or more chosen
+Task statuses. This does not keep a model turn or tool call waiting. Registration
+checks the current status atomically: if it already matches any target, registration
+fails, creates no subscription and sends no notice. A terminal Task cannot acquire
+a subscription for a future transition. The recipient is the Task's recorded
+Owner, not an arbitrary session supplied by the caller.
+
+Only the first matching committed status transition consumes the subscription.
+Each Task allows one waiting subscription at a time; it expires without a notice
+if the Task enters a terminal state outside its targets.
+Definition edits, ACKs, activity alone, same-status reports and rejected status
+changes do not trigger it. Without a registered subscription, status reports and
+cancellation stay silent. `task_unsubscribe` cancels a waiting subscription, not
+an already-triggered notification or a message already accepted by the host.
+Read `task_read(view=subscriptions)` for bounded subscription and delivery facts.
+
+The system sends `[Task status updated](task:<uuid>?event=status_changed)` to
+Owner through the host's ordinary enqueue prompt entry. A busy Owner may receive
+it later; the system does not interrupt or clear that session's queue. This is a
+new prompt, not continuation of a suspended tool call. The card retains the
+notification's reason but reads the current Task, which may have changed again.
+It is not the Executor's requirement-update/ACK notice. Owner reads current
+evidence before deciding what to do and does not automatically re-subscribe.
+
+One-shot triggering does not imply exactly-once external delivery. Persisted
+delivery records distinguish accepted, queued and uncertain effects; acceptance
+does not prove reading. An uncertain send must not be retried blindly or replaced
+with a hand-written notice. On service-ready startup, a bounded recovery pass
+automatically sends records known to be pending before any send attempt, without
+waiting for a new Task request. It does not retry unknown or failed attempts.
+Subscriptions are explicit event handling, not a
+monitor, recurring schedule or a rule for launching dependent Tasks.
 
 ### File reference compatibility
 

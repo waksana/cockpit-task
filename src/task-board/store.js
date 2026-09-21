@@ -32,12 +32,13 @@ export class TaskStore {
     try {
       chmodSync(file, 0o600);
       const version = this.db.prepare('PRAGMA user_version').get().user_version;
-      if (version > 1) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
+      if (version > 2) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
       this.db.exec(`
       PRAGMA journal_mode=WAL;
       PRAGMA synchronous=FULL;
       PRAGMA foreign_keys=ON;
       PRAGMA busy_timeout=5000;
+      BEGIN IMMEDIATE;
       CREATE TABLE IF NOT EXISTS tasks (
         seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
         title TEXT NOT NULL, description TEXT NOT NULL, owner TEXT NOT NULL,
@@ -79,7 +80,21 @@ export class TaskStore {
       CREATE INDEX IF NOT EXISTS activities_task ON activities(task_id,seq);
       CREATE INDEX IF NOT EXISTS outcomes_task ON outcomes(task_id,seq);
       CREATE INDEX IF NOT EXISTS definitions_task ON definitions(task_id,seq);
-      PRAGMA user_version=1;
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+        task_id TEXT NOT NULL REFERENCES tasks(id), owner TEXT NOT NULL,
+        actor_session_id TEXT NOT NULL, statuses TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('waiting','triggered','cancelled','expired')),
+        created_at TEXT NOT NULL, ended_at TEXT, ended_by TEXT, event TEXT,
+        delivery_status TEXT NOT NULL DEFAULT 'not_requested'
+          CHECK(delivery_status IN ('not_requested','pending','unknown','accepted','queued','not_sent')),
+        attempted_at TEXT, completed_at TEXT, delivery_error TEXT
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS subscriptions_waiting_owner ON subscriptions(task_id,owner) WHERE state='waiting';
+      CREATE INDEX IF NOT EXISTS subscriptions_task ON subscriptions(task_id,seq);
+      CREATE INDEX IF NOT EXISTS subscriptions_pending ON subscriptions(seq) WHERE delivery_status='pending';
+      PRAGMA user_version=2;
+      COMMIT;
       `);
     } catch (error) {
       this.db.close();
@@ -190,7 +205,10 @@ export class TaskStore {
   executeLocal(name, rawInput) {
     const input = parseInput(name, rawInput);
     if (name === 'task_read') return this.read(input);
-    const handlers = { task_create: 'create', task_edit: 'edit', task_ack: 'ack', task_report: 'report', task_cancel: 'cancel' };
+    const handlers = {
+      task_create: 'create', task_edit: 'edit', task_ack: 'ack', task_report: 'report', task_cancel: 'cancel',
+      task_subscribe: 'subscribe', task_unsubscribe: 'unsubscribe',
+    };
     if (!handlers[name]) fail('EXTERNAL_OPERATION_REQUIRED', 'This tool requires the host operation service', 400);
     const receipt = this.transaction(() => {
       if (this.receipt(name, input)) return this.operation(input.request_id);
@@ -268,6 +286,7 @@ export class TaskStore {
     const field = requested => ({ status: requested ? 'rejected' : 'not_requested' });
     const fields = { activity: field(input.activity), task_status: field(input.status), outcome: field(input.outcome) };
     const at = now();
+    let subscription_ids = [];
     if (input.activity) {
       const id = randomUUID();
       this.db.prepare('INSERT INTO activities(id,task_id,revision,executor,author,text,at) VALUES(?,?,?,?,?,?,?)')
@@ -284,6 +303,7 @@ export class TaskStore {
       if (input.status) {
         this.db.prepare('UPDATE tasks SET status=?,lifecycle=lifecycle+? WHERE id=?').run(input.status, Number(input.status !== row.status), row.id);
         fields.task_status = { status: 'saved', value: input.status };
+        subscription_ids = this.transitionSubscriptions(row, input.status, input, at);
       }
     }
     if (input.activity || (!stale && (input.status || input.outcome))) {
@@ -291,7 +311,10 @@ export class TaskStore {
     }
     const rejected = stale && Boolean(input.status || input.outcome);
     return {
-      result: { ...this.effects(this.row(row.id), rejected ? (input.activity ? 'partially_applied' : 'rejected') : 'applied'), ...fields },
+      result: {
+        ...this.effects(this.row(row.id), rejected ? (input.activity ? 'partially_applied' : 'rejected') : 'applied'), ...fields,
+        ...(subscription_ids.length ? { subscription_ids } : {}),
+      },
       error: rejected ? { code: 'DESCRIPTION_UPDATED', message: 'description has changed; requested status and outcome were not saved. Read the current definition and acknowledge it', status: 409 } : null,
     };
   }
@@ -303,7 +326,87 @@ export class TaskStore {
     const cancellation = { reason: input.reason, author: input.actor_session_id, source: 'reported', at: now() };
     this.db.prepare("UPDATE tasks SET status='cancelled',lifecycle=lifecycle+1,cancellation=?,updated_at=? WHERE id=?")
       .run(JSON.stringify(cancellation), cancellation.at, row.id);
-    return { result: { ...this.effects(this.row(row.id)), cancellation } };
+    const subscription_ids = this.transitionSubscriptions(row, 'cancelled', input, cancellation.at);
+    return { result: { ...this.effects(this.row(row.id)), cancellation, ...(subscription_ids.length ? { subscription_ids } : {}) } };
+  }
+  subscription(row) {
+    return {
+      subscription_id: row.id, task_id: row.task_id, owner: row.owner,
+      actor_session_id: row.actor_session_id, statuses: JSON.parse(row.statuses), state: row.state,
+      created_at: row.created_at, ended_at: row.ended_at, ended_by: row.ended_by,
+      event: row.event ? JSON.parse(row.event) : null,
+      notification: {
+        status: row.delivery_status, attempted_at: row.attempted_at, completed_at: row.completed_at,
+        error: row.delivery_error ? JSON.parse(row.delivery_error) : null,
+      },
+    };
+  }
+  getSubscription(id) {
+    const row = this.db.prepare('SELECT * FROM subscriptions WHERE id=?').get(id);
+    if (!row) fail('SUBSCRIPTION_NOT_FOUND', 'Subscription does not exist', 404);
+    return this.subscription(row);
+  }
+  subscribe(input) {
+    const row = this.row(input.task_id);
+    this.checkContext(row, input);
+    if (input.statuses.includes(row.status)) fail('ALREADY_IN_TARGET_STATUS', 'Task is already in a target status; no subscription was created');
+    if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Terminal Tasks cannot transition; no subscription was created');
+    if (this.db.prepare("SELECT 1 FROM subscriptions WHERE task_id=? AND owner=? AND state='waiting'").get(row.id, row.owner)) {
+      fail('SUBSCRIPTION_EXISTS', 'This Task Owner already has a waiting subscription; inspect or cancel it explicitly');
+    }
+    const id = randomUUID();
+    this.db.prepare("INSERT INTO subscriptions(id,task_id,owner,actor_session_id,statuses,state,created_at) VALUES(?,?,?,?,?,'waiting',?)")
+      .run(id, row.id, row.owner, input.actor_session_id, JSON.stringify(input.statuses), now());
+    return { result: { ...this.effects(row), subscription: this.getSubscription(id) } };
+  }
+  unsubscribe(input) {
+    this.row(input.task_id);
+    const subscription = this.getSubscription(input.subscription_id);
+    if (subscription.task_id !== input.task_id) fail('SUBSCRIPTION_NOT_FOUND', 'Subscription does not belong to this Task', 404);
+    if (subscription.state === 'cancelled') return { result: { status: 'unchanged', task_id: input.task_id, subscription } };
+    if (subscription.state !== 'waiting') fail('SUBSCRIPTION_NOT_WAITING', 'Subscription already ended; a consumed notification cannot be recalled');
+    this.db.prepare("UPDATE subscriptions SET state='cancelled',ended_at=?,ended_by=? WHERE id=? AND state='waiting'")
+      .run(now(), input.actor_session_id, subscription.subscription_id);
+    return { result: { status: 'applied', task_id: input.task_id, subscription: this.getSubscription(subscription.subscription_id) } };
+  }
+  transitionSubscriptions(row, status, input, at) {
+    if (status === row.status) return [];
+    const subscriptions = this.db.prepare("SELECT * FROM subscriptions WHERE task_id=? AND state='waiting'").all(row.id);
+    const ids = [];
+    for (const subscription of subscriptions) {
+      if (JSON.parse(subscription.statuses).includes(status)) {
+        const event = { event_id: randomUUID(), request_id: input.request_id, from_status: row.status, status, at, actor_session_id: input.actor_session_id };
+        this.db.prepare("UPDATE subscriptions SET state='triggered',ended_at=?,event=?,delivery_status='pending' WHERE id=?")
+          .run(at, JSON.stringify(event), subscription.id);
+        ids.push(subscription.id);
+      } else if (terminal(status)) {
+        this.db.prepare("UPDATE subscriptions SET state='expired',ended_at=? WHERE id=?").run(at, subscription.id);
+      }
+    }
+    return ids;
+  }
+  pendingNotificationBoundary() {
+    return this.db.prepare("SELECT max(seq) AS seq FROM subscriptions WHERE delivery_status='pending'").get().seq ?? 0;
+  }
+  pendingNotifications(after, through, limit = 20) {
+    return this.db.prepare("SELECT seq,id FROM subscriptions WHERE delivery_status='pending' AND seq>? AND seq<=? ORDER BY seq LIMIT ?")
+      .all(after, through, limit);
+  }
+  claimNotification(id) {
+    return this.transaction(() => {
+      // Unknown is durable before any send. It is deliberately never a recovery candidate.
+      const error = { code: 'NOTIFICATION_UNCONFIRMED', message: 'Notification attempt may be in flight or interrupted; inspect before taking any manual action. Never blindly resend.' };
+      const changed = this.db.prepare("UPDATE subscriptions SET delivery_status='unknown',attempted_at=?,delivery_error=? WHERE id=? AND delivery_status='pending'")
+        .run(now(), JSON.stringify(error), id);
+      return changed.changes ? this.getSubscription(id) : null;
+    });
+  }
+  finishNotification(id, expected, status, error = null) {
+    return this.transaction(() => {
+      this.db.prepare('UPDATE subscriptions SET delivery_status=?,delivery_error=?,completed_at=? WHERE id=? AND delivery_status=?')
+        .run(status, error ? JSON.stringify(error) : null, now(), id, expected);
+      return this.getSubscription(id);
+    });
   }
   bindAssignment(rawInput) {
     const input = parseInput('task_assign', rawInput);
@@ -405,6 +508,13 @@ export class TaskStore {
       return this.page(rows, limit, scope, row => this.overview(row, false));
     }
     const row = this.row(input.task_id);
+    if (input.view === 'subscriptions') {
+      const scope = hash({ view: input.view, task_id: row.id });
+      const limit = input.limit ?? 5;
+      const rows = this.db.prepare('SELECT * FROM subscriptions WHERE task_id=? AND seq < ? ORDER BY seq DESC LIMIT ?')
+        .all(row.id, this.cursor(input, scope), limit + 1);
+      return this.page(rows, limit, scope, entry => this.subscription(entry), { task_id: row.id });
+    }
     if (input.view === 'overview') return this.overview(row);
     if (input.view === 'execution' || input.view === 'definition') return this.task(row.id);
     if (input.view === 'changelog' && input.revision !== undefined) {

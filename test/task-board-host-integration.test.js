@@ -8,7 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const hostWorktree = process.env.TASK_BOARD_HOST_WORKTREE;
-const ownerTools = ['task_read', 'task_create', 'task_session_create', 'task_assign', 'task_edit', 'task_cancel'];
+const ownerTools = ['task_read', 'task_create', 'task_session_create', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe'];
 const executorTools = ['task_read', 'task_edit', 'task_ack', 'task_report', 'task_cancel'];
 const allTools = [...new Set([...ownerTools, ...executorTools])].sort();
 
@@ -57,6 +57,9 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
   const expectedDefinitions = new Map();
   const isolatedSessionIds = new Set();
   const reports = [];
+  const moduleRequests = [];
+  let runtimeReady = false;
+  let expectedStartupNotification;
   let invalidations = 0;
   let runtime;
   let engine;
@@ -91,7 +94,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     // Match the host's ESM export: mixing require/import builds breaks ToolSet identity.
     const { RuntimeConnection, ToolSet } = await import(pathToFileURL(resolve(sdkRoot, sdkPackage.exports['.'].import.default)).href);
     const [
-      { OfficialRuntime }, { Engine }, { ModuleHost }, { ModuleRoles }, { installLocalModule },
+      { OfficialRuntime }, { Engine }, { ModuleHost }, { ModuleRoles }, { installLocalModule, moduleDataRoot },
       { default: Fastify }, { Client }, { StreamableHTTPClientTransport },
     ] = await Promise.all([
       importHost('packages/core/src/runtime.ts'),
@@ -239,7 +242,15 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
         }
         if (name === 'session/get') return { meta: await engine.getMeta(body.sessionId) };
         if (name === 'roles/readiness') return engine.roleReadiness(body.sessionId, body.roles);
-        if (name === 'prompt') return engine.prompt(body.sessionId, body.text, body.mode);
+        if (name === 'prompt') {
+          if (expectedStartupNotification) {
+            assert.equal(runtimeReady, true, 'Cold recovery cannot send before native runtime startup');
+            assert.equal(app.server.listening, true, 'Cold recovery cannot send before HTTP listen');
+            assert.deepEqual(moduleRequests, [], 'Recovery must not depend on an inbound Task API/MCP request');
+            assert.deepEqual(body, expectedStartupNotification);
+          }
+          return engine.prompt(body.sessionId, body.text, body.mode);
+        }
         assert.fail(`Unexpected module host intent: ${name}`);
       },
     };
@@ -249,16 +260,23 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(installed.manifest.id, 'cockpit-task');
     assert.equal(installed.manifest.version, '0.1.0');
     assert.ok(installed.root.startsWith(`${dirs.host}/modules/installed/`));
-    const startModule = async () => {
+    const startModule = async ({ listen = true, port = 0 } = {}) => {
       app = Fastify({ forceCloseConnections: true });
+      moduleRequests.length = 0;
+      app.addHook('onRequest', (request, _reply, done) => {
+        if (request.url.includes('/api/')) moduleRequests.push(request.url);
+        done();
+      });
       moduleHost = new ModuleHost({
         hostRoot: dirs.host, observer: engine, host: bridge,
         onInvalidate: () => { invalidations++; },
         report: (id, error) => reports.push({ id, error }),
       });
       await moduleHost.register(app);
-      await app.listen({ host: '127.0.0.1', port: 0 });
-      return `http://127.0.0.1:${app.server.address().port}`;
+      if (listen) {
+        await app.listen({ host: '127.0.0.1', port });
+        return `http://127.0.0.1:${app.server.address().port}`;
+      }
     };
     const origin = await startModule();
     const bootstrap = moduleHost.bootstrap();
@@ -318,6 +336,8 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       if (event.type === 'user.message') nativeMessages.push({ sessionId, content: event.data.content });
     });
     await engine.start();
+    runtimeReady = true;
+    moduleHost.ready();
     const ownerId = await engine.newSession(dirs.work, [owner]);
     isolatedSessionIds.add(ownerId);
     const unionId = await engine.newSession(dirs.work, [owner, executor]);
@@ -420,7 +440,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     for (const request of dispatched) {
       const offered = JSON.stringify(request.tools);
       for (const name of executorTools) assert.ok(offered.includes(name), `Missing Executor tool ${name}`);
-      for (const name of ['task_create', 'task_session_create', 'task_assign']) assert.ok(!offered.includes(name), `Unexpected Executor tool ${name}`);
+      for (const name of ['task_create', 'task_session_create', 'task_assign', 'task_subscribe', 'task_unsubscribe']) assert.ok(!offered.includes(name), `Unexpected Executor tool ${name}`);
     }
     const reference = `[Task assigned to you](task:${taskId}?event=assigned)`;
     assert.deepEqual(nativeMessages.filter(message => message.sessionId === executorId), [{ sessionId: executorId, content: reference }]);
@@ -520,28 +540,153 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(requests.length, afterNoticeModels, 'Cold resume must not send a startup prompt');
     await verifyAssembly(executorId, [executor], executorTools, ['cockpit-task-executor']);
     await promptAndInspect(executorId, 'Synthetic cold-resumed Executor capability check; acknowledge without tools.',
-      executorTools, ['task_create', 'task_session_create', 'task_assign']);
+      executorTools, ['task_create', 'task_session_create', 'task_assign', 'task_subscribe', 'task_unsubscribe']);
 
-    stage = 'cold-restarting the packaged module and reading persisted state';
+    stage = 'explicitly subscribing and delivering one status-change card only to the isolated Owner';
+    const beforeSubscriptionMessages = nativeMessages.length;
+    const subscribedTask = (await tool('task_read', { view: 'execution', task_id: taskId })).result;
+    const subscriptionInput = {
+      actor_session_id: unionId, task_id: taskId, write_context: subscribedTask.write_context,
+    };
+    const already = await mcp.callTool({
+      name: 'task_subscribe', arguments: { ...subscriptionInput, request_id: 'already-in-progress', statuses: ['in_progress'] },
+    });
+    assert.equal(already.isError, true);
+    assert.equal(already.structuredContent.error.code, 'ALREADY_IN_TARGET_STATUS');
+    assert.deepEqual((await tool('task_read', { view: 'subscriptions', task_id: taskId })).result.items, []);
+    const waiting = await tool('task_subscribe', { ...subscriptionInput, request_id: 'subscribe-cancelled', statuses: ['cancelled'] });
+    assert.equal(waiting.result.subscription.owner, ownerId, 'Recipient comes from the Task, not the actor');
+    const unsubscriptionInput = {
+      actor_session_id: ownerId, request_id: 'unsubscribe-cancelled', task_id: taskId,
+      subscription_id: waiting.result.subscription.subscription_id,
+    };
+    const cancelledSubscription = await tool('task_unsubscribe', unsubscriptionInput);
+    assert.equal(cancelledSubscription.result.subscription.state, 'cancelled');
+    assert.deepEqual((await tool('task_unsubscribe', unsubscriptionInput)).result, cancelledSubscription.result);
+    const armed = await tool('task_subscribe', { ...subscriptionInput, request_id: 'subscribe-done', statuses: ['done'] });
+    assert.equal(nativeMessages.length, beforeSubscriptionMessages, 'Registration and cancellation are silent');
+    const completeInput = {
+      actor_session_id: executorId, request_id: 'integration-task-done', task_id: taskId,
+      revision: subscribedTask.revision, write_context: subscribedTask.write_context,
+      status: 'done', outcome: { summary: 'Synthetic isolated completion' },
+    };
+    const complete = await tool('task_report', completeInput);
+    assert.equal(complete.notification_error, null);
+    assert.equal(complete.result.task_status.value, 'done');
+    assert.equal(complete.notifications[0].subscription_id, armed.result.subscription.subscription_id);
+    assert.ok(['accepted', 'queued'].includes(complete.notifications[0].notification.status));
+    const statusCard = `[Task status updated](task:${taskId}?event=status_changed)`;
+    await waitFor(async () => nativeMessages.some(message => message.sessionId === ownerId && message.content === statusCard)
+      && await engine.busyCount() === 0, 'one-shot Owner notification native completion');
+    assert.deepEqual(nativeMessages.slice(beforeSubscriptionMessages), [{ sessionId: ownerId, content: statusCard }]);
+    assert.deepEqual((await tool('task_report', completeInput)).result, complete.result);
+    const subscriptions = (await tool('task_read', { view: 'subscriptions', task_id: taskId })).result.items;
+    assert.equal(subscriptions[0].event.status, 'done');
+    assert.equal(subscriptions[0].state, 'triggered');
+    assert.equal(subscriptions[1].state, 'cancelled');
+    assert.equal(bridgeCalls.filter(call => call.name === 'prompt' && call.body.sessionId === ownerId).length, 1);
+
+    stage = 'seeding only isolated durable crash-gap evidence after closing the module';
     await mcp.close();
     mcp = undefined;
     await engine.stop();
+    runtimeReady = false;
     moduleHost.close();
     await app.close();
-    await startModule();
+    const { TaskStore: PackagedTaskStore } = await import(pathToFileURL(join(installed.root, 'src/task-board/store.js')).href);
+    const dataRoot = await moduleDataRoot('cockpit-task', dirs.host);
+    assert.ok(dataRoot.startsWith(`${dirs.host}/`), 'Crash-gap seed must stay inside this fresh isolated home');
+    const seed = new PackagedTaskStore(dataRoot);
+    const seedCrashGap = label => {
+      const task = seed.executeLocal('task_create', {
+        actor_session_id: unionId, request_id: `cold-create-${label}`, owner: ownerId,
+        title: `Synthetic ${label} recovery`, description: 'Synthetic cold-recovery fixture only.',
+      });
+      const subscription = seed.executeLocal('task_subscribe', {
+        actor_session_id: unionId, request_id: `cold-subscribe-${label}`, task_id: task.task_id,
+        write_context: task.write_context, statuses: ['cancelled'],
+      }).subscription;
+      seed.executeLocal('task_cancel', {
+        actor_session_id: unionId, request_id: `cold-cancel-${label}`, task_id: task.task_id,
+        write_context: task.write_context, reason: 'Synthetic gap between durable transition and external send',
+      });
+      return subscription;
+    };
+    let pending, unknown;
+    try {
+      pending = seedCrashGap('pending');
+      unknown = seedCrashGap('unknown');
+      seed.claimNotification(unknown.subscription_id);
+      assert.equal(seed.getSubscription(pending.subscription_id).notification.status, 'pending');
+      assert.equal(seed.getSubscription(unknown.subscription_id).notification.status, 'unknown');
+    } finally { seed.close(); }
+
+    stage = 'cold service-ready recovery without inbound Task traffic';
+    const port = Number(new URL(origin).port);
+    const beforeColdMessages = nativeMessages.length;
+    const beforeColdCalls = bridgeCalls.length;
+    await startModule({ listen: false });
     assert.deepEqual(moduleHost.bootstrap().errors, []);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(bridgeCalls.length, beforeColdCalls, 'Activation cannot call the native host');
+    await engine.start();
+    runtimeReady = true;
+    assert.equal(bridgeCalls.length, beforeColdCalls, 'Runtime up alone cannot recover before HTTP listen');
+    await app.listen({ host: '127.0.0.1', port });
+    assert.deepEqual(moduleRequests, []);
+    const recoveredCard = `[Task status updated](task:${pending.task_id}?event=status_changed)`;
+    expectedStartupNotification = { sessionId: ownerId, text: recoveredCard, mode: 'enqueue' };
+    assert.equal(moduleHost.ready(), undefined, 'Service-ready dispatch must be nonblocking');
+    moduleHost.ready();
+    await waitFor(async () => nativeMessages.some(message => message.sessionId === ownerId && message.content === recoveredCard)
+      && await engine.busyCount() === 0, 'cold-start pending notification to the native isolated Owner');
+    expectedStartupNotification = undefined;
+    assert.deepEqual(nativeMessages.slice(beforeColdMessages), [{ sessionId: ownerId, content: recoveredCard }]);
+    assert.deepEqual(bridgeCalls.slice(beforeColdCalls).filter(call => call.name === 'prompt'), [{
+      name: 'prompt', body: { sessionId: ownerId, text: recoveredCard, mode: 'enqueue' },
+    }]);
+    const recovered = await app.inject({
+      method: 'POST', url: `${apiBase}/read`, headers, payload: { view: 'subscriptions', task_id: pending.task_id },
+    });
+    assert.equal(recovered.json().result.items[0].notification.status, 'accepted');
+    const uncertain = await app.inject({
+      method: 'POST', url: `${apiBase}/read`, headers, payload: { view: 'subscriptions', task_id: unknown.task_id },
+    });
+    assert.equal(uncertain.json().result.items[0].notification.status, 'unknown');
+
+    stage = 'second cold startup never resends accepted or unknown notification attempts';
+    await engine.stop();
+    runtimeReady = false;
+    moduleHost.close();
+    await app.close();
+    const beforeRepeatCalls = bridgeCalls.length;
+    const beforeRepeatMessages = nativeMessages.length;
+    await startModule({ listen: false });
+    await engine.start();
+    runtimeReady = true;
+    await app.listen({ host: '127.0.0.1', port });
+    moduleHost.ready();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(bridgeCalls.length, beforeRepeatCalls, 'Accepted and unknown receipts cannot be recovery candidates');
+    assert.equal(nativeMessages.length, beforeRepeatMessages);
+    assert.deepEqual(moduleRequests, []);
     const fresh = await app.inject({ method: 'POST', url: `${apiBase}/read`, headers, payload: { view: 'execution', task_id: taskId } });
     assert.equal(fresh.statusCode, 200, fresh.body);
     assert.equal(fresh.json().result.description, description);
     assert.equal(fresh.json().result.executor, executorId);
     assert.equal(fresh.json().result.acknowledged_revision, 2);
+    assert.equal(fresh.json().result.status, 'done');
+    const savedSubscriptions = await app.inject({
+      method: 'POST', url: `${apiBase}/read`, headers, payload: { view: 'subscriptions', task_id: taskId },
+    });
+    assert.deepEqual(savedSubscriptions.json().result.items, subscriptions);
     const persistedActivity = await app.inject({
       method: 'POST', url: `${apiBase}/read`, headers, payload: { view: 'activity', task_id: taskId, limit: 10 },
     });
     assert.equal(persistedActivity.json().result.items[0].text, latest.activity.text);
     assert.ok(reports.every(({ error }) => error.code === 'MODULE_VERSION_MISMATCH'), reports.map(({ error }) => String(error)).join('\n'));
     assert.deepEqual(providerErrors, []);
-    t.diagnostic('Verified real artifact install/activation, shared browser parser asset, digest guards, official HTTP MCP, native roles, assigned and explicit updated notices, actual native Task read/ACK/report, no automatic edit messages, cold resume and persistence.');
+    t.diagnostic('Verified packaged Task, official HTTP MCP, native role subsets/union, assigned/updated notices, one-shot Owner notifications, service-ready cold recovery without inbound requests, no accepted/unknown resend across a second cold startup, and persistence.');
   } catch (error) {
     failed = true;
     t.diagnostic(`Integration failed while ${stage}.`);
