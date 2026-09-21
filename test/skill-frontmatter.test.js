@@ -224,6 +224,31 @@ test('role prompts stay short while the Skills preserve delegation, communicatio
   assert.match(executor, /Do not send Owner questions, confirmations, progress, blockers or completion messages, directly or via subagents/);
 });
 
+test('record guidance preserves the task-specific agreement and evidence without copying prior context', () => {
+  for (const role of ['owner', 'executor']) {
+    const source = prose(readFileSync(join(root, skillDirectory(role), 'SKILL.md'), 'utf8'));
+    for (const requirement of [
+      /goal, scope, key decisions, authorization boundaries, special constraints and completion conditions/,
+      /not complete prior context/,
+      /[Rr]eference general Skills, repository instructions and environment documentation as needed instead of repeating them/,
+      /keep execution-critical task-specific facts explicit/i,
+      /[Ss]eparate prior investigation from current requirements/,
+      /not a raw evidence store/,
+      /accessible, locatable references for detailed evidence/,
+      /"see Issue".*essential agreement|essential agreement.*"see Issue"/,
+      /hide requirements in metadata/,
+      /inherited context/,
+      /[Kk]eep exact values needed to support conclusions or resume safely/,
+    ]) assert.match(source, requirement, `${role}: ${requirement}`);
+  }
+  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  assert.match(executor, /Lead activity with meaningful new changes, findings, decisions or blockers and necessary remaining work/);
+  assert.match(executor, /not a restatement of the brief/);
+  assert.match(executor, /State what a blocker needs/);
+  assert.match(executor, /Lead outcome with the delivered result, how it meets the agreement and remaining limitations, then necessary supporting evidence/);
+  assert.match(executor, /Research results may be detailed: distinguish conclusions, reasoning and unverified points/);
+});
+
 test('explicit one-shot subscriptions preserve silent defaults, role boundaries and uncertain delivery guidance', () => {
   const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
   assert.match(owner, /Owner may explicitly subscribe to specified Task states/);

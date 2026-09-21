@@ -52,6 +52,11 @@ Do not relabel old work to satisfy new scope.
 Save direct user changes as the complete updated Task definition with reason/source
 and the decision superseded. Distinguish approval from proposals/quotations; do not
 copy chat, hide requirements in metadata or require an Owner relay/self-prompt.
+When editing description, preserve the task-specific goal, scope, key decisions,
+authorization boundaries, special constraints and completion conditions, not complete
+prior context. Reference general Skills, repository instructions and environment
+documentation as needed instead of repeating them; keep execution-critical task-specific
+facts explicit and separate prior investigation from current requirements.
 Your successful changed-definition edit on your unfinished Task ACKs that revision;
 check for newer changes. Notices point to Task, not a substitute agreement or authority.
 
@@ -60,15 +65,22 @@ or an unclear rule, not each message/checkpoint. This does not reduce fresh Task
 
 ## Record meaningful facts; deliver truthfully
 
-Task is the sole shared work record. Report meaningful progress, blockers, decisions
-and results, not fixed-interval updates, invented percentages or tool logs.
-State what a blocker needs. Activity is reported, not live; partial results, message
+Task is the sole shared work record, not a raw evidence store. Lead activity with
+meaningful new changes, findings, decisions or blockers and necessary remaining work,
+not a restatement of the brief, fixed-interval updates, invented percentages or tool logs.
+State what a blocker needs. Use accessible, locatable references for detailed evidence,
+not "see Issue" instead of the essential agreement or an assumption of inherited context.
+Keep exact values needed to support conclusions or resume safely.
+Activity is reported, not live; partial results, message
 acceptance and idle do not prove completion. Activity alone does not update status;
 outcome alone does not mark done.
 
 Fulfill the latest acknowledged agreement, then report `done` with a new outcome
 in the same request and useful result references. Explain achievements and unexecuted
-boundaries without presenting partial delivery as complete. Use `in_review` only
+boundaries without presenting partial delivery as complete. Lead outcome with the
+delivered result, how it meets the agreement and remaining limitations, then necessary
+supporting evidence. Research results may be detailed: distinguish conclusions,
+reasoning and unverified points. Use `in_review` only
 when the work requires it, not as a mandatory Owner acceptance gate.
 
 Communicate with the user here, not with Owner. Do not send Owner questions,

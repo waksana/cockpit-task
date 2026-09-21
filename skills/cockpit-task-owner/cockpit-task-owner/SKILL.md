@@ -37,9 +37,17 @@ not child Tasks, dependency engines, helper-request workflows or standing role p
 Executor manages internal steps/subagents without stage-by-stage redispatch or a
 mandatory Owner acceptance gate.
 
-Provide the complete current agreement and minimum relevant materials/environment,
-not copied chat or a mandatory project form. Choose a capable session without
-competing work: one unfinished Task at a time, not one lifetime goal.
+When creating or revising description, preserve the complete current task-specific
+agreement: goal, scope, key decisions, authorization boundaries, special constraints
+and completion conditions. Complete agreement is not complete prior context.
+Reference general Skills, repository instructions and environment documentation as
+needed instead of repeating them; keep execution-critical task-specific facts explicit.
+Separate prior investigation from current requirements. Task is a shared work record,
+not a raw evidence store: use accessible, locatable references for detailed evidence.
+References cannot replace the essential agreement with "see Issue", hide requirements
+in metadata or assume inherited context. Keep exact values needed to support conclusions
+or resume safely; do not copy chat or impose a mandatory project form.
+Choose a capable session without competing work: one unfinished Task at a time, not one lifetime goal.
 New/forked sessions neither isolate shared resources nor inherit authorization.
 
 Use `task_create` to register, `task_session_create` when a new Executor is needed,
