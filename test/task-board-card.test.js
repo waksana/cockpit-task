@@ -40,6 +40,18 @@ test('dialog delegates initial/return focus and revisions use native lazy disclo
   assert.doesNotMatch(history, /back\.current|revisionButton|returnRevision/);
 });
 
+test('Task presentation composes public surfaces, headings and actions without private host styles', () => {
+  const source = readFileSync(new URL('../web/task-board/index.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../web/task-board/style.css', import.meta.url), 'utf8');
+  assert.match(source, /className: 'ck-surface ck-modal tb-dialog'/);
+  assert.match(source, /className: 'ck-heading'/);
+  assert.match(source, /className: 'ck-actions tb-dialog-header'/);
+  assert.match(source, /className: 'ck-actions tb-dialog-footer'/);
+  const modal = css.match(/\.tb-dialog\s*\{([^}]+)\}/)[1];
+  assert.doesNotMatch(modal, /background:|border:|border-radius:|padding:|font:/);
+  assert.doesNotMatch(css, /::backdrop|\.tb-card:focus-visible|var\(--(?:host|chat)-/);
+});
+
 function fixture() {
   const requests = [];
   const invalidations = new Set();
@@ -163,6 +175,7 @@ test('card event headings come from the message and survive loading, failure and
     return card.type(card.props).children[0];
   };
   const heading = card => card.children.find(child => child?.props?.className === 'tb-card-event');
+  assert.equal(render('assigned').props.className, 'ck-button tb-card');
   assert.deepEqual(heading(render('assigned')).children, ['Task assigned to you']);
   assert.deepEqual(heading(render('status_changed')).children, ['Task status updated']);
   snapshot = { phase: 'ready', data: { ...result, status: 'done', revision: 4 }, error: null };
