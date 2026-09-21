@@ -63,7 +63,7 @@ test('Task HTTP MCP speaks the official protocol and retains structured failures
   const f = fixture(async (name, input) => { calls.push({ name, input }); return expected; });
   try {
     await f.connect();
-    assert.deepEqual(f.client.getServerVersion(), { name: 'cockpit-task', version: '0.1.4' });
+    assert.deepEqual(f.client.getServerVersion(), { name: 'cockpit-task', version: '0.1.5' });
     const listed = await f.client.listTools();
     assert.deepEqual(listed.tools.map(tool => tool.name), ['task_read']);
     const response = await f.client.callTool({ name: 'task_read', arguments: { task_id: 'one' } });
