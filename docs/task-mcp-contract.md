@@ -1,17 +1,16 @@
 # Task MCP 工具契约
 
-状态：实现及独立审阅已完成；交付记录见 [PR #3](https://github.com/waksana/cockpit-task/pull/3)，不代表发布或部署。保留节点讨论作为决策来源，当前接口以本文及 `src/task-board/contracts.js` 为准。
-
-依据：[Task Schema](task-schema.md)、[工具与技能设计](task-tools-skills.md)
-
-日期：2026-09-20
+本文与 [contracts.js](../src/task-board/contracts.js) 定义当前工具输入、结果和错误。
+记录语义见 [Task Schema](task-schema.md)，行为指导见
+[角色 Skills](task-tools-skills.md)，隔离验证见
+[生命周期回放](task-lifecycle-testing.md)。
 
 ## 1. 工具集合与角色
 
-实现采用以下十个工具。去掉续办与改派，保留独立的执行 session 创建入口；
-新增 Owner 明确登记和取消的一次性状态订阅，不恢复自动最终通知或监工。
-Task MCP 负责创建并配置执行能力，指派仍独立。Task 模块仅提供 Owner / Executor
-两份角色技能，不包含 Coding / Research 工作技能。
+Task 提供十个工具，模块 ID 与 MCP key 为 `cockpit-task`。
+登记、创建执行 session 和首次指派是独立操作；状态订阅是可选的一次性等待，
+不是默认最终通知、监工或依赖调度。模块只维护 Owner / Executor 两份角色技能，
+不包含 Coding / Research 工作技能。
 
 | 工具 | Owner | Executor | 职责 |
 | --- | --- | --- | --- |
@@ -26,18 +25,23 @@ Task MCP 负责创建并配置执行能力，指派仍独立。Task 模块仅提
 | `task_subscribe` | 是 | 否 | 显式登记未来状态的一次性 Owner 通知，当前已匹配则失败 |
 | `task_unsubscribe` | 是 | 否 | 取消仍在等待的订阅，不撤回已触发或发送的通知 |
 
-表中角色表示系统应注入的工具集合，不是逐 Task 权限表。用户明确：session 具有对应 MCP 就可调用，包括操作其他 Task；不再按 owner / executor 字段限制读写，也不要求通用可信 caller 协议。分工字段用于协作、筛选和追溯，不作为 ACL。版本、状态、ACK、幂等和首次绑定等记录一致性检查仍然保留。
+表中角色表示宿主注入的工具集合，不是逐 Task 权限表。具有工具即可操作其他 Task，
+owner / executor 用于责任、筛选和追溯，不作为 ACL。版本、状态、逐版 ACK、
+幂等、固定绑定与单 session 单项未结束执行等数据检查仍适用于所有调用者。
 
-Executor 默认工具集合不包含创建 Task 或为自己追加 Owner。本轮不提供续办、改派或已有 session 动态追加 Owner；即使具有工具，已绑定的 Executor 也不可通过编辑替换，done / cancelled 不可恢复为执行状态。这是所有调用者共同遵守的数据规则，不是归属鉴权。
+Executor 子集没有创建 Task 或订阅工具。宿主负责已有 session 的角色管理；
+Task 自身不暴露角色变更，指派不追加角色、Skill 或 MCP。
+已绑定 Executor 不可替换，done / cancelled 不可恢复执行。
 
-用户已确认创建时同一模块可选多个角色。仅选 Executor 时使用上表 Executor 列；
+同一模块可以选择多个角色。仅选 Executor 时使用上表 Executor 列；
 同时选 Owner / Executor 时工具取并集，共享工具只注册一次，两份 Skill 按委派和执行场景配合。
-`task_session_create` 仍只创建 Executor，不隐式选中两种角色；创建时多选不等于运行中追加角色，
-也不改变单 session 最多一项未结束执行 Task 的规则。
+`task_session_create` 只为新 session 选择 Executor，不隐式选中两种角色。
+角色变化或多选不等于实际承接，也不放宽执行占用限制。
 
 ### 普通更新不发消息，重要更新由 Owner 处理队列
 
-用户明确：普通要求更新只写 Task，不发送追加指令、提醒或待执行 cue。Owner 真正判断本次更新非常重要、不能等待正常同步时，可明确触发强制对齐。
+普通要求更新只写 Task，不发送追加指令、提醒或待执行 cue。
+Owner 判断重要更新不能等待正常同步时，可明确进行一次重要更新交接。
 
 - Owner 按 Skill 先读取并保留 pending 内容，再按已保存的消息 ID 清理，包括其他 session / subagent 的消息；不能盲删未知内容或并发新消息。
 - 随后总结保留的上下文，最后附上 `[Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新 revision 的要求，合为一条消息发送；不复制完整 description。
@@ -45,9 +49,10 @@ Executor 默认工具集合不包含创建 Task 或为自己追加 Owner。本�
 - 首次指派先检查 idle / 空 queue，已知忙碌则不发送、不主动中断；检查与 enqueue 发送之间存在竞态，queued / unconfirmed 必须保留真实分步结果，不承诺绝不入队或盲重发。
 - 不通过后台巡查、定时发送或 Task 自建消息队列触发该行为，不宣称是原子排他保证。
 
-这是 Owner Skill 的例外流程，不是新的 Task 工具或自动队列机制。完整边界与模板见 [Owner 随包参考](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)。先前的 `cockpit_advance_queue` 已退出当前宿主契约；实现历史保留在[宿主契约](task-host-contract.md)。保留既有单次中断、按 ID 删除 pending、原生状态读取和消息发送。
-
-只有 Owner 判断“本次更新非常重要，不能等待正常同步”后才介入。task_edit、definition_check 和 ACK 差异都不自动触发队列清理、中断或消息发送。
+这是 Owner Skill 指导的例外流程，不是 Task 工具、自动推进或后台循环。
+完整边界与模板见 [Owner 随包参考](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)，
+公开接入见[宿主契约](task-host-contract.md)。
+task_edit、definition_check 和 ACK 差异都不自动触发队列清理、中断或消息发送。
 
 ## 2. 共用输入约定
 
@@ -62,7 +67,7 @@ Executor 默认工具集合不包含创建 Task 或为自己追加 Owner。本�
 | `write_context` | 从读取或写入结果取得的不透明并发上下文；原样回传，不自行构造 |
 | `reason` | 变更原因；涉及用户澄清或取消时记录相应来源说明 |
 
-`write_context` 是已实现的不透明技术上下文，不是新的业务版本或身份凭据。它分别编码生命周期与可编辑资料代次；description 使用独立 revision。归属/状态变化推进生命周期，title/references/metadata 变化推进资料代次：
+`write_context` 是不透明技术上下文，不是业务版本或身份凭据。它分别编码生命周期与可编辑资料代次；description 使用独立 revision。首次绑定/实际状态变化推进生命周期，title/references/metadata 实际变化推进资料代次：
 
 - 取消或完成后迟到的执行状态、成果请求不能复用旧上下文覆盖结束事实；不同 session 不能争抢同一 Task 的首次指派。
 - 只有 description 更新时，不能一刀切拒绝本应允许保存的旧版 activity；按报告各部分分别处理。
@@ -82,7 +87,10 @@ activity.text 最长 4,000，outcome.summary 最长 8,000；每个 activity/outc
 
 ### task_read
 
-用户确认读取应按角色关注点区分，不一次返回全部内容。以下视图已实现。`view` 明确指定；Owner 默认用 `list` 并显式指定 `owner=自己的 session ID`，单项调用 `overview`；Executor 默认调用 `execution`。不根据可信身份或 Task 归属推导权限，任何具有读取工具的 session 均可选所需视图。列表筛选使用显式 owner / executor 等业务字段，不限制为调用者本人；`actor_session_id` 提供归因和定义提醒，不是自动列表筛选。
+`view` 必须明确指定。Owner 默认用 `list` 并显式指定 `owner=自己的 session ID`，
+单项用 `overview`；Executor 默认用 `execution`。这些是 Skill 的信息默认值，
+不一次返回全部内容，也不限制任何持有工具者的读取范围。
+列表筛选使用显式 owner / executor；actor 只提供归因和定义提醒，不自动筛选列表。
 
 | `view` | 其他输入 | 返回内容 |
 | --- | --- | --- |
@@ -131,7 +139,9 @@ UI 可以不提供 actor，不伪造 human session ID；定向读取仍检查该
 
 ### task_session_create
 
-这是已实现的独立入口。Owner 决定新建以及所需工作环境；Task MCP 通过宿主公开能力创建真实 Executor session、装配 Task Executor 所需指导和工具，并确认能力就绪。不能要求 Owner 自己拼装 MCP、skills 和角色 System Prompt，或用自报“能力已就绪”代替程序确认。
+Owner 决定新建及所需工作环境；该独立入口通过宿主公开能力创建真实 Executor
+session、装配 Task 指导与工具并显式检查能力。不要求 Owner 手工拼装，
+也不接受自报“能力已就绪”代替检查。
 
 完整输入：`actor_session_id, request_id, cwd`。不接受 `work_skills`、任意角色或宿主配置透传。Task 只负责自身 Executor 协作能力；Coding / Research 的内容、安装和维护不属于本模块。模块调用 `context.host.call("session/new",{cwd,roles:[{moduleId:"cockpit-task",roleId:"executor"}]})`，再用 `roles/readiness` 与 `session/get` 检查能力及原生状态。
 
@@ -139,7 +149,9 @@ UI 可以不提供 actor，不伪造 human session ID；定向读取仍检查该
 
 正常在 `result.operation` 返回真实 `session_id` 与明确的创建、能力准备结果。创建成功但能力未就绪时保留真实 session ID 和失败步骤，不宣称可派单；创建结果未知时也不自动再建一个。原操作结果可通过 `task_read(view=operation)` 查询，pending 重放返回 `OPERATION_UNCONFIRMED`，不再次调用宿主。
 
-这个工具不创建 Task、不绑定 executor、不发送启动消息。Task 登记与 session 创建可独立准备，两者就绪后再调用 `task_assign`。底层由已实现角色能力接口的宿主管理真实 session；不兼容的宿主必须明确拒绝，不降级成未装配 session。
+这个工具不创建 Task、不绑定 executor、不发送启动消息。创建成功或能力就绪不证明
+之后仍可立即接单，task_assign 会重新检查。宿主管理真实 session 和角色，
+不兼容必须明确拒绝，不降级成未装配 session。
 
 ### task_assign
 
@@ -159,14 +171,18 @@ UI 可以不提供 actor，不伪造 human session ID；定向读取仍检查该
 ```
 
 该引用就是完整首次派单消息，标签无需 UI 渲染也能说明原因，不复制 description。
-Owner 不再手工重复发送。`event` 是消息/引用元数据，不增加工具参数、Task 字段、
+Owner 不手工重复发送。`event` 是消息/引用元数据，不增加工具参数、Task 字段、
 Task 类型或状态，也不是命令或调度机制。工具的能力检查、原生忙碌判断与幂等规则不变。
 
 发送时 Task 的定义与归属必须仍符合该次操作前提，不能拿先前检查冒充现在可发送。已知目标不能安全接收时，在绑定前拒绝；若绑定后重新检查发现忙碌或冲突，返回归属已应用、消息未发送的真实部分结果，不自动重试或换人。适配器在确认 idle 且队列为空后调用 `prompt({sessionId,text,mode:"enqueue"})`，空闲时直接开始；不使用会中断新启动工作的 immediate。检查与发送之间不是原子窗口，竞态下实际 queued 必须作为异常保留，不能宣称严格 idle-only 保证。
 
-新建 session 通常来自 `task_session_create`；复用由 Owner 从宿主列表中选择已有能力的 session。本体创建时选择角色，`cockpit_list_sessions` 带出所选角色。无论哪种来源，指派工具仍负责确认当前能力可用，不让 Owner 手工检查，也不把角色标签或此前创建成功当作永久就绪证明。
+新建 session 通常来自 `task_session_create`；复用由 Owner 从宿主列表选择候选者。
+列表角色标签不代表当前能力就绪。无论来源，指派工具都负责重新检查，
+不把此前创建成功或宿主角色记录当作永久就绪证明。
 
-用户已明确不在指派时补齐能力。已有 session 缺少 Executor 角色指导、Skill 或工具时，在绑定与发送前返回 `CAPABILITY_UNAVAILABLE` 及缺失项，不追加角色、启用 MCP、重载或自动新建替代 session。一个 Executor 完成上一项 Task 后可复用，但不得同时承担两项未结束 Task。
+已有 session 缺少 Executor 角色指导、Skill 或工具时，绑定和发送前返回
+`CAPABILITY_UNAVAILABLE` 及缺失项，不追加角色、启用 MCP、重载或自动新建替代者。
+完成或取消后 session 可复用，但不得同时承担两项未结束 Task。
 
 指派不改变 description、revision 或 changelog，不生成 Executor activity。
 
@@ -223,7 +239,10 @@ description 如提供，必须是完整的新定义，不是让执行者自行�
 
 标题和补充资料的编辑不冒充 description 修订；实际要求、约束和验收变化必须更新 description，不能藏进 metadata 绕过定义同步。未提供字段不修改，资料按共用输入约定整体替换。
 
-Owner 修订后保留 Executor 的旧 ACK，触发后续更新提醒。当前 Executor 自己成功修订正文时同时确认新 revision；不改变 status，不自动生成 activity。文字编辑不能恢复 done / cancelled，旧成果仍标注原版本。
+Owner 修订后保留 Executor 的旧 ACK。仅当自报 actor 是当前绑定 Executor、
+Task 未结束且正文实际改变时，同时确认新 revision；不改变 status 或生成 activity。
+相同正文、仅资料修改及终态编辑不自动 ACK。编辑不能恢复 done / cancelled，
+旧成果仍标注原版本。
 
 输出变更效果、当前 revision / ack 和 write_context，不重复返回全文。并发冲突不覆盖当前定义，也不自动合并自然语言要求。
 
@@ -231,7 +250,10 @@ Owner 修订后保留 Executor 的旧 ACK，触发后续更新提醒。当前 Ex
 
 输入：共用变更字段，加 `revision`。
 
-具有 ACK 工具即可对指定 Task 提交确认，不因调用者不同而作归属拒绝。确认语义仍是该 Task 的执行者已读当前定义，不能把“另一个 session 有工具”当成执行者已经知晓。Skill 指导如实确认；后端校验版本与生命周期，不声称验证实际阅读或理解。操作者记录与本人修订自动 ACK 所需的业务上下文在节点 4 收口，不重新引入访问控制。
+具有 ACK 工具即可对指定 Task 提交确认，不按操作者与 Task 的关系拒绝。
+确认语义是固定 Executor 已读当前定义；记录其 confirmed_for 和自报 author，
+并不验证实际阅读或理解。Skill 必须如实确认，不能代 Executor 虚报。
+后端校验当前 revision、已有执行归属和未结束生命周期。
 
 只更新 acknowledged_revision。首次 ACK、后续 ACK 都不改变 status、不生成 activity、不发消息。已经确认同一版时返回 unchanged；最新定义已变时拒绝旧 ACK，并附上更新提醒。
 
@@ -244,16 +266,18 @@ Owner 修订后保留 Executor 的旧 ACK，触发后续更新提醒。当前 Ex
 | 可选部分 | 输入形状 | 意义 |
 | --- | --- | --- |
 | `activity` | `{text}` | Executor 对所依据版本的执行活动，作者与保存时间由服务记录 |
-| `status` | `in_progress | blocked | in_review | done` | 明确状态变化；不靠 activity 文本推断 |
+| `status` | `in_progress`、`blocked`、`in_review`、`done` | 明确状态变化；不靠 activity 文本推断 |
 | `outcome` | `{summary, references?}` | 提交的成果；保留其 description revision 和执行归属 |
 
 各部分都是显式输入：只写 activity 不改状态；只改状态不凭空生成一条 activity；提交 outcome 本身不隐式进入 done。完成时可一次明确提交 `status=done` 与 outcome，两者一起保存。进入 done 必须有本次完成对应的成果，不借旧版或前次执行的 outcome 代替。
 
 在当前 revision 且已 ACK 的前提下，合法状态和成果作为一个执行更新一起提交。无合法 lifecycle 转换、无成果却请求 done、格式错误等输入应在写入前明确拒绝，不随意部分执行。
 
-activity 只能引用当前执行归属下本人已经 ACK 过的版本；本人成功修订产生的自动 ACK 同样有效。用户明确：未确认过的版本不能作为活动依据，应拒绝，不因为它是“执行事实”就宽松保存。版本存在或已经读取也不等于 ACK。
+activity 只能引用固定 Executor 精确 ACK 过的版本，合规自动 ACK 同样有效。
+未确认版本不能作为依据；版本存在、读过或已确认更高版本都不能证明它曾获 ACK。
 
-唯一已确认的部分应用场景是：description 变更使报告过期，而当前 Executor 基于已确认旧版的 activity 本身仍可合法追加：
+唯一的报告部分应用场景是 description 已更新，而基于已确认旧版的 activity
+在其他生命周期和并发条件下仍可合法追加：
 
 - activity 保存原 revision。
 - 同次请求的 status / outcome 不保存，返回 DESCRIPTION_UPDATED。
@@ -271,7 +295,8 @@ activity 只能引用当前执行归属下本人已经 ACK 过的版本；本人
 
 取消不是执行成果报告，不应因未 ACK 新 definition 而强迫执行者先继续工作；仍核对生命周期和并发前提。明确置 cancelled，不改变 description、revision、changelog，不冒充执行者 activity，也不自动停止 session。仅当前有匹配的一次性订阅时由系统发送状态卡片，默认不发消息。按共同规则返回定义提醒。
 
-只取消未结束任务；已 cancelled 返回 unchanged，done 不能通过 cancel 重写已完成事实。取消后恢复未获当前范围授权。
+只取消未结束任务；已 cancelled 的合法请求返回 unchanged，done 不能通过 cancel
+重写已完成事实。不提供终态恢复；取消不等于实际执行已停止。
 
 ### task_subscribe
 
@@ -324,7 +349,7 @@ activity 只能引用当前执行归属下本人已经 ACK 过的版本；本人
 
 读取直接返回所请求的数据，操作状态不与 Task.status 混用。
 
-已实现的主要错误类别（业务错误与字段效果分开）：
+主要错误类别（业务错误与字段效果分开）：
 
 | 错误 | agent 应如何处理 |
 | --- | --- |
@@ -334,7 +359,7 @@ activity 只能引用当前执行归属下本人已经 ACK 过的版本；本人
 | `TASK_STATE_CONFLICT` | 读取当前生命周期状态，不用普通报告恢复已结束任务 |
 | `EXECUTOR_OCCUPIED` | 由 Owner 选择其他安排，不抢占或自动新建 |
 | `CAPABILITY_UNAVAILABLE` | 能力未就绪，不宣称指派完成 |
-| `EXECUTOR_NOT_READY` | 目标不能安全非排队启动，消息未发送；不排队、自动重试或擅自中断 |
+| `EXECUTOR_NOT_READY` | 当次检查不满足可接单条件，未发送；检查是否已绑定，不自动重试或擅自中断 |
 | `REQUEST_ID_CONFLICT` | 不用同一请求标识提交不同内容 |
 | `TASK_NOT_FOUND` / `OPERATION_NOT_FOUND` / `REVISION_NOT_FOUND` | 指定 Task、操作或修订不存在（404），不编造空记录 |
 | `OPERATION_UNCONFIRMED` | 读取原操作及可靠证据，不自动重发或换人 |
@@ -389,18 +414,22 @@ Executor:
 
 每次写入都带 actor_session_id 和新的明确 request_id；已有 Task 写入还带读取返回的 write_context，create/session_create/unsubscribe 不带。相同操作重试保留相同输入和 request_id。Skill 读取也提交自己的 actor_session_id；每次响应都处理 definition_check。
 
-重要更新由 Owner 按正式 Skill 保存并清理 pending 内容，再用 `cockpit_send_prompt` 一次发送摘要，末尾附 `[Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新 revision 的要求，替代旧的文本前缀模板。必要时使用保留队列的单次中断；不用清全部队列的 Stop 作为清理捷径，不重复发送未知结果的消息，不把接续回执当作当前 revision 的 ACK。普通 `task_edit` 不自动发通知，是否发送仅由 Owner 明确决定。
+重要更新由 Owner 按 Skill 保存并清理 pending 内容，再通过宿主公开发送入口一次发送
+摘要、`[Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新版要求。
+必要时单次保留队列地中断；不用 Stop 作为清理捷径，不重复未知发送，
+不把接续回执当作当前 revision 的 ACK。普通 task_edit 不发送通知。
 
-## 6. 实现边界与历史依据
+## 6. 传输与启动边界
 
-本文最初是节点 2 工具设计草案；工具、角色装配、持久化、卡片和必要宿主能力现已在开发工作树实现，不再作为“待下个节点才能实施”的限制。未声明已发布、合并或部署；不引入通用可信调用身份或逐 Task 访问控制。
+模块 HTTP MCP 与普通 HTTP API 挂载于宿主，共用业务服务和独立
+`task-board.sqlite`，不启动额外 daemon。宿主按角色装配配置，
+不为十个业务工具另建注册表。
 
-节点 3 确认的传输方向已落地：Task 模块实现自己的 HTTP MCP，与供界面使用的普通
-Task HTTP API 一起挂载到本体；两者复用同一业务操作层。模块提供 MCP 配置供
-宿主角色装配使用，不要求本体为这十个业务工具另建注册或协议实现。
+官方 stateful Streamable HTTP transport 让后续 POST 的取消通知关联原调用；
+取消阻止后续副作用，不回滚已完成动作。协议 session 失效不构成重放业务写入的理由。
+细节见[宿主契约](task-host-contract.md)。
 
-模块采用官方 stateful Streamable HTTP MCP，使后续 POST 的取消通知能关联原调用。它与 HTTP API 共用业务服务，不启动独立 daemon。前端 / MCP 新建共用角色选择与装配；重要更新的队列处理仅由 Skill 指导 Owner，不宣称专门原子控制接口。
-
-原生调查来源见 [宿主接入契约](task-host-contract.md)：immediate 可插入执行中的 turn，两种中断路径有不同的队列副作用。这些研究解释为何首次指派不抢占，以及清队列前必须保留内容并明确处理并发；不能把早期“接口尚缺失”的历史描述当作当前实现状态。
-
-技术收口见 [实现契约](task-implementation.md)：独立 `task-board.sqlite`、分代 write_context、逐版 ACK、原子本地回执、显式未发送操作恢复、有界读取和标准 Task 链接。操作恢复不等于任务续办或改派；仍保留真实外部副作用结果。
+通知恢复要求 `context.serviceReadyVersion === 1`，在 DB 打开或升级前检查。
+只从宿主 runtime 启动且 HTTP 监听后的 `onReady` 恢复明确 pending 的发送，
+不在激活、提前的 agent 事件或首次读取时恢复，不重试 unknown 或已尝试失败项。
+并发、持久回执和安全恢复细节见[实现契约](task-implementation.md)。

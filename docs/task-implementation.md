@@ -1,276 +1,241 @@
 # Task implementation contract
 
-The packaged [Owner reference](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)
-guides explicit pending-message preservation, cleanup and a single summary
-followed by a Task updated reference. The host advancement helper is retired;
-capability checks remain explicit and on demand. This simplification does not
-add readiness badges. The Task message-event link grammar remains module-local;
-durable status-notification recovery additionally uses the host's public
-service-ready lifecycle callback.
-The companion lifecycle change is
-[waksana/cockpit#74](https://github.com/waksana/cockpit/pull/74).
-
-This document closes the technical choices left by the design drafts. The user
-has authorized continuous implementation and delivery of both Task and the
-required host changes; only material unresolved product decisions require a pause.
-
-Status: the Task core, module integration, role resources and required host
-capabilities are implemented and independently reviewed. Delivery is tracked by
-[Task PR #3](https://github.com/waksana/cockpit-task/pull/3) and
-[waksana/cockpit#68](https://github.com/waksana/cockpit/pull/68);
-this is not a publication or production-deployment claim.
-Earlier node/draft wording in the design history records decision provenance,
-not a requirement to wait for another stage before implementing.
+This document defines storage, concurrency, delivery and presentation boundaries.
+See the [MCP contract](task-mcp-contract.md) for input/result shapes, the
+[host contract](task-host-contract.md) for integration, and the
+[lifecycle replay guide](task-lifecycle-testing.md) for isolated verification.
 
 ## Module and data
 
-The new module is `cockpit-task`, separate from the legacy Work Commander service.
-The previous `task-board` identity needs an explicit offline host migration of its
-data directory and saved role selections; see [cutover boundaries](task-board.md#explicit-existing-installation-cutover).
-Its entry is `cockpit.module.json`; it runs in Cockpit, not a standalone daemon.
-Legacy launch commands, databases and installations are not automatically changed.
-The module uses `task-board.sqlite` under its host-provided dataRoot. It does not
-open or migrate the old service database.
+The module ID and MCP server key are `cockpit-task`, display name Task, version
+`0.1.0`. Its manifest is [cockpit.module.json](../cockpit.module.json).
+`src/task-board/`, `web/task-board/` and the database filename `task-board.sqlite`
+are current internal paths. Task runs inside Cockpit, not a standalone service.
 
-Task HTTP API and HTTP MCP share one application service. SQLite transactions
-protect local changes. Description snapshots, activity, outcomes, acknowledgements
-and operation receipts have distinct tables. Schema version 2 adds a distinct
-subscriptions table with a partial unique index for one waiting subscription per
-Task Owner, and an index for known-unsent notifications. Startup upgrades version 1
-transactionally without changing existing Task or receipt rows. Older binaries
-reject the newer schema rather than opening it with incomplete semantics.
-Executor has a partial unique index
-across unfinished Tasks. Acknowledgements retain each confirmed revision, not just
-the greatest number. Database timestamps are assigned by the service.
-HTTP MCP uses the official stateful Streamable HTTP transport so cancellation
-notifications on a later POST reach the original request. Protocol sessions are
-transport state, not a separate daemon or trusted business actor identity.
+The database lives in the host-provided module dataRoot. Task does not read
+credentials, session histories, native runtime stores or other service databases.
+Its HTTP API and HTTP MCP share one application service and set of business rules.
+
+SQLite transactions protect local mutations. Separate tables hold Tasks,
+description snapshots, exact revision acknowledgements, activities, outcomes,
+operation receipts and subscriptions. A partial unique index limits each
+Executor to one unfinished Task. Subscription uniqueness permits one waiting
+subscription per Task Owner; Owner is fixed for the Task.
+
+Schema version 2 includes subscriptions and notification evidence. Opening a v1
+Task database upgrades it transactionally, preserving Task and receipt rows;
+unsupported newer schema versions fail with `SCHEMA_TOO_NEW`. Service-assigned
+timestamps and retained histories are not caller-authenticated evidence.
+
+Activation requires Module API v1, the exact module identity,
+`context.serviceReadyVersion === 1` and `context.host.call` before storage opens
+or migrates. Do not remove these guards or silently skip recovery on an
+unsupported host. Web activation separately requires API v2, UI v1 and a portal.
 
 ## Business context, not authentication
 
-Mutation input includes `actor_session_id`, the caller's reported session identifier.
-This is labelled `reported`, not an authenticated caller identity. It supplies
-authorship, the Executor's current Task lookup for definition reminders, and the
-existing rule for automatic ACK on an Executor's own definition edit.
-HTTP callers supply the same context; browsing a session is not proof of authorship.
-There is no per-Task actor ACL, and no role argument grants or revokes tool access.
-Read-only calls may omit actor_session_id, as a human card is not an acting session.
-Skills pass it on reads as well so the response can check their current assigned Task.
+All mutations require `actor_session_id`, a reported session identifier.
+Reads may omit it; browser readers do not invent a human session ID.
+Skills include their actor on reads to check their currently assigned Task as
+well as any explicit target. Actor is not an automatic list filter or credential.
 
-ACK records both the Task's fixed executor (`confirmed_for`) and the reported
-actor (`author`). Cross-Task ACK operations remain callable as agreed; they assert
-the Executor's acknowledgement, not proof that the caller or Executor read a text.
-Skills require truthful attribution. Reports retain the same distinction.
+Role assembly determines the available tool subset, not a per-Task ACL.
+ACK history records the fixed Executor as `confirmed_for` and the reported actor
+as `author`. Cross-Task operations remain callable, but Skills must not claim
+another Executor has read a definition. The backend does not verify reading,
+understanding or user authorization through actor IDs or chat inspection.
+
+The host controls role management, including changes to existing sessions.
+Task itself exposes no such mutation: session creation selects Executor for
+the new session, while assignment checks existing capabilities without adding
+roles, enabling resources or repairing the target.
 
 ## Concurrency and replay
 
-All writes require request_id. The request fingerprint includes operation name,
-actor and complete validated input. One ID with different input is a conflict.
-Local mutation and final receipt commit atomically; retries replay effects but
-always perform a fresh definition_check.
+Every write has a stable `request_id`. Its fingerprint covers the tool and
+complete validated input, including actor. The same ID with different input
+fails; exact-input replay returns the original effects without repeating them.
+Local effects and final receipt commit atomically. `definition_check` is always
+fresh, not stored as a permanent conclusion in a receipt.
 
-write_context is an opaque encoded concurrency snapshot returned by reads/writes,
-not a credential. It contains separate lifecycle and editable-metadata generations.
-Assignment and state changes advance lifecycle generation. Title/references/metadata
-changes advance editable generation. Description has its own revision. Activity and
-ACK do not invalidate unrelated writes.
+`write_context` is an opaque concurrency snapshot, not a credential or a second
+description version. Return it unchanged:
 
-Every existing-Task write except subscription cancellation checks lifecycle context.
-`task_unsubscribe` instead checks the specified subscription's waiting state in
-the transaction; it cannot alter Task state or recall a consumed notice.
-Definition edits also check
-editable generation and supplied revision. ACK checks the current revision.
-Reports permit activity against an actually ACKed older revision, but reject stale
-status/outcome. No other report validation error partially writes activity.
-done requires a new outcome in that same report. Terminal Tasks do not accept
-execution reports or ACK; their definition/history remain readable and may be edited
-without reopening execution or automatically ACKing a terminal Task.
+| Generation | Changes that advance it | Checks |
+| --- | --- | --- |
+| Description `revision` | Actual description changes only | Definition edits, current ACK, assignment and reports as applicable |
+| Lifecycle | First assignment or actual status transition | Existing-Task writes except subscription cancellation |
+| Editable materials | Actual title/references/metadata changes | Definition edits |
+
+ACK and activity do not invalidate unrelated writes. Subscription registration
+checks lifecycle without advancing it. `task_unsubscribe` instead checks the
+specified subscription's waiting state in its transaction; it neither changes
+Task state nor recalls a consumed notice.
+
+Description changes atomically write the complete text, next revision and
+changelog snapshot. Only an actual changed-description edit by the assigned
+Executor on an unfinished Task auto-ACKs that revision. Unchanged text,
+materials-only edits and terminal edits do not. ACK never changes status or
+creates activity.
+
+Reports require an exact acknowledgement for the supplied revision and fixed
+Executor. A later ACK does not cover skipped revisions. An acknowledged older
+activity may save while stale status/outcome are rejected with
+`DESCRIPTION_UPDATED`; no other report validation failure partially saves
+activity. Results distinguish saved, rejected and not_requested fields.
+`done` requires a new outcome in that same request.
+
+Terminal Tasks reject execution reports and ACK. Their definition/history remain
+readable and editable without reopening or auto-ACK. Old outcomes retain their
+revision; overview marks whether the latest outcome matches the current definition.
 
 ## External operation receipts
 
-Session creation and dispatch write a durable pending receipt before calling host.
-A process interruption during an external call leaves an unconfirmed receipt;
-no startup recovery automatically repeats the call. Expose all known step results
-through task_read(view=operation). Definition checks are not stored in receipts.
+Session creation and assignment persist a pending receipt before host calls.
+Step results are updated durably. A crash during an external action leaves
+unconfirmed evidence; startup does not automatically repeat creation or dispatch.
+`task_read(view=operation,request_id)` exposes the known result without host refresh.
 
-task_assign first validates an unassigned todo and existing Executor capability
-and current native readiness, binds the Task transactionally, then checks the
-Task/version and native state again before sending exactly one
-`[Task assigned to you](task:<uuid>?event=assigned)` reference to start
-execution while idle. The adapter calls host `prompt` with `mode:"enqueue"`:
-after the idle/empty-queue checks this starts normally without interrupting a turn.
-It deliberately does not use native `immediate`, which could interrupt work that
-starts during the race. If readiness changes and the host returns `queued:true`,
-the operation records that real queueing as `UNEXPECTED_QUEUE`, not successful
-dispatch or confirmed non-delivery. The checks and send are not atomic.
+Creation retains a confirmed session ID even if capability inspection fails.
+It does not bind a Task or send an initialization prompt, and replay never
+creates a replacement.
 
-Known not-sent, failed or unknown steps remain visible, including a fixed assignment
-that already committed. Replaying request_id never resends. An explicit recovery
-of a confirmed not-sent dispatch may use task_assign with resume_request_id and a
-new request_id, same Task/executor and fresh context/revision. It must verify the
-original receipt proves no send occurred. This is operation recovery, not Task
-reopening or reassignment. Unknown sends cannot use this path.
+Assignment proceeds as follows:
 
-Session creation with a known ID but failed readiness returns that ID and capability
-details; it never creates a replacement on retry. Ordinary host reload/recovery is
-explicit, not performed by Task assignment.
+1. Inspect current Executor capability and native idle/empty availability.
+2. Bind the unassigned todo transactionally, enforcing single unfinished work.
+3. Recheck capability/native state and the Task's version, lifecycle and binding.
+4. Persist message uncertainty before calling host `prompt` once with the entire
+   message `[Task assigned to you](task:<uuid>?event=assigned)` and `mode:"enqueue"`.
+
+The idle checks and send are not atomic. Enqueue avoids proactively interrupting
+a turn that starts in the race; an actual `queued:true` result is retained as
+`UNEXPECTED_QUEUE`, not dispatch success or proof of non-delivery.
+Accepted does not mean read, ACKed or executing.
+
+Failures before or after binding retain their actual effects. Capability and
+availability rejection details include capability `reasons`, native
+`loaded/status`, fixed `availability_reasons` and `observed_at`, without message
+or question bodies. These are failure-time observations, not live status;
+receipt reads/replays do not refresh them or repair the session.
+
+Exact request replay never resends. Explicit recovery requires a new request ID,
+fresh context/revision, the same Task/Executor and `resume_request_id` pointing
+to an unused finalized assignment receipt proving `assignment=applied` and
+`message=not_sent`. Recovery consumes that receipt and repeats the safety checks.
+Pending, unknown, queued or accepted sends cannot authorize recovery.
+No recovery path reassigns, reopens a terminal Task or silently rolls back binding.
 
 ## One-shot status notifications
 
-`task_subscribe` checks lifecycle context, current status and the one-waiting
-constraint in the registration transaction. Already matching rejects without
-registering or notifying. Targets are explicit Task statuses, not expressions;
-recipient is the saved Task Owner, never a caller-supplied destination.
+Subscription is optional and normally unused. Owner registers only for a concrete,
+necessary future Owner action, not progress/completion watching; this is Skill
+guidance rather than a server-side policy expression. Choose minimal targets,
+withdraw unnecessary waits and never automatically re-subscribe. Executor work
+does not depend on an Owner wait or notice being read.
 
-An actual status transition atomically saves the Task effects, operation receipt,
-subscription consumption, transition event and `pending` notification. Same-status
-reports and failed transitions do not trigger. An unmatched terminal transition
-expires the wait. Cancelling a waiting subscription races through the same SQLite
-transaction boundary; it cannot revoke a triggered event.
+Registration atomically checks lifecycle, current status and waiting uniqueness.
+Already matching fails without registration or immediate notification.
+A terminal Task cannot register for future transitions. The recipient is always
+the saved Task Owner, not a caller-supplied destination.
 
-The notification record serves as a small durable outbox, not a scheduler or a
-second native message queue. Before sending, a passive Owner lookup must confirm
-the original session exists. Missing/unavailable Owners produce visible `not_sent`
-evidence without creating another session. A compare-and-set claim persists
-`unknown` before the host send. Accepted/queued responses update that record;
-an interrupted or ambiguous send remains unknown and is never automatically retried.
-Host enqueue may normally queue behind an active Owner; no interruption or
-queue-clearing action is involved, and acceptance does not prove reading.
+A real matching status transition commits Task effects, receipt, subscription
+consumption, immutable transition event and `pending` delivery together.
+Same-status reports and failed transitions do not trigger; an unmatched terminal
+transition expires the wait. Waiting cancellation races through the same
+transaction boundary and cannot revoke an already triggered event.
 
-Task effects and delivery evidence remain separate: triggering writes return
-stable `result.subscription_ids`, plus current `notifications` and any
-`notification_error`. A failed notification must not erase committed outcomes or
-encourage repeating the Task report. Subscriptions retain their event snapshot
-and bounded delivery error even after terminal state; `task_read(view=subscriptions)`
-pages them independently. Cards show current data, not this historical event.
+The delivery record is a bounded durable outbox, not a second native queue or
+scheduler. A passive `session/get` lookup first checks the original Owner exists.
+Missing/unavailable Owners produce `not_sent` evidence; no replacement is created.
+A compare-and-set claim persists `unknown` before the non-idempotent host send.
+The only message is `[Task status updated](task:<uuid>?event=status_changed)`.
+Accepted/queued responses update evidence; ambiguous or interrupted sends remain
+unknown and are never automatically retried. Busy Owner enqueue is normal and
+does not interrupt, clear messages or prove reading.
 
-Activation checks `context.serviceReadyVersion === 1` before opening or migrating
-storage; API-v1 alone does not prove support. The returned `onReady` callback
-starts recovery only after the host runtime has started and HTTP is listening,
-so resumed native sessions can connect the module's MCP. Activation, pre-listen
-`agent/status` events and inbound reads do not start recovery.
+Triggering writes preserve `result.subscription_ids` and separately return current
+`notifications` / `notification_error`. Notification failure does not erase a
+committed status or outcome and must not cause the whole report to be repeated.
+Subscription history retains event/delivery facts for terminal Tasks too.
+Cards show current Task data, not the immutable trigger snapshot.
 
-Recovery sends only durable `pending` entries, in bounded batches through a fixed
-high-water mark. It does not wait for new Task traffic. Waiting subscriptions survive restart; unknown/accepted/queued
-and known failed attempts do not replay. Shutdown prevents new claims and keeps
-storage open until in-flight work has recorded its outcome. There is no polling,
-automatic re-subscription, or exactly-once claim for the non-idempotent host prompt.
+Only the returned `onReady` callback starts pending recovery, after the host
+runtime is started and HTTP is listening so resumed sessions can connect MCP.
+Activation, pre-listen agent events and inbound reads do not trigger it.
+Recovery uses bounded batches through a fixed high-water mark without waiting
+for new Task traffic. Waiting subscriptions survive restart; only known-unattempted
+pending notices recover. Unknown, accepted, queued and known failed attempts do
+not replay. Shutdown prevents new claims and keeps storage open until in-flight
+work records its outcome. There is no exactly-once guarantee for host prompt.
 
 ## Read boundaries and reference
 
-The generic Markdown link remains `[Task](task:<uuid>)`. Task IDs are bare UUIDs;
-the scheme and query are not part of `task_id`. Message reasons use these forms:
+Read views are fixed, not arbitrary projections:
+`list`, `overview`, `execution`, `definition`, `changelog`, `activity`, `outcomes`,
+`subscriptions`, `operation`. Owner defaults to explicit owner-filtered list and
+overview; Executor defaults to execution. These are information defaults, not ACLs.
+Full current description appears in execution/definition or a selected changelog
+revision, never silently truncated into an overview.
 
-| Purpose | Reference |
-| --- | --- |
-| Ordinary reference, including old messages | `[Task](task:<uuid>)` |
-| Entire automatic first dispatch from `task_assign` | `[Task assigned to you](task:<uuid>?event=assigned)` |
-| Owner's explicit important-update notice | `[Task updated](task:<uuid>?event=updated)` |
-| System notification from an explicit one-shot Owner status subscription | `[Task status updated](task:<uuid>?event=status_changed)` |
-
-Only lowercase `assigned`, `updated` and `status_changed` are accepted event values. Claim only
-valid Task-scheme UUID references and the supported query forms. Unknown events
-and malformed queries stay unclaimed; never strip a bad query and reinterpret it
-as a generic Task reference. Labels explain the message to the model without UI,
-but rendering must use the explicit URL event, not infer it from label or status.
-Generic references have no event header. Historical generic messages remain valid.
-
-The event reason belongs immutably to that message/reference while card data is
-read fresh. It is not a Task entity type/status, a command, or an event bus or
-scheduler. Subscription records and tools are separate from this link grammar. `task_assign` owns its
-single first dispatch; Owner must not send a duplicate. `task_edit` never sends
-an automatic notification. Only Owner decides whether an important update needs
-the Skill's explicit handoff: one preserved-context summary followed by the
-updated reference and an instruction to read/ACK the latest revision. Neither
-message copies the description; the updated notice replaces the old text prefix.
-`status_changed` instead identifies an Owner's explicitly requested state notification.
-It never asks Executor to ACK and must not imply that a delayed card's currently
-rendered state is the state which originally triggered the subscription.
-
-The existing host renderer passes raw target and label, so no host protocol
-change is required. Verified cockpit-file main
-`e58761b5831de2065aac09d4ae17efd829153b3c` and v0.1.7 use
-`isLocalFileReference` to reject non-file schemes in both capture and rendering.
-`task:` with an event query does not collide. Never substitute relative
-`task/<id>` paths, which can be treated as files. This verification does not claim
-that File has been modified or deployed.
-
-Read views follow task-mcp-contract.md. Default list page is 20, maximum 50;
-histories use opaque keyset cursors tied to view/filter/Task. List defaults to
-unfinished Tasks. Full description is returned only in execution/definition views
-or a requested changelog entry. Overview excerpts are bounded and mark truncation.
-Description maximum is 24,000 characters; transport results must remain bounded
-without silently truncating full definitions. History summaries page separately
-from a selected full revision. Outcome text and activity have explicit limits.
-
-Concrete bounds in `src/task-board/contracts.js`:
-
-| Data | Limit |
+| Data | Bound |
 | --- | --- |
 | Title / reason | 240 / 2,000 characters |
-| Description | 24,000 characters, never silently truncated |
-| References | 20 entries; label 200 / target 2,000 characters; 8,000 serialized characters total |
+| Description | 24,000 characters |
+| References | 20 entries; label 200 / target 2,000; 8,000 serialized characters total |
 | Metadata | Plain JSON object, 8,000 serialized characters, depth at most 12 |
 | Description + references + metadata | 64,000 serialized characters combined, including escaping |
 | Activity text / outcome summary | 4,000 / 8,000 characters |
 | Each activity / outcome input object | 16,000 serialized characters, including outcome references |
-| Overview activity excerpt | 320 characters, with explicit `truncated` flag |
-| History page count | Default 5, maximum 10 |
-| List/history page payload | 24,000 serialized characters, with a cursor for every remainder |
+| Overview activity excerpt | 320 characters with explicit `truncated` |
+| List / history item counts | Default 20 / 5; maximum 50 / 10 |
+| List/history page payload | 24,000 serialized characters, cursor for every remainder |
 
-Page limits are upper bounds, not promises of an exact item count. Budgets apply
-to the store result, excluding the response envelope and definition check. Full
-current definitions and individually selected changelog revisions are outside the
-page budget; combined input bounds plus attribution keep these responses below
-approximately 80,000 serialized characters. Oversized input fails explicitly,
-including when an edit combines new materials with the saved description.
-Changelog pages contain summaries; `task_read({view:"changelog",task_id,revision})`
-returns one full snapshot and cannot be combined with `limit` or `cursor`.
+Page budgets exclude the envelope and definition check; requested counts are
+upper bounds, not guarantees. Opaque keyset cursors are tied to view/filter/Task.
+Changelog pages contain summaries; selecting one revision returns its full
+snapshot and cannot combine with limit/cursor. Full current definitions and
+single revisions are outside the page budget, bounded by input limits and
+attribution to approximately 80,000 serialized characters. Oversized edits are
+checked against retained fields too, not merely the supplied patch.
 
-The inline card shows title, Task status, executor, latest reported activity and
-revision/ACK. An accessible detail dialog loads current definition and independently
-paged histories on demand. The card reads current data, not the historical state
-when the reference was sent. Host events invalidate visible reads; reconnect refetches.
-Native session state, if available through the public API, is labelled separately.
-No chat scanning, fabricated live progress, independent dashboard or unsolicited
-automatic notifications. Only explicit one-shot status subscriptions can request
-system-generated status notices to Owner.
+| Purpose | Exact reference form |
+| --- | --- |
+| Ordinary reference | `[Task](task:<uuid>)` |
+| Entire first assignment message | `[Task assigned to you](task:<uuid>?event=assigned)` |
+| Explicit important-update notice to Executor | `[Task updated](task:<uuid>?event=updated)` |
+| Explicit subscription's system notice to Owner | `[Task status updated](task:<uuid>?event=status_changed)` |
 
-## Packaging and integration
+IDs passed to tools are bare UUIDs. The parser accepts only the `task:` scheme,
+a UUID, and either no query or exactly one supported lowercase event form above.
+Unknown events, extra/malformed queries, fragments and relative `task/<id>` paths
+are not claimed; never discard a bad query to reinterpret it as a generic reference.
+Relative paths can be mistaken for File references; Task stays in its own scheme.
 
-Task ships its own HTTP MCP implementation, backend entry, frontend assets,
-role System Prompts and two packaged SKILL.md resources. Runtime dependencies must
-be included in the module artifact; installation never runs dependency resolution.
-Use the existing Node test runner and package manager, without adding test frameworks.
+Labels explain message intent without UI, but the renderer uses the explicit URL
+event, not label or current Task status. Event metadata is immutable to the message,
+not a Task field/type/status, command or event bus. Generic references remain
+eventless. A delayed status_changed card need not show its triggering state.
 
-The module bridge is `context.host.call(name, body)`, with these implemented
-contracts (camelCase is the host API, unlike Task tool snake_case):
+The frontend renders an inline card with title, status, Executor, latest reported
+activity and revision/ACK. An accessible detail dialog reads current definition
+and independently paged histories on demand. Host invalidation refreshes visible
+reads; reconnect refetches, and superseded reads cannot overwrite current results.
+On-demand native observations use session/get only, are labelled separately, and
+do not load sessions, poll, scan chat or fabricate live progress.
 
-- `session/new({cwd,roles:[{moduleId:"cockpit-task",roleId:"executor"}]})`
-  returns `{sessionId}`.
-- `session/get({sessionId})` returns `{meta}`; unknown sessions have `meta:null`.
-  Selected roles remain metadata, but capability readiness is not projected here.
-- `roles/readiness({sessionId,roles?})` returns
-  `{sessionId,loaded,ready,roles,reasons}` for this explicit check. It never loads
-  an unloaded session and is not a persistent status or proof of execution.
-- `prompt({sessionId,text,mode:"enqueue"})` returns `{ok,queued?}`.
+## Transport and packaging
 
-Role injection is exactly Owner `task_read/task_create/task_session_create/
-task_assign/task_edit/task_cancel/task_subscribe/task_unsubscribe` and Executor `task_read/task_edit/task_ack/
-task_report/task_cancel`. Combined roles take the union. Coding/Research work
-skills are not part of this module or the `task_session_create` input.
+Task adapts the official stateful Streamable HTTP MCP transport to host module
+routes, preserving response headers/streams and cancellation signals. Later POST
+cancellation reaches the original call; one cancelled call does not cancel other
+calls on that connection. Protocol state is not trusted actor identity or business
+storage. Expired transport sessions require explicit reconnection, not business
+write retries. Connection capacity, disposal and host calls are defined in the
+[host contract](task-host-contract.md).
 
-The adapter calls `roles/readiness` explicitly during creation and before
-assignment, then separately checks current native processing, pending messages,
-decisions and background work through `session/get`. Ordinary native observations
-call only `session/get`; neither observation nor Task reads collect capability
-state. There is no readiness projection/cache in the ordinary session lifecycle.
-
-The host does not provide `session/advance-queue` or `cockpit_advance_queue`.
-Existing single interrupt, pending-item removal and prompt operations remain
-independent public operations; no automatic advancement or new Task queue is added.
-
-The host contract is implemented separately in the isolated host worktree. The
-module explicitly rejects a host lacking required role/session capabilities.
-Both repositories get independent read-only review of actual changes, targeted
-validation and protected PR delivery. No production deployment is included.
+Task ships backend/frontend assets, role prompts, two self-contained Skills and
+runtime dependencies. Installation does not resolve dependencies at runtime.
+Modern build/install instructions are in [Task](task-board.md#module-api-and-packaging).
+Packaging, testing and repository cleanup perform no production installation,
+role/session changes or deployment.

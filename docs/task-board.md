@@ -1,338 +1,227 @@
 # Task
 
-Task is a Cockpit module for independent Tasks. It is not the legacy Work
-Commander daemon. It requires the host's module roles/session capability contract,
-Web API v2, UI v1 and Node.js 24 or later. Installing a module is an explicit
-operator action; building or merging this repository does not install or activate it.
+Task is a Cockpit module for independent work records shared by Owner and Executor.
+Its module ID and HTTP MCP key are `cockpit-task`, version `0.1.0`.
+It runs in Cockpit, not a standalone daemon or dashboard.
 
-The companion host change is [waksana/cockpit#68](https://github.com/waksana/cockpit/pull/68),
-merged at [`3eddcf1abe671d0e3b54bda5a951cc6b0d1ed5a6`](https://github.com/waksana/cockpit/commit/3eddcf1abe671d0e3b54bda5a951cc6b0d1ed5a6).
-The follow-up simplification is [waksana/cockpit#69](https://github.com/waksana/cockpit/pull/69):
-capability checks are on demand, without automatic queue advancement or projected
-readiness. Status subscriptions additionally require
-[waksana/cockpit#74](https://github.com/waksana/cockpit/pull/74), the generic backend
-`onReady` callback, advertised by `context.serviceReadyVersion === 1` and merged at
-[`f64662e5d77f5b3e3e0f701d9975dbf75ae496d5`](https://github.com/waksana/cockpit/commit/f64662e5d77f5b3e3e0f701d9975dbf75ae496d5). Use a host
-build containing these capabilities. The existing 0.2.6 release label alone does
-not establish compatibility; an older host is rejected before Task storage opens
-or upgrades.
+## Requirements
+
+Use Node.js 24 or later and a host with Module API v1, Web API v2/UI v1, module
+roles, the public `context.host.call` bridge, exact declared MCP server keys, and
+service-ready lifecycle v1. `context.serviceReadyVersion === 1` and the post-listen
+`onReady` callback are required for pending notification recovery.
+The service-ready requirement is checked before storage opens or migrates;
+a release label or API-v1 alone is insufficient. Missing public capabilities fail
+explicitly, without private-access fallbacks. See the
+[host contract](https://github.com/waksana/cockpit-task/blob/main/docs/task-host-contract.md).
 
 ## Roles and records
 
-Choose Owner, Executor, or both under Task when creating a Cockpit session. The host
-assembles the selected role System Prompts, Skills and HTTP MCP configuration.
-Role selections are shown in the session list and retained for cold resume.
-Role labels describe configuration, not proof that a disconnected MCP is ready.
-Capability readiness is checked explicitly on demand, including during Executor
-creation and assignment. It is not projected into session lists, snapshots or
-ordinary details, and there are no readiness badges or background checks.
-Native busy state, pending messages and subagents are checked separately.
+Choose Owner, Executor or both through the host's role management. The host
+assembles role System Prompts, Skills and HTTP MCP subsets, persists the selection
+and reassembles it on cold resume. Host role changes for existing sessions are
+separate from Task operations: Task does not expose that mutation or automatically
+add capabilities during assignment.
 
-These are collaboration capabilities, not business identities. A session named
-Cockpit Owner still owns Cockpit itself; choosing Owner does not make it responsible
-for developing the Task module or bind it to a particular Task. Project instructions
-and the session name express that business identity independently.
-The module ID and MCP server key are `cockpit-task`; role IDs remain `owner` and
-`executor`. The active Skills are
-[cockpit-task-owner](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md) and
-[cockpit-task-executor](../skills/cockpit-task-executor/cockpit-task-executor/SKILL.md).
-This identity change is not cosmetic: existing `task-board` installations require
-the explicit offline cutover described below to preserve data and session associations.
+| Role | Responsibility |
+| --- | --- |
+| Owner | Clarify, register, explicitly assign and follow independent Tasks |
+| Executor | Deliver one entire assigned outcome, organizing internal steps/subagents |
 
-Owner clarifies, creates and assigns independent Tasks, then reads their progress.
 Owner may investigate read-only and answer questions, but delegates implementation
-and state-changing delivery by default rather than doing it personally or hiding
-it in its own subagents. A request for an outcome is not an instruction for personal
-execution. An explicit user request for personal execution, or a real assignment
-as a capable Executor, is an exception; missing delegation capability is a blocker,
-not an implicit exception.
-One Executor delivers the entire Task, using internal subagents if needed. An
-Executor can execute at most one unfinished Task at a time, and may be reused after
-completion or cancellation. There are no child Tasks, reassignment or reopening.
-Coding and research skills are separate, not bundled into this module.
+and state-changing delivery by default. An outcome request is not a request for
+personal execution. Explicit personal-execution instruction or a real assignment
+as a capable Executor is an exception; dual-role selection alone is not.
+Unavailable delegation is a blocker, not permission to take over.
 
-Role Skills are loaded when first needed and reused while their instructions remain
-in context. New messages do not require repeated loading. Reload only for missing
-instructions after compaction/recovery, changed Skill content, or a workflow rule
-that needs clarification. This is distinct from reading mutable Task requirements
-and checking revisions/ACK at meaningful checkpoints.
+One session can execute at most one unfinished Task, then be reused after
+completion/cancellation. Tasks are flat references: no child Tasks, dependency
+engine, reassignment or terminal reopening. Review is optional unless the Task's
+requirements demand it; Executor can complete without a default Owner approval gate.
+Coding/Research work skills are external to Task.
 
-The short role prompts establish responsibility; the Skill bodies explain judgment
-and default information needs. Each Skill independently bundles references for
-view/field questions, writes/conflicts/recovery, and link syntax. Only Owner also
-bundles the exceptional important-update handoff. Read the relevant reference when
-needed, not all of them on each turn. No runtime reference depends on repository
-docs or the other Skill; research and evaluation artifacts are not packaged.
-This is guidance, not runtime enforcement of native Skill-loading frequency.
+The active Skills are [cockpit-task-owner](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md)
+and [cockpit-task-executor](../skills/cockpit-task-executor/cockpit-task-executor/SKILL.md).
+Load when first needed, reuse guidance in context, and reload only when missing,
+changed or unclear. Each bundles its own on-demand references; stable Skill reuse
+does not replace fresh Task reads.
 
-Owner starts with `task_read(view=list, owner=<own session ID>)`, then `overview`
-for one Task; `actor_session_id` does not supply that filter. Focus on identity,
-Executor, status, latest reported activity/time, revision/ACK and
-`outcome.available/current`. An available current outcome is not proof of complete
-delivery: read its content. Use `definition` before edits and `execution` for assigned
-work; histories and outcomes are separate, not automatically attached to each read.
+Description contains the full current agreement. Revision/changelog version only
+that description. Activity records reported execution against an actually ACKed
+revision, not live native progress. ACK never starts work or adds activity.
+Only the assigned Executor's actual changed-description edit on an unfinished
+Task auto-ACKs the new revision. Terminal definitions can be edited without reopening.
 
-description contains the complete current requirements. revision and changelog
-version that definition only. activity records execution facts against an actually
-acknowledged revision; the latest activity is the latest reported situation, not
-real-time native activity. ACK neither starts work nor adds activity.
-An Executor's own definition change also acknowledges the new revision.
-
-## Tools
+## Tools and normal use
 
 | Tool | Use |
 | --- | --- |
-| task_read | Select overview, execution, definition or bounded history views |
-| task_create | Register a todo without creating or starting a session |
-| task_session_create | Create a capability-ready Executor through the host |
-| task_assign | Check an existing Executor, bind it and send one Task reference |
-| task_edit | Replace requirements or edit optional metadata |
-| task_ack | Acknowledge the current definition separately from work status |
-| task_report | Record activity, status and/or outcome explicitly |
-| task_cancel | Cancel the Task without stopping its native session |
-| task_subscribe | Register one explicit, one-shot Owner notification for target statuses |
-| task_unsubscribe | Cancel a still-waiting status subscription |
+| `task_read` | Fixed bounded views; complete requirements and histories read separately |
+| `task_create` | Register an unassigned todo |
+| `task_session_create` | Create a new Executor with Task capabilities through the host |
+| `task_assign` | Check an existing Executor, bind once and send one assigned reference |
+| `task_edit` | Replace the complete description or edit title/materials |
+| `task_ack` | Confirm the current definition separately from status |
+| `task_report` | Explicit activity, status and/or outcome; done requires a new outcome |
+| `task_cancel` | Cancel the Task without stopping its native session |
+| `task_subscribe` | Optional one-shot Owner wait for explicit target statuses |
+| `task_unsubscribe` | Cancel a still-waiting subscription |
 
-Owner and Executor receive role-specific subsets; selecting both takes their union.
-Having a tool allows operating other Tasks: owner/executor fields are responsibility,
-not per-record authorization. All writes still enforce data consistency.
-actor_session_id is reported provenance, not verified identity.
+Owner receives read/create/session_create/assign/edit/cancel/subscribe/unsubscribe;
+Executor receives read/edit/ack/report/cancel (all `task_` prefixed). Both roles
+take the union. Having a tool permits cross-Task operations: responsibility
+fields are not per-record authorization. `actor_session_id` is reported provenance,
+not verified identity.
 
-Use the host-provided session ID for actor_session_id. Writes include request_id;
-writes to existing Tasks also send back the read's opaque write_context, except
-`task_unsubscribe`, which checks the specified subscription's waiting state directly. A description
-revision is not a concurrency token for unrelated state changes.
-Repeated requests preserve their original ID and exact input. After a response is
-lost, inspect the operation before doing anything with an external side effect.
+1. Owner writes a complete Task, then explicitly creates or selects an Executor.
+2. Assignment checks capability and native idle/empty state, binds, rechecks and
+   sends exactly one assigned reference. Owner does not duplicate it.
+3. Executor reads `execution`, ACKs the exact current revision, then explicitly
+   reports `in_progress` when work starts.
+4. At meaningful checkpoints and before consequential actions/delivery, read the
+   latest requirements, reconcile changes and ACK as necessary.
+5. Record meaningful activity and blockers. Deliver the full agreement with
+   `status=done` and a new outcome in the same report.
 
-Each response separates result, error and a fresh definition_check.
-Process reminders even on reads, failures or replay. If an old acknowledged activity
-is saved but stale status/outcome are rejected, do not repeat the whole report or
-relabel the work as current. done requires a new outcome in that report.
+Owner starts with `task_read(view=list, owner=<own session ID>)`, then overview
+for one Task. Actor is not that filter. Read definition before editing and outcomes
+before judging delivery; activity/changelog are separate pages. An available
+current outcome does not itself prove complete delivery.
 
-## Collaboration
+## Writes, failures and recovery
 
-Create the Task, explicitly create or select an Executor, then assign. Dispatch
-contains exactly one `[Task assigned to you](task:<uuid>?event=assigned)` reference,
-sent by `task_assign`; Owner must not duplicate that first dispatch. Its label
-explains why it was sent even without UI rendering. The card reads current data
-from the module, not a snapshot in chat. Details and history are loaded on demand.
-Initial dispatch checks capability and idle/empty state without proactively
-interrupting. Those checks and the enqueue send are not atomic: a race may return
-queued or unconfirmed. Inspect each recorded step; do not blindly resend.
-Capability/availability rejections preserve failure-time `operation.details` before
-or after binding: capability reasons, native loaded/status, fixed
-`availability_reasons` and `observed_at`. These distinguish pending messages,
-decisions and active work without retaining their contents. Receipt reads/replays
-do not refresh this historical observation or turn it into live monitoring.
+Every write requires a stable request_id. Exact-input replay preserves original
+effects; the same ID with changed input conflicts. Existing-Task writes also
+send back the read's opaque write_context, except unsubscribe, which checks the
+specified subscription's waiting state. Description revision is not a general
+lifecycle concurrency token.
 
-Use `[Task](task:<uuid>)` for an ordinary reference. Task IDs passed to tools are
-just the UUID, not the full URI or its query. Only lowercase `assigned`,
-`updated` and `status_changed` are accepted event values. The event is immutable message/reference
-metadata, not a Task type, status, command or event bus. The renderer uses the
-explicit URL event, never the label or current Task status; generic and old
-references remain compatible without an event header. Unknown events or malformed
-queries are left unclaimed, not silently treated as generic Task references.
+Read `result`, `error` and fresh `definition_check` independently, including on
+failure or replay. Old activity can save while stale status/outcome fail; do not
+repeat saved activity or relabel it to satisfy new scope. Exact ACK history matters:
+ACKing v3 does not prove a skipped v2 was acknowledged.
 
-Ordinary requirement changes only edit Task. Executor reads/ACKs at startup,
-checkpoints, before consequential actions, before delivery and after resuming.
-Owner coordinates through Task, not chats with Executor for requirements, progress
-or confirmation. Executor asks genuine decisions directly of the user in its own
-session, not through Owner. Questions, confirmations, progress, blockers and completion
-are not sent to Owner, including through subagents. User-facing summaries are allowed;
-they are not a second maintained progress ledger. Neither role adds background
-monitoring, reminders or unsolicited final notifications. An explicit Owner
-status subscription is the opt-in system-notification exception described below;
-Executor does not send or duplicate that notification.
+Creation, capability, binding, message acceptance, ACK and actual execution are
+different facts. Assignment does not add roles, repair capability, reload or
+create a replacement session. Capability readiness is explicit and on demand,
+not a list/detail badge; native busy/queue/decisions/background work are checked
+separately. The check and enqueue send are not atomic, so a race can produce
+queued or unknown results. Neither is safe to resend.
 
-For an exceptionally important update, Owner follows the Skill's
-[exceptional update handoff](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md):
-read and preserve pending messages, clear the preserved items by ID, then
-summarize them and append the following update notice in that same single message:
+Inspect `task_read(view=operation,request_id)` for durable step results.
+Failure-time `availability_reasons` and `observed_at` explain an observation,
+not live status; receipt reads/replay do not refresh them.
+Preserve created or bound resources after partial failures.
+Only an unused final assignment receipt proving `assignment=applied` and
+`message=not_sent` supports explicit resume_request_id recovery with a new request
+ID, fresh context/revision and the same Task/Executor. Unknown, queued, accepted
+or pending sends do not. Cancellation does not stop native work or undo external effects.
 
-```text
-[Task updated](task:<uuid>?event=updated)
-Read the current Task and acknowledge its latest revision before continuing.
-```
+## Collaboration and references
 
-This replaces the former text-prefix notice. Do not copy the Task description.
-The recommendation covers all pending sources, not only Task messages. New
-arrivals, incomplete content and already-started work need explicit handling.
-If necessary, interrupt the main turn once; do not use Stop to blindly discard
-unread arrivals or silently cancel subagents. Confirm native readiness before
-handoff, and distinguish sending acceptance from current-revision ACK.
-This is Owner Skill guidance, not an automatic queue advancement mechanism.
-`task_edit` never automatically sends this notice. The `assigned` and `updated`
-link events do not themselves add Task fields or change capability/busy checks.
-It replaces the retired `cockpit_advance_queue` helper. The host retains single
-interrupt, per-item queue removal, native-state reads and sending; it does not
-maintain an advancement loop or its operation receipts.
+Requirements, decisions, progress and outcomes belong in Task, not a second chat
+ledger. Executor asks the user directly in its own session; neither role starts
+an Owner/Executor conversation for progress, confirmation or clarification.
+No direct or subagent-relayed Executor messages to Owner. User-facing summaries
+are allowed. Ordinary edits/reports stay silent without an explicit subscription.
 
-Missing capability rejects assignment; it does not install a role or repair an
-existing session. Uncertain creation or dispatch is never automatically replayed.
-Task cancellation does not cancel native work, and editing a terminal definition
-does not reopen execution.
+| Purpose | Reference |
+| --- | --- |
+| Ordinary reference | `[Task](task:<uuid>)` |
+| Entire automatic first dispatch | `[Task assigned to you](task:<uuid>?event=assigned)` |
+| Explicit important-update notice | `[Task updated](task:<uuid>?event=updated)` |
+| System notice from a status subscription | `[Task status updated](task:<uuid>?event=status_changed)` |
+
+Pass only the UUID to tools. Event values are exact lowercase URL metadata, not
+Task fields, commands or inferred states. Generic references have no event title;
+unknown events or malformed queries remain unclaimed. Use `task:`, not relative
+`task/<id>` file-like paths.
+
+The frontend renders an inline reference card and current-data detail dialog,
+not a separate dashboard. Message reason is fixed; title, state, definition and
+history are fetched from Task. Native session observations are labelled separately,
+read on demand and never imply business progress or capability readiness.
+
+For an exceptionally important change that cannot wait for checkpoints, Owner
+follows the [important-update handoff](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md):
+save the updated Task, preserve pending content before removing saved IDs, handle
+new arrivals explicitly, and if needed interrupt the main turn once while
+preserving the queue. Send one preserved-context summary followed by an updated
+reference and an instruction to read/ACK the latest revision. Do not copy description,
+blindly Stop/clear unread messages, cancel background work or loop interruptions.
+`task_edit` never sends this notice automatically.
 
 ### One-shot status subscriptions
 
-Default to no subscription. Owner should register only when a future state enables
-a concrete, necessary Owner action, such as deciding from the result or arranging
-another authorized independent Task, not simply tracking progress or completion.
-Owner judges the need without requiring the user to request the subscription.
-Do not invent follow-up work, split a complete outcome or add an approval gate to
-justify a wait. Choose the fewest useful targets and cancel a still-waiting
-subscription when that follow-up is no longer needed. Executor execution/delivery
-does not depend on Owner subscribing or reading a notice. This is collaboration
-guidance, not a new required field or server-side rule engine.
+Default to no subscription. Register only when a future status enables a concrete,
+necessary Owner action—not merely knowing progress or confirming completion.
+Do not invent work or approval gates to justify waiting. Choose the fewest useful
+targets and withdraw the wait if the follow-up is no longer needed.
+Executor never waits for subscription or notice consumption before delivering.
 
-Owner can use `task_subscribe` to explicitly await entry into one or more chosen
-Task statuses. This does not keep a model turn or tool call waiting. Registration
-checks the current status atomically: if it already matches any target, registration
-fails, creates no subscription and sends no notice. A terminal Task cannot acquire
-a subscription for a future transition. The recipient is the Task's recorded
-Owner, not an arbitrary session supplied by the caller.
+Registration already in a target state fails without subscribing or notifying.
+Each Task permits one waiting subscription; the first matching committed
+transition consumes it. An unmatched terminal transition expires it.
+Same-state reports, edits, ACKs and activity alone do not trigger.
+Unsubscribe cannot recall a consumed notification or host queue item.
 
-Only the first matching committed status transition consumes the subscription.
-Each Task allows one waiting subscription at a time; it expires without a notice
-if the Task enters a terminal state outside its targets.
-Definition edits, ACKs, activity alone, same-status reports and rejected status
-changes do not trigger it. Without a registered subscription, status reports and
-cancellation stay silent. `task_unsubscribe` cancels a waiting subscription, not
-an already-triggered notification or a message already accepted by the host.
-Read `task_read(view=subscriptions)` for bounded subscription and delivery facts.
+The system enqueues one status_changed reference to Task.owner without interruption
+or queue clearing. Owner reads current evidence, reassesses the necessary action
+and does not automatically re-subscribe, poll or hold a model turn open.
+This is not an Executor requirement-update/ACK notice or a dependency scheduler.
 
-The system sends `[Task status updated](task:<uuid>?event=status_changed)` to
-Owner through the host's ordinary enqueue prompt entry. A busy Owner may receive
-it later; the system does not interrupt or clear that session's queue. This is a
-new prompt, not continuation of a suspended tool call. The card retains the
-notification's reason but reads the current Task, which may have changed again.
-It is not the Executor's requirement-update/ACK notice. Owner reads current
-evidence before deciding what to do and does not automatically re-subscribe.
-
-One-shot triggering does not imply exactly-once external delivery. Persisted
-delivery records distinguish accepted, queued and uncertain effects; acceptance
-does not prove reading. An uncertain send must not be retried blindly or replaced
-with a hand-written notice. On service-ready startup, a bounded recovery pass
-automatically sends records known to be pending before any send attempt, without
-waiting for a new Task request. It does not retry unknown or failed attempts.
-Subscriptions are explicit event handling, not a
-monitor, recurring schedule or a rule for launching dependent Tasks.
-
-### File reference compatibility
-
-The verified cockpit-file main commit `e58761b5831de2065aac09d4ae17efd829153b3c`
-and v0.1.7 reject non-file schemes through `isLocalFileReference` in both capture
-and rendering. `task:` references, including event queries, do not collide with
-File references. Do not use relative `task/<id>` paths: File treats relative paths
-as file candidates. The host already passes raw link target and label; no new
-host protocol is needed. This is source compatibility, not a claim that File was
-modified or deployed.
+Inspect subscriptions for immutable trigger facts and delivery evidence.
+Task results and notification_error are separate; failed delivery does not undo
+saved outcomes. Unknown sends are not automatically retried or manually duplicated.
+After HTTP is listening, onReady recovers only known-unattempted pending notices
+in a bounded pass. One-shot triggering does not guarantee exactly-once host delivery.
 
 ## Module API and packaging
 
-The module's ordinary HTTP API and HTTP MCP share the same operations and database.
-POST `/read` selects read views; POST `/tools/<tool-name>` performs a tool operation.
-GET `/tasks/<uuid>/native` reads only the assigned session's current public
-observation, on demand. It never loads that session and does not persist its state.
-`/mcp` is the official Streamable HTTP MCP endpoint: POST for requests, GET for
-the protocol stream and DELETE to close a protocol session. Cancellation
-notifications reach the original in-flight call; completed external effects
-are not rolled back. These paths are relative
-to Cockpit's digest-bound module API base, not an independently exposed service.
-The host applies its existing access boundary. Module MCP configuration carries
-the current endpoint and required module version header.
-The module requires `context.host.call` for `session/new`, `session/get`,
-`roles/readiness` and `prompt`; it has no fallback to private runtime access.
-Roles are `cockpit-task/owner` and `cockpit-task/executor`. The host assembles the
-shared MCP server `cockpit-task` with the selected role tool union and module
-provenance. Use a host build supporting exact declared MCP server keys; the
-historical generated `module_task-board__task` name is not an alias.
+Relative to the host's protected, version-bound module API base:
 
-The database is `task-board.sqlite` under the host-provided module dataRoot.
-No code opens or migrates the legacy work.db. Session histories, credentials and
-native runtime state are not copied into Task storage.
+- `POST /read` and `POST /tools/<tool-name>` share the business service.
+- `GET /tasks/<uuid>/native` reads the assigned session without loading it.
+- `/mcp` provides official stateful Streamable HTTP: POST requests/notifications,
+  GET stream and DELETE protocol-session close. Cancellation reaches the original
+  call without undoing completed effects.
 
-Run `npm ci --ignore-scripts`, `npm test`, then `npm run package:module`.
-The output `dist/cockpit-task-0.1.0.tgz` includes runtime dependencies and resources;
-its `.sha256` sidecar identifies the archive. CI retains these as the
-`cockpit-task-module` development artifact, not a release or deployment.
-The host does not run npm during installation. Use the host's documented explicit
-local module installation procedure with a compatible host build. The legacy
-`npm start`, module.json and deployment scripts remain separate; do not use them
-to start Task or overwrite an existing installation.
+Current backend/frontend paths remain `src/task-board/` and `web/task-board/`.
+The database is `task-board.sqlite` under the host-provided dataRoot.
+Task does not copy session histories, credentials or native runtime state.
 
-### Explicit existing-installation cutover
-
-New installations use only `cockpit-task`. Existing `task-board` installations must
-use the host's explicit offline module-identity migration capability;
-installing the new identity alongside the old one is not a migration and would split
-records and register two renderers for `task:` references. Do not activate both.
-The old module ID is rejected by this backend; there is no runtime alias or fallback.
-
-Migration must preserve the complete old module data directory and rewrite saved
-role selections from `task-board` to `cockpit-task`, retaining `owner`/`executor`.
-The database filename remains `task-board.sqlite` intentionally: it is internal
-storage, not a public resource name. Its schema v1 contains UUID Task IDs, native
-session IDs, operation receipts and opaque write contexts, but no module-ID binding.
-Task references remain `task:<uuid>`; no database-row or message rewrite is needed.
-Move the entire data directory offline, including any SQLite WAL/SHM sidecars;
-never open a fresh empty database instead or rename only the database file.
-Stored user-authored references and descriptions are not rewritten.
-
-The host migration replaces the active identity and preserves saved associations
-through a durable journal, rejecting conflicting target state rather than merging
-or dropping it. It preserves enabled/config state and updates host-owned saved role
-labels from the verified target manifest; it does not edit native session history
-or personal Skill/MCP configuration.
-
-After separate cutover authorization, use a host build containing the migration
-CLI. Stage the target archive without `--enable`, stop every host/module writer
-(including older host processes that do not participate in the cooperative lease),
-hold automatic restarts stopped, and follow `docs/module-id-migration.md` in that
-host checkout. These commands run from the host checkout, not this repository:
+From this repository, build the modern module:
 
 ```sh
-# Stage only: intentionally omit --enable.
-pnpm module install /absolute/path/cockpit-task-0.1.0.tgz --trust-local-code
-
-# Dry plan: use the exact version and digest of the installed, disabled target.
-pnpm module migrate-id task-board cockpit-task \
-  --version <installed-target-version> --digest <installed-target-sha256> --offline
-
-# Explicit cutover: identical parameters, with --apply.
-pnpm module migrate-id task-board cockpit-task \
-  --version <installed-target-version> --digest <installed-target-sha256> --offline --apply
-
-# Only for an interrupted journal: identical parameters, with --resume.
-pnpm module migrate-id task-board cockpit-task \
-  --version <installed-target-version> --digest <installed-target-sha256> --offline --resume
-```
-
-The host owns private backups, pending-migration startup protection and recovery.
-`--offline` is required in every mode; `--apply` and `--resume` are mutually exclusive.
-Do not remove its journal or retry with different parameters. Follow the host
-procedure for any stale lock; do not bypass writer checks. Existing personal
-legacy Skills, particularly the old executing `cockpit-task-owner`, require a
-separately authorized retirement before new role use; this identity migration
-does not remove them.
-
-Implementing and testing this capability does not authorize a live cutover, data
-move, session change or installation; those require separate approval.
-
-For the optional cross-repository integration test, prepare the compatible host
-checkout using its frozen dependency workflow, then run:
-
-```sh
+npm ci --ignore-scripts
+npm test
 npm run package:module
-mkdir -p .task-board-host-runner
-HOST_SOURCE=/absolute/path/to/compatible/cockpit
-TMPDIR="$PWD/.task-board-host-runner" TSX_DISABLE_CACHE=1 \
-  TASK_BOARD_HOST_WORKTREE="$HOST_SOURCE" \
-  "$HOST_SOURCE/packages/core/node_modules/.bin/tsx" --test test/task-board-host-integration.test.js
-rmdir ".task-board-host-runner/tsx-$(id -u)" .task-board-host-runner
 ```
 
-This uses the actual archive, installer, native SDK and module roles with empty
-temporary home/config/state directories and a synthetic loopback model provider.
-It does not contact a real model provider or use existing sessions. The default
-unit-test command skips this opt-in test when no host checkout is specified.
+`dist/cockpit-task-0.1.0.tgz` contains runtime dependencies, backend/frontend assets,
+role prompts and both self-contained Skills. Its `.sha256` sidecar identifies the
+archive. [Task CI](https://github.com/waksana/cockpit-task/blob/main/.github/workflows/task-board-ci.yml) retains these as the
+`cockpit-task-module` artifact; an artifact is not an installation or deployment.
+
+Installation is an explicit operator action on a compatible host. From the host
+checkout, stage the local artifact using the host's module installer:
+
+```sh
+pnpm module install /absolute/path/to/cockpit-task-0.1.0.tgz --trust-local-code
+```
+
+This command deliberately omits automatic enablement. Follow that host's documented
+module-management procedure to inspect and explicitly enable the installed module;
+the host does not run npm during installation. Do not bypass compatibility guards.
+These are instructions, not a claim that cleanup or packaging installed anything.
+
+## Further contracts and validation
+
+- [Product design](https://github.com/waksana/cockpit-task/blob/main/docs/task-design.md) and [record schema](https://github.com/waksana/cockpit-task/blob/main/docs/task-schema.md)
+- [MCP tools](https://github.com/waksana/cockpit-task/blob/main/docs/task-mcp-contract.md) and [role guidance](https://github.com/waksana/cockpit-task/blob/main/docs/task-tools-skills.md)
+- [Host integration](https://github.com/waksana/cockpit-task/blob/main/docs/task-host-contract.md) and [implementation](https://github.com/waksana/cockpit-task/blob/main/docs/task-implementation.md)
+- [Lifecycle replay methodology](https://github.com/waksana/cockpit-task/blob/main/docs/task-lifecycle-testing.md), including isolated
+  model-driven cases and opt-in host integration
+
+Use isolated storage and synthetic sessions for validation. Never substitute real
+Owner sessions, existing installations, credentials or live databases for fixtures.
