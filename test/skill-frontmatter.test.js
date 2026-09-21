@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -55,12 +55,6 @@ function assertSkillClosure(directory, role) {
 }
 
 test('only the two current Task role Skills are discoverable, with YAML-safe frontmatter', () => {
-  const root = fileURLToPath(new URL('../', import.meta.url));
-  const delivery = JSON.parse(readFileSync(join(root, 'service-delivery.json'), 'utf8'));
-  assert.equal(delivery.build.artifactPaths.includes('skills'), false);
-  assert.equal(delivery.build.artifactPaths.some(path => path === 'docs' || path.startsWith('docs/legacy-skills')), false);
-  assert.ok(delivery.build.artifactPaths.includes('roles/commander.md'));
-  assert.ok(delivery.build.artifactPaths.includes('roles/owner.md'));
   const files = readdirSync(join(root, 'skills'), { recursive: true })
     .filter(path => basename(path) === 'SKILL.md');
   assert.equal(files.length, 2);
@@ -72,15 +66,28 @@ test('only the two current Task role Skills are discoverable, with YAML-safe fro
     names.add(metadata.name);
   }
   assert.deepEqual([...names].sort(), ['cockpit-task-executor', 'cockpit-task-owner']);
-  const archives = readdirSync(join(root, 'docs/legacy-skills'));
-  assert.deepEqual(archives.sort(), ['cockpit-task-commander.md', 'cockpit-task-owner.md', 'work-commander-owner.md', 'work-commander.md']);
-  for (const path of archives) assert.ok(!readFileSync(join(root, 'docs/legacy-skills', path), 'utf8').startsWith('---'));
-  for (const path of ['src/work.js', 'roles/commander.md', 'roles/owner.md']) {
-    assert.doesNotMatch(readFileSync(join(root, path), 'utf8'), /legacy-skills|Use skill |skills\/session-toggle/);
+});
+
+test('repository entrypoints describe only the current Task module', () => {
+  const manifest = JSON.parse(readFileSync(join(root, 'cockpit.module.json'), 'utf8'));
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
+  assert.equal(pkg.name, manifest.id);
+  assert.equal(pkg.version, manifest.version);
+  assert.equal(lock.name, pkg.name);
+  assert.equal(lock.version, pkg.version);
+  assert.equal(lock.packages[''].name, pkg.name);
+  assert.equal(lock.packages[''].version, pkg.version);
+  assert.deepEqual(Object.keys(pkg.scripts).sort(), ['package:module', 'test']);
+  assert.deepEqual(readdirSync(join(root, 'src')), ['task-board']);
+  assert.deepEqual(readdirSync(join(root, 'web')), ['task-board']);
+  assert.deepEqual(readdirSync(join(root, 'roles')).sort(), ['task-executor.md', 'task-owner.md']);
+  assert.deepEqual(readdirSync(join(root, 'scripts')), ['package-task-board.js']);
+  assert.deepEqual(readdirSync(join(root, '.github/workflows')), ['task-board-ci.yml']);
+  for (const path of ['module.json', 'service-delivery.json', 'BRIEF.md',
+    'docs/legacy-skills', 'docs/skill-drafts', 'docs/task-feedback.md', 'docs/task-workstreams.md']) {
+    assert.equal(existsSync(join(root, path)), false, `Retired repository content: ${path}`);
   }
-  const installer = readFileSync(join(root, 'scripts/install.sh'), 'utf8');
-  assert.match(installer, /--exclude='docs\/legacy-skills'/);
-  assert.match(installer, /--exclude='skills'/);
 });
 
 test('each current Skill has an independent relative reference closure without research payloads', t => {
@@ -240,20 +247,17 @@ test('subscription guidance requires necessary Owner follow-up without gating Ex
   }
 });
 
-test('public Skill links resolve to active resources rather than obsolete handoff anchors', () => {
-  for (const file of ['task-board.md', 'task-tools-skills.md', 'task-mcp-contract.md',
-    'task-host-contract.md', 'task-implementation.md', 'task-design.md', 'task-schema.md']) {
-    const source = readFileSync(join(root, 'docs', file), 'utf8');
+test('public documentation links resolve to active resources rather than retired content', () => {
+  const files = ['README.md', ...readdirSync(join(root, 'docs')).filter(file => file.endsWith('.md')).map(file => `docs/${file}`)];
+  for (const file of files) {
+    const path = join(root, file);
+    const source = readFileSync(path, 'utf8');
     assert.doesNotMatch(source, /#exceptional-update-handoff|skills\/(?:task-owner|task-executor)\//);
-    for (const link of localLinks(source).filter(link => link.startsWith('../skills/'))) {
-      assert.ok(existsSync(resolve(root, 'docs', link.split('#')[0])), `${file}: ${link}`);
+    for (const link of localLinks(source)) {
+      const target = resolve(dirname(path), decodeURIComponent(link.split(/[?#]/)[0]));
+      assert.ok(target.startsWith(root), `${file}: ${link} escapes the repository`);
+      assert.ok(existsSync(target), `${file}: missing local reference ${link}`);
     }
-  }
-  for (const role of ['owner', 'executor']) {
-    const source = readFileSync(join(root, `docs/skill-drafts/task-${role}.md`), 'utf8');
-    assert.ok(!source.startsWith('---'), 'Historical pointers must not be discoverable Skills');
-    assert.match(source, /historical design entry/);
-    assert.ok(localLinks(source).includes(`../../${skillDirectory(role)}/SKILL.md`));
   }
 });
 
@@ -267,6 +271,14 @@ test('module packaging carries both isolated Skills and no draft or evaluation r
     .flatMap(role => skillFiles(role).map(file => `./${skillDirectory(role)}/${file}`)).sort();
   assert.deepEqual(entries.filter(entry => entry.startsWith('./skills/') && !entry.endsWith('/')).sort(), expected);
   assert.ok(!entries.some(entry => /^\.\/docs\//.test(entry)), 'No design, evaluation or private coordination docs');
+  const topLevel = [...new Set(entries.filter(entry => entry !== './').map(entry => entry.split('/')[1]))].sort();
+  assert.deepEqual(topLevel, ['README.md', 'cockpit.module.json', 'node_modules', 'package.json', 'roles', 'skills', 'src', 'web']);
+  for (const entry of entries.filter(entry => /^\.\/(?:src|web)\//.test(entry) && !entry.endsWith('/'))) {
+    assert.match(entry, /^\.\/(?:src|web)\/task-board\//, `Only current module source is packaged: ${entry}`);
+  }
+  const packagedMetadata = JSON.parse(execFileSync('tar', ['-xOf', archive, './package.json'], { encoding: 'utf8' }));
+  assert.equal(packagedMetadata.name, manifest.id);
+  assert.equal(packagedMetadata.version, manifest.version);
   for (const entry of expected) {
     assert.equal(execFileSync('tar', ['-xOf', archive, entry], { encoding: 'utf8' }),
       readFileSync(join(root, entry), 'utf8'), `Archive must contain the current resource: ${entry}`);
@@ -279,28 +291,8 @@ test('module packaging carries both isolated Skills and no draft or evaluation r
   t.diagnostic(`npm run package:module produced ${archive} with both bodies and seven runtime references`);
 });
 
-test('legacy explicit registration installs only its MCP and preserves unrelated resources', t => {
-  const root = fileURLToPath(new URL('../', import.meta.url));
-  const home = mkdtempSync(join(root, '.legacy-registration-'));
-  t.after(() => rmSync(home, { recursive: true, force: true }));
-  const configRoot = join(home, '.copilot');
-  mkdirSync(configRoot);
-  const unrelated = { type: 'http', url: 'http://example.invalid/mcp', tools: ['read'] };
-  writeFileSync(join(configRoot, 'mcp-config.json'), JSON.stringify({ mcpServers: { unrelated } }));
-  const registration = spawnSync(process.execPath, [join(root, 'scripts/register.js'), root, '--confirm'], {
-    cwd: root, env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8',
-  });
-  assert.equal(registration.status, 0, registration.stderr);
-  const registered = JSON.parse(readFileSync(join(configRoot, 'mcp-config.json'), 'utf8'));
-  assert.deepEqual(registered.mcpServers.unrelated, unrelated);
-  assert.deepEqual(Object.keys(registered.mcpServers).sort(), ['unrelated', 'work-commander']);
-  assert.deepEqual(registered.mcpServers['work-commander'].args, [join(root, 'src/mcp.js')]);
-  assert.equal(existsSync(join(configRoot, 'skills')), false);
-  assert.match(registration.stdout, /retired Skills are not installed/);
-});
-
 test('unquoted mapping separators in either role description fail release validation', () => {
-  for (const role of ['commander', 'owner']) {
+  for (const role of ['owner', 'executor']) {
     const description = `Cockpit Task ${role} role: explicit authorized work.`;
     const source = `---\nname: cockpit-task-${role}\ndescription: ${description}\n---\n`;
     assert.throws(() => skillMetadata(source), /JSON-quoted description/);

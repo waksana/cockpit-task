@@ -23,7 +23,7 @@ event 只说明这条消息的原因，不是 Task 状态；卡片仍读取当�
 Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的版本。没有子任务树、
 改派或续办；Coding / Research 的具体工作方法不属于 Task 模块。
 
-**使用与打包：[Task](docs/task-board.md)**。新模块需要支持模块角色和宿主
+**使用与打包：[Task](docs/task-board.md)**。模块需要支持模块角色和宿主
 能力接口的 Cockpit；旧版宿主不能仅靠安装这个包获得这些能力。构建、合并不等于安装
 或升级，部署须由操作者另行决定。
 
@@ -32,72 +32,23 @@ Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的�
 [宿主接入](docs/task-host-contract.md) · [实现边界](docs/task-implementation.md)。
 
 回归演练：[Owner / Executor 生命周期用例与复跑流程](docs/task-lifecycle-testing.md)，
-包含隔离边界、输入、角色分工、故障注入、证据标准，以及尚待执行的订阅必要性用例。
+包含隔离边界、输入、角色分工、故障注入、证据标准，以及生命周期与订阅必要性演练的结果和限制。
 
-新模块代码位于 `src/task-board/`，卡片位于 `web/task-board/`；
-`npm run package:module` 生成独立模块归档。数据仅使用宿主提供的模块目录，
-不会导入真实旧数据库、覆盖旧安装或启动旧 daemon。
-模块 ID、MCP key 和归档内部包名均为 `cockpit-task`；Skill 为
-`cockpit-task-owner` / `cockpit-task-executor`。旧 `task-board` 数据和角色关联
-必须通过[显式离线迁移](docs/task-board.md#explicit-existing-installation-cutover)保留，
-不能并装两个 Task，也不提供长期别名。代码实现不授权线上迁移。
+## 开发与打包
 
-## Legacy Work Commander
+需要 Node.js 24 或更新版本：
 
-**以下内容只描述保留的旧服务，不是 Task 模块的启动或使用说明。**
-旧 `npm start`、stdio MCP、权限凭证、数据库和部署脚本均与新模块分离。
+```sh
+npm ci --ignore-scripts --no-audit --no-fund
+npm test
+npm run package:module
+```
 
-独立的工作服务 + SQLite + MCP + 私人工作页。Cockpit 仍是唯一真实会话基础服务；这里不保存聊天、模型目录或会话状态副本，不运行指挥 agent、巡查器或自动调度。
+模块代码位于 `src/task-board/`，卡片位于 `web/task-board/`；
+`cockpit.module.json` 是模块入口。归档输出到 `dist/cockpit-task-<version>.tgz`，
+供支持所需接口的 Cockpit 装载；Task 不提供独立服务启动命令。
 
-**旧 Cockpit Task 是面向 agent 的结构化工作记录与操作服务，主动方是 agent。** 从实际协作中形成的通用约定由 schema 承载，统一身份、状态、关系和结果表达，降低沟通成本并直接支撑 Dashboard；agent 判断具体内容与下一步。Commander 显式派单，owner 主动写回；服务执行指定操作，不主动监工、验收或推进任务。看板反映最近报告，不是实时监测。详见[定位与契约](docs/contract.md#定位供-commander-使用的工作工具)。旧 standalone MCP 和安装技术名称仍保留 `work-commander`。
-
-**旧 Skill 已在源码退役**：`work-commander`、`work-commander-owner`、
-`cockpit-task-commander` 和旧执行型 `cockpit-task-owner` 的正文归档于
-`docs/legacy-skills/*.md`，仅作仓库历史资料，不作为运行时回退或发布输入。
-旧服务派单保留自包含的绑定、授权版本、承接和最终交付指导，不读取归档，
-不再要求安装或开启这些 Skill；旧 manifest 不声明 Skill。
-新版协调型 `cockpit-task-owner` 不随旧服务发布。旧服务权限、数据库、daemon、
-`work_*` 工具和唯一最终通知规则不变。原则型新 Skill 已纳入新 Task 模块的正式源码
-及打包资源，见 [Owner](skills/cockpit-task-owner/cockpit-task-owner/SKILL.md)、
-[Executor](skills/cockpit-task-executor/cockpit-task-executor/SKILL.md) 与
-[角色说明](docs/task-tools-skills.md)。本次源码变化不修改个人安装；
-源码合并不会自动升级线上；既有 `task-board` 安装须按
-[显式离线迁移](docs/task-board.md#explicit-existing-installation-cutover)流程完成切换。
-
-## 使用入口
-
-- 外部只读工作页：[task.rbym47.com](https://task.rbym47.com/)，由现有 Passkey Gate 保护；新主机需设备验证，不在浏览器放 Task 凭证。接入与边界见[HTTPS 工作页](docs/passkey-access.md)。
-- 工作页不包含登录、凭证输入或认证管理；本机 API/MCP 的 bearer 鉴权仍保留，浏览器通过上方受保护入口访问。
-- [工作台阅读与交互](docs/dashboard.md)：真实已加载数量概览、按阶段分组的单列表、独立分页与任务详情；包含隔离合成预览方式。
-- 服务：`systemctl --user status work-commander`；数据 `~/.local/state/work-commander/`。
-- MCP：`node <安装目录>/src/mcp.js`（stdio），默认连接本机 8790。
-- 文档：[待办与统一记录](docs/backlog.md) · [接入和运行](docs/operations.md) · [工具与可靠性边界](docs/contract.md) · [统一迁入范围与交付](docs/unified-records-delivery.md) · [首版实证](docs/acceptance.md)。
-- 显式前置：`work_dependency add/remove`，查询复用 `work_read`；[语义与调用](docs/task-dependencies.md)。只维护同 caller 的直接关系和条件，不自动派工或修改执行状态。
-- 验证：`npm test`；开发启动：`npm start`，同数据目录持有内核独占锁。
-
-## 运行版本与安全退出
-
-`GET /version` 返回启动时捕获的 `SERVICE_DELIVERY_SHA/ARTIFACT/REQUEST/INSTANCE` 身份及实际包版本；
-`GET /health` 使用同一 `instanceId`，均禁止缓存。源码启动未设置这四项身份时明确返回
-`sha:null` / `artifactSha256:null` / `identitySource:"unknown"` 并生成独立 UUID，不读取 Git HEAD 冒充已部署版本。
-交付身份四项必须全部提供且合法（40 位 SHA、64 位 artifact SHA256、非空 request、UUID instance），
-部分或畸形配置会拒绝启动；`/version` 的规范字段为 `sha`、`artifactSha256`、`requestId`、`instanceId`。
-`GET /status` 只读返回 admission、在途 mutation/dispatch/notification/recovery 数量、总数 `inFlight` 和退出原因；
-`POST /admin/restart {"pending":true}` 同步关闭新 mutation admission，重复调用幂等，
-等已经接受的真实执行及通知结束才退出，不等仍在 Cockpit 中执行的业务 owner。
-排空期间认证读取继续可用，新 mutation 返回 `503 SERVICE_DRAINING`；静态读取/SSE 不阻止退出。
-没有强制超时、取消操作或自动恢复重放。
-
-管理入口只接受通过现有 Host 防护的非浏览器 loopback 客户端（拒绝 Origin / Sec-Fetch-Site 等浏览器元数据；
-允许 Node fetch 单独发送的 Sec-Fetch-Mode）。
-本机同用户可信边界不是恶意本机进程隔离；不应将端口或管理路径代理到公网。
-可选 `WORK_ADMIN_TOKEN` 要求单独的 bearer 管理凭证，不使用 caller/owner/viewer 凭证；
-未配置时供可信本机 runner 无凭证调用。`service-delivery.json` 声明交付契约，不代表 runner 已安装。
-首次迁移的旧进程**没有**此 drain 协议，须另行批准维护切换并确认真实在途操作已完成，
-不能把旧 `/health` 当安全退出证明。新 unit 使用无限 stop 等待，安装前旧 unit 的 75 秒强停限制仍存在。
-
-一句话用 `work_record` 登记待办，零会话副作用；补齐授权后通过 `work_dispatch` 在**同 taskId**开工。同目标继续原 owner。元数据用 recordRevision，执行目标/授权用 goalVersion；只有后者变化才 `work_amend`。owner 报告/交付仍用 `work_report`、`work_deliver`。默认 `work_read` 返回 10 个未结束简表，完成历史按需查，不查询 Cockpit。
-
-**Task 1.2.8：owner 本任务修改与续办。** 用户在绑定 owner 会话直接给出同任务新要求时，owner 可用原凭证、完整 goal、reason/source 调用 `work_amend`，包括在已交付后创建后继版本，再直接 accepted 新版本继续；无需 caller 中转、自派消息或新 session。`work_record update` 也允许绑定 owner，但元数据不重开/授权执行。旧结果、身份、版本并发和在途保护保留；没有新授权不得自动复活。接口边界见[契约](docs/contract.md)，源码版本不表示安装环境已升级。
-
-**统一记录**：用户批准的旧任务保留原始来源后迁入，历史 owner/caller 引用与真实执行绑定分离。迁入不派工、不唤醒 owner、不发旧回执；切换后的 Markdown 仅留入口，不再双写状态。旧回执由讨论方 `work_observe` 带来源登记，不能冒充 owner。单用户本地部署不隔离恶意同用户 agent；现有 Cockpit 宽读取和未知副作用仍如实暴露。
+模块 ID、MCP key 和包名均为 `cockpit-task`；正式 Skill 为
+[Owner](skills/cockpit-task-owner/cockpit-task-owner/SKILL.md) 和
+[Executor](skills/cockpit-task-executor/cockpit-task-executor/SKILL.md)。
+持久化仅使用宿主提供的模块目录，不自动导入其他数据库或修改既有安装。

@@ -39,8 +39,8 @@ included in the 40/40 result and use the narrower setup documented below.
 | Evaluation | Read-only observer, raw audit, retained outputs and bounded snapshots |
 
 Do not use production data, installations, credentials, sessions or Owner messages.
-Do not start the legacy daemon, migrate a real database, deploy, or restart a real
-Cockpit service. Use a loopback-only lab with a new storage directory. No actor may
+Do not migrate a real database, deploy, or restart a real Cockpit service.
+Use a loopback-only lab with a new storage directory. No actor may
 call real Cockpit session tools, contact another actor through a side channel, or
 read another actor's private experiment report.
 
@@ -218,8 +218,28 @@ The separate `test/task-board-host-integration.test.js` uses the actual isolated
 host/SDK with a synthetic provider. It requires a compatible host worktree,
 `TASK_BOARD_HOST_WORKTREE`, a freshly packaged module and the host's TypeScript
 runner. Without that environment it skips; a skipped run is not native evidence.
-See [host integration](task-host-contract.md) and the test source for its current
-setup. Do not run legacy `npm start` to obtain a host for this exercise.
+From the Task repository, with that host's dependencies already installed:
+
+```bash
+npm run package:module
+HOST_SOURCE=/absolute/path/to/compatible/cockpit
+mkdir .task-board-host-runner
+TMPDIR="$PWD/.task-board-host-runner" TSX_DISABLE_CACHE=1 \
+  TASK_BOARD_HOST_WORKTREE="$HOST_SOURCE" \
+  "$HOST_SOURCE/packages/core/node_modules/.bin/tsx" --test test/task-board-host-integration.test.js
+```
+
+Use a fresh runner directory and run no concurrent packaging against its archive.
+The harness creates empty temporary home/config/state directories and a synthetic
+loopback provider; it does not use real sessions or contact a real model provider.
+Inspect the test result, then remove the empty runner directories:
+
+```bash
+rmdir ".task-board-host-runner/tsx-$(id -u)" .task-board-host-runner
+```
+
+See [host integration](task-host-contract.md) for required capabilities.
+Task is hosted by Cockpit; it has no standalone server startup command.
 
 ## Actor instructions
 
