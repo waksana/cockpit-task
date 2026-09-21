@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -13,6 +13,8 @@ import { createMcpRoutes } from '../src/task-board/mcp.js';
 import { toolSchemas } from '../src/task-board/contracts.js';
 import { TaskService } from '../src/task-board/service.js';
 import { TaskStore } from '../src/task-board/store.js';
+
+const manifest = JSON.parse(readFileSync(new URL('../cockpit.module.json', import.meta.url), 'utf8'));
 
 function fixture(execute, sharedModule, schemas = { task_read: z.object({ task_id: z.string() }).strict() }) {
   const controller = new AbortController();
@@ -63,7 +65,7 @@ test('Task HTTP MCP speaks the official protocol and retains structured failures
   const f = fixture(async (name, input) => { calls.push({ name, input }); return expected; });
   try {
     await f.connect();
-    assert.deepEqual(f.client.getServerVersion(), { name: 'cockpit-task', version: '0.1.5' });
+    assert.deepEqual(f.client.getServerVersion(), { name: manifest.id, version: manifest.version });
     const listed = await f.client.listTools();
     assert.deepEqual(listed.tools.map(tool => tool.name), ['task_read']);
     const response = await f.client.callTool({ name: 'task_read', arguments: { task_id: 'one' } });
