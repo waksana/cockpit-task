@@ -18,6 +18,11 @@ Task、依赖引擎或级联状态。引用其他 Task 只是资料关联。
 新 session 选择 Executor；指派不补装任何能力，也不暴露角色变更操作。
 拥有两种角色不等于实际承接，也不放宽单项执行限制。
 
+资源感知创建和独立 `task_session_prepare` 只准备显式选择的原生资源，不形成
+新的 Task 字段、类型或资源要求表单。prepare 要求已加载空闲、Executor 角色已应用、
+无待重载角色且未绑定任何未结束 Task；native idle 不能解除业务占用。
+准备不创建、绑定或发送消息，Task 登记不依赖准备成功，backlog 可以不派单。
+
 ## 2. 核心字段
 
 下表为语义模型，不是一次读取返回全部内容的对象。服务维护 UUID、时间、
@@ -158,7 +163,12 @@ definition 提供完整当前要求，changelog/activity/outcomes/subscriptions 
 description revision、生命周期代次和可编辑资料代次分别保护各自冲突，
 不能用单一 revision 掩盖首次指派竞争或终态后的迟到状态写入。
 
-外部 session 创建、能力检查、绑定和消息发送有独立操作回执。
+外部 session 创建、资源准备、能力检查、绑定和消息发送有独立操作回执。
+资源感知 create / prepare 的 `preparation` 和宿主 `resources` 分步效果与最终
+`capability` 分开；已有创建回执形状在省略资源选择时保持兼容。
+启用、工具初始化、最终就绪、授权、接受、ACK 和执行不能互相替代。
+prepare/assign 的同目标并发保护仅覆盖已加载 Task 服务内的调用存续期间，
+不新增持久锁，也不改变单项未结束执行的唯一约束。
 已创建/绑定资源不能因后续失败而假装不存在；恢复只接受已证实未发送的
 固定指派，不重放 unknown、queued 或 accepted 发送。完整规则见
 [实现契约](task-implementation.md#external-operation-receipts)与

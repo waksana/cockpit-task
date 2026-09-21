@@ -8,7 +8,8 @@ import { z } from 'zod/v4';
 const descriptions = {
   task_read: 'Read bounded Task views. For list, explicitly filter by owner or executor; actor_session_id checks your current assigned Task too but is not an automatic list filter or authentication. Use overview for one Task, definition before edits and execution for complete current requirements. Histories, outcomes and subscriptions are separate; subscriptions include durable notification evidence even for terminal Tasks. Reads never acknowledge.',
   task_create: 'Register an independent unassigned Task with complete requirements. Does not create a session or send a message. Keep request_id stable on retry.',
-  task_session_create: 'Create a real Executor session with the Task role, Skill and MCP through Cockpit. Does not bind a Task or send a prompt. Inspect readiness and any partial result; never recreate on an unknown result.',
+  task_session_create: 'Create a real Executor with its Task role. Optionally prepare explicitly selected existing skills and mcp_servers; no automatic matching, installation or authentication. Omitted selections preserve ordinary creation. Resource-aware creation requires host preparation v1 before creating. Does not bind a Task or send a prompt. Inspect per-step effects and readiness; never recreate on an unknown result.',
+  task_session_prepare: 'Prepare explicitly selected existing skills and mcp_servers for an already loaded idle Executor with no unfinished Task. Enables only selected resources, initializes tools when needed and checks actual offered tools plus Executor readiness. Preserves unrelated choices; no reload, new role, model change, Task binding or prompt. Stable request replay never repeats effects; inspect operation and native state before any new request. Enabled Skill does not mean its body was loaded.',
   task_assign: 'Assign an unassigned Task to an existing capable Executor and send one assigned reference. Checks capability and idle/empty state without installing capability or proactively interrupting. The checks and enqueue send are not atomic: a race may return queued or unconfirmed. Inspect durable per-step results and failure-time availability_reasons; never blindly resend.',
   task_edit: 'Replace the complete description or edit Task metadata. Description changes keep a changelog. Only an actual description change by the assigned Executor on an unfinished Task automatically acknowledges that revision; unchanged text and metadata-only edits do not. Does not send messages or change execution status.',
   task_ack: 'Record that the assigned Executor has read the current description revision. Does not start work, add activity or send messages. Report authorship truthfully; actor_session_id is attribution, not verified identity.',
@@ -25,13 +26,13 @@ export function createMcpRoutes({ execute, schemas, signal, report }) {
     name, description: descriptions[name], inputSchema: z.toJSONSchema(schema, { target: 'draft-7' }),
     annotations: {
       readOnlyHint: name === 'task_read', destructiveHint: name !== 'task_read',
-      idempotentHint: true, openWorldHint: ['task_assign', 'task_session_create', 'task_report', 'task_cancel'].includes(name),
+      idempotentHint: true, openWorldHint: ['task_assign', 'task_session_create', 'task_session_prepare', 'task_report', 'task_cancel'].includes(name),
     },
   }));
   let stopped = false;
 
   async function connection() {
-    const server = new Server({ name: 'cockpit-task', version: '0.1.5' }, { capabilities: { tools: {} } });
+    const server = new Server({ name: 'cockpit-task', version: '0.1.6' }, { capabilities: { tools: {} } });
     const lifetime = new AbortController();
     const pending = new Map();
     const state = {

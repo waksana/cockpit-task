@@ -23,6 +23,7 @@ included in the 40/40 result and use the narrower setup documented below.
 - [Controller fault recipes](#controller-fault-recipes)
 - [Subscription-necessity cases N1-N3](#subscription-necessity-cases-n1-n3)
 - [Coding workflow cases G1-G4](#coding-workflow-cases-g1-g4)
+- [Executor preparation: rationale and acceptance](#executor-preparation-rationale-and-acceptance)
 - [Coverage and grading](#coverage-and-grading)
 - [Artifacts, review and shutdown](#artifacts-review-and-shutdown)
 - [Baseline observations and untested boundaries](#baseline-observations-and-untested-boundaries)
@@ -813,6 +814,58 @@ not a real native subagent. The blocked case's final user prompt must not be cou
 as an automatic wake-up. A genuinely conflicting dirty-main stop/resume case was
 not exercised; preserving the explicitly excluded note was not proof of a clean
 original checkout. This run predates the direct-question guidance.
+
+## Executor preparation: rationale and acceptance
+
+Separate authorized, read-only research checked all 26 then-visible identities as
+both Owner and Executor: three actual Owners, eight Tasks, seven assigned.
+This is bounded coverage, not all deleted/unreachable identities or all history.
+No business payloads or private session/Task/request identifiers are reproduced here.
+The observations are rationale, not new runs included in the historical totals.
+
+Clean default create -> rename -> assign and completed-Executor reuse both worked.
+For the third Owner, two fresh Executors received assignment as their first user
+message; original create/assign call IDs were outside the bounded history.
+One backlog-only Task was correctly left undispatched. Model changes or Skill
+toggles could invalidate native tool metadata without removing the resources;
+MCP reconnect did not restore it. Cold reload reset temporary resource selections,
+and reloading an empty session could lose it. Unknown creation therefore requires
+inspection of the durable receipt, never blind replacement.
+
+Use synthetic fixtures for the following preparation acceptance cases; this table
+specifies expected evidence, not a claim that the new feature has already passed
+every case or achieved measured tool-count savings.
+
+| Case | Required evidence |
+| --- | --- |
+| Legacy/default creation | Omit selections; old creation/receipt still works on an older compatible host. Rename remains separate, with one assignment message and no initialization prompt. |
+| Explicit creation or reuse | Discoverable Skill/server names and raw tool names are explicit. Both paths retain requested resource effects and finish with separate ready/idle evidence; unrelated choices survive. |
+| Unsupported host | Any explicit selection, including empty arrays, and every prepare reject with `PREPARATION_UNSUPPORTED` before external effects; no success-shaped fallback. |
+| Candidate exclusion | Unloaded/busy targets, unapplied Executor roles and pending role reloads reject. Any unfinished Task binding rejects even if native idle; completed reuse remains eligible. |
+| Stale tool metadata | Initialize once for null metadata or confirmed selected enablement, including non-null stale metadata after MCP enable. No-op/already-enabled selections with non-null metadata and genuinely missing tools still fail without speculative rebuild. Preserve effects; initialized is not ready and enabled Skill is not body loaded. |
+| Selection failure | Unknown names, `*`, duplicates/limits, filtered-out requested tools, and a server with omitted/empty tools but none offered fail explicitly without installing, authenticating or bypassing policy. |
+| Bounded receipt | Omitted/empty MCP tool selections return one actual offered raw-name witness, not a catalogue; explicit selections return only requested offered names. Errors are at most 2,000 characters and explicitly marked when truncated. |
+| Partial/unknown effects | Retain known session ID and per-step effects; exact replay does not redo actions. Read receipt/current state before a new explicit continuation after known failure; unknown never licenses replacement. |
+| Cancellation/receipt ordering | Persist the known target and `not_prepared` before passive inspection, then `unknown` before native preparation. Cancellation gates the next Task-to-host call; an already submitted guarded call may finish its native steps. Retain actual results when available, without interruption/rollback/retry. |
+| Concurrent/final checks | Same-target prepare/assign conflicts reject for the call lifetime within the loaded Task service, not via a new durable lock. Final readiness and idle are checked again. Assignment still checks/binds/sends once and never silently repairs. |
+| Independent agreement | Backlog stays undispatched. Executor reads/ACKs the complete task-specific agreement and loads needed Skill bodies independently; no assumed inherited Owner context. |
+
+A separate isolated native host regression showed that MCP enable can retain an
+already-initialized empty table after disable and tool initialization, and that
+explicit initialization immediately restores it. This supports initializing once
+after confirmed selected enablement, not speculative rebuilding on no-op selections.
+The Skill-enable fixture invalidated metadata to null and preparation succeeded
+while preserving an unrelated disabled Skill and MCP server. These are native fixture
+observations, not production mutations or additions to historical model-driven totals.
+
+The UI support baseline remains
+`9fd5204bda99a8bd65b2c5ef152cc47ce87837d5` / `uiSurfaceVersion: 1`.
+Backend preparation requires the separate v1 marker and public intent from
+[waksana/cockpit#98](https://github.com/waksana/cockpit/issues/98), with related native tool
+support in [Cockpit #97](https://github.com/waksana/cockpit/pull/97).
+The observed running host 0.2.7 / source `1dd38c6` lacked both; source merge is not
+deployment. Do not mutate real sessions or reinstall immutable Task 0.1.5 to rerun
+these cases; the changed source prepares 0.1.6.
 
 ## Coverage and grading
 

@@ -1,5 +1,5 @@
 import { TaskError, parseInput } from './contracts.js';
-import { assignExecutor, createExecutor } from './operations.js';
+import { assignExecutor, createExecutor, prepareExecutor } from './operations.js';
 import { deliverNotification } from './notifications.js';
 
 export class TaskService {
@@ -11,6 +11,7 @@ export class TaskService {
     this.active = 0;
     this.closing = false;
     this.closed = false;
+    this.sessionOperations = new Set();
   }
 
   async execute(name, rawInput, { signal } = {}) {
@@ -33,7 +34,7 @@ export class TaskService {
     try {
       input = parseInput(name, rawInput);
       if (signal?.aborted) throw new TaskError('REQUEST_CANCELLED', 'Task request was cancelled before execution', 409);
-      if (name === 'task_session_create' || name === 'task_assign') {
+      if (['task_session_create', 'task_session_prepare', 'task_assign'].includes(name)) {
         const receipt = this.store.reserveOperation(name, input);
         if (receipt.replay) outcome = { result: receipt.result, error: receipt.error };
         else {
@@ -41,15 +42,35 @@ export class TaskService {
             input, signal,
             inspect: id => this.host.inspect(id),
             save: value => this.store.saveOperation(input.request_id, value),
+            preparationSupported: this.host.preparationSupported === true,
+            prepare: (id, resources) => this.host.prepare(id, resources),
+            preflight: id => this.store.preparationPreflight(id),
+            guard: (id, work) => this.withSessionOperation(id, work),
           };
-          outcome = name === 'task_session_create'
-            ? await createExecutor({ ...options, create: cwd => this.host.create(cwd) })
-            : await assignExecutor({
-              ...options,
-              bind: () => this.store.bindAssignment(input),
-              recheck: () => this.store.dispatchPreflight(input),
-              send: (id, text) => this.host.send(id, text),
-            });
+          if (name === 'task_session_create') {
+            outcome = await createExecutor({ ...options, create: cwd => this.host.create(cwd) });
+          } else if (name === 'task_session_prepare') {
+            outcome = await prepareExecutor(options);
+          } else {
+            try {
+              outcome = await this.withSessionOperation(input.executor, () => assignExecutor({
+                ...options,
+                bind: () => this.store.bindAssignment(input),
+                recheck: () => this.store.dispatchPreflight(input),
+                send: (id, text) => this.host.send(id, text),
+              }));
+            } catch (error) {
+              if (!(error instanceof TaskError) || error.code !== 'EXECUTOR_OPERATION_IN_PROGRESS') throw error;
+              outcome = {
+                result: { operation: {
+                  request_id: input.request_id, task_id: input.task_id, executor: input.executor,
+                  status: 'rejected', capability: 'unchecked', assignment: 'not_applied', message: 'not_sent',
+                } },
+                error: { code: error.code, message: error.message },
+              };
+              options.save(outcome);
+            }
+          }
         }
       } else {
         outcome = { result: this.store.executeLocal(name, input), error: null };
@@ -106,6 +127,15 @@ export class TaskService {
       ...outcome, definition_check,
       ...(notifications ? { notifications, notification_error: notification_error ?? null } : {}),
     };
+  }
+
+  async withSessionOperation(sessionId, work) {
+    if (this.sessionOperations.has(sessionId)) {
+      throw new TaskError('EXECUTOR_OPERATION_IN_PROGRESS', 'Another preparation or assignment is using this Executor; nothing attempted');
+    }
+    this.sessionOperations.add(sessionId);
+    try { return await work(); }
+    finally { this.sessionOperations.delete(sessionId); }
   }
 
   deliver(id, signal) {

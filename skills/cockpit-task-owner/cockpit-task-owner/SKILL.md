@@ -47,13 +47,16 @@ not a raw evidence store: use accessible, locatable references for detailed evid
 References cannot replace the essential agreement with "see Issue", hide requirements
 in metadata or assume inherited context. Keep exact values needed to support conclusions
 or resume safely; do not copy chat or impose a mandatory project form.
-Choose a capable session without competing work: one unfinished Task at a time, not one lifetime goal.
+Exclude every Executor bound to an unfinished Task, even if native idle; one unfinished
+Task at a time, not one lifetime goal. Choose a capable session without competing work.
 New/forked sessions neither isolate shared resources nor inherit authorization.
 
-Use `task_create` to register, `task_session_create` when a new Executor is needed,
-and `task_assign` to assign. Let tools assemble/check capabilities rather than
-hand-building them or relaxing user-selected requirements. Registration, creation,
-readiness, message acceptance, ACK and execution are distinct facts.
+Choose authorized resources/environment and existing discoverable Skill/MCP names, not guesses from Task text.
+Use `task_create`, then `task_session_create` with selections or `task_session_prepare` for a loaded idle Executor
+with its role applied and no pending role reload. Neither new nor reuse is mandatory; backlog does not dispatch.
+Inspect the receipt, then `task_assign` once: it checks, never repairs. Unknown effects need inspection, not blind retry/replacement.
+Preparation does not install/authenticate, reload, change global defaults or prompt; readiness is not authorization, acceptance, ACK or execution.
+Skill enabled is not body loaded; Executor loads relevant bodies when first needed, without inheriting your context.
 `task_assign` sends the first assigned reference itself; do not send a duplicate.
 
 ## Coding work

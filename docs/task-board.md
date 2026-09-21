@@ -1,7 +1,7 @@
 # Task
 
 Task is a Cockpit module for independent work records shared by Owner and Executor.
-Its module ID and HTTP MCP key are `cockpit-task`, source preparation version `0.1.5`.
+Its module ID and HTTP MCP key are `cockpit-task`, source preparation version `0.1.6`.
 It runs in Cockpit, not a standalone daemon or dashboard.
 
 ## Requirements
@@ -14,6 +14,14 @@ The service-ready requirement is checked before storage opens or migrates;
 a release label or API-v1 alone is insufficient. Missing public capabilities fail
 explicitly, without private-access fallbacks. See the
 [host contract](https://github.com/waksana/cockpit-task/blob/main/docs/task-host-contract.md).
+
+Explicit resource preparation additionally requires
+`context.host.resourcePreparationVersion === 1` and `session/resources-prepare`
+([waksana/cockpit#98](https://github.com/waksana/cockpit/issues/98)); unsupported hosts reject
+before resource-aware creation or preparation effects. Omitting resource selections
+preserves legacy creation. This is separate from the unchanged UI support baseline
+`9fd5204bda99a8bd65b2c5ef152cc47ce87837d5` / `uiSurfaceVersion: 1`.
+Source support is not a release or deployment claim.
 
 ## Roles and records
 
@@ -79,7 +87,8 @@ Task auto-ACKs the new revision. Terminal definitions can be edited without reop
 | --- | --- |
 | `task_read` | Fixed bounded views; complete requirements and histories read separately |
 | `task_create` | Register an unassigned todo |
-| `task_session_create` | Create a new Executor with Task capabilities through the host |
+| `task_session_create` | Create an Executor, optionally preparing explicitly selected native resources |
+| `task_session_prepare` | Prepare a loaded idle Executor with no unfinished Task; no creation or dispatch |
 | `task_assign` | Check an existing Executor, bind once and send one assigned reference |
 | `task_edit` | Replace the complete description or edit title/materials |
 | `task_ack` | Confirm the current definition separately from status |
@@ -88,21 +97,32 @@ Task auto-ACKs the new revision. Terminal definitions can be edited without reop
 | `task_subscribe` | Optional one-shot Owner wait for explicit target statuses |
 | `task_unsubscribe` | Cancel a still-waiting subscription |
 
-Owner receives read/create/session_create/assign/edit/cancel/subscribe/unsubscribe;
+Owner receives read/create/session_create/session_prepare/assign/edit/cancel/subscribe/unsubscribe;
 Executor receives read/edit/ack/report/cancel (all `task_` prefixed). Both roles
 take the union. Having a tool permits cross-Task operations: responsibility
 fields are not per-record authorization. `actor_session_id` is reported provenance,
 not verified identity.
 
-1. Owner writes a complete Task, then explicitly creates or selects an Executor.
-2. Assignment checks capability and native idle/empty state, binds, rechecks and
+1. Owner chooses authorized work resources/environment and registers the complete
+   Task. Backlog registration alone does not dispatch.
+2. Create with optional `skills` / `mcp_servers`, or explicitly prepare an eligible
+   existing Executor; inspect the operation receipt. Exclude every Executor bound
+   to unfinished work, even if idle. No preference for new or reused sessions is imposed.
+3. Assignment checks capability and native idle/empty state, binds, rechecks and
    sends exactly one assigned reference. Owner does not duplicate it.
-3. Executor reads `execution`, ACKs the exact current revision, then explicitly
+4. Executor reads `execution`, ACKs the exact current revision, then explicitly
    reports `in_progress` when work starts.
-4. At meaningful checkpoints and before consequential actions/delivery, read the
+5. At meaningful checkpoints and before consequential actions/delivery, read the
    latest requirements, reconcile changes and ACK as necessary.
-5. Record meaningful activity and blockers. Deliver the full agreement with
+6. Record meaningful activity and blockers. Deliver the full agreement with
    `status=done` and a new outcome in the same report.
+
+Resource names must already be discoverable; preparation does not infer them from
+Task text, install/authenticate, alter unrelated choices or global defaults, reload,
+change roles/models or send a prompt. Explicit empty selections still request preparation.
+Tool availability is checked against the actual filtered offered table.
+Skill enabled is not body loaded; MCP connected is not tool offered; initialized
+tools are not final readiness. Executor loads relevant Skill bodies when first needed.
 
 Owner starts with `task_read(view=list, owner=<own session ID>)`, then overview
 for one Task. Actor is not that filter. Read definition before editing and outcomes
@@ -122,7 +142,7 @@ failure or replay. Old activity can save while stale status/outcome fail; do not
 repeat saved activity or relabel it to satisfy new scope. Exact ACK history matters:
 ACKing v3 does not prove a skipped v2 was acknowledged.
 
-Creation, capability, binding, message acceptance, ACK and actual execution are
+Creation, resource preparation, capability, binding, message acceptance, ACK and actual execution are
 different facts. Assignment does not add roles, repair capability, reload or
 create a replacement session. Capability readiness is explicit and on demand,
 not a list/detail badge; native busy/queue/decisions/background work are checked
@@ -133,6 +153,11 @@ Inspect `task_read(view=operation,request_id)` for durable step results.
 Failure-time `availability_reasons` and `observed_at` explain an observation,
 not live status; receipt reads/replay do not refresh them.
 Preserve created or bound resources after partial failures.
+Resource-aware create/prepare receipts retain `preparation`, host `resources` step
+effects and separate final `capability`. Read the receipt and current state before
+an explicit new preparation request after a known failure; unknown effects never
+justify blind retry or replacement. Preparation rejects pending role reload and
+any unfinished Task binding; it is not a repair mode for an assigned Executor.
 Only an unused final assignment receipt proving `assignment=applied` and
 `message=not_sent` supports explicit resume_request_id recovery with a new request
 ID, fresh context/revision and the same Task/Executor. Unknown, queued, accepted
@@ -219,7 +244,7 @@ npm test
 npm run package:module
 ```
 
-`dist/cockpit-task-0.1.5.tgz` contains runtime dependencies, backend/frontend assets,
+`dist/cockpit-task-0.1.6.tgz` contains runtime dependencies, backend/frontend assets,
 role prompts, two role Skills and the shared coding Skill. Its `.sha256` sidecar identifies the
 archive. [Task CI](https://github.com/waksana/cockpit-task/blob/main/.github/workflows/task-board-ci.yml) retains these as the
 `cockpit-task-module` artifact; an artifact is not an installation or deployment.
@@ -228,7 +253,7 @@ Installation is an explicit operator action on a compatible host. From the host
 checkout, stage the local artifact using the host's module installer:
 
 ```sh
-pnpm module install /absolute/path/to/cockpit-task-0.1.5.tgz --trust-local-code
+pnpm module install /absolute/path/to/cockpit-task-0.1.6.tgz --trust-local-code
 ```
 
 This command deliberately omits automatic enablement. Follow that host's documented

@@ -16,6 +16,10 @@ references, metadata, assignment, status, revision and ACK. Confirm that this is
 your assignment, not an inference from a title, role, idle status or old chat.
 History and outcomes are separate; read them for a concrete question.
 New/forked sessions neither inherit authorization nor isolate shared resources.
+Preparation/readiness is not assignment, authorization, ACK or execution.
+Skill enabled is not body loaded; load relevant Skill bodies when first needed,
+without assuming inherited Owner context. MCP connected is not tool offered,
+and initialized tool metadata is not final readiness.
 
 Own the entire authorized result: investigation, execution, correction and delivery,
 not just a proposal or stage. Organize internal steps/subagents without child Tasks,

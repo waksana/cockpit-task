@@ -54,19 +54,24 @@ Executor 亲自成功修改未结束 Task 的正文时，同时确认新 revisio
 状态、归属、动态和 ACK 不推进 description revision。旧成果保留原版本；
 定义改变后，旧成果不能冒充新要求已交付的证明。终态定义可以编辑，但不会重开执行。
 
-## 3. 登记、创建和指派是独立操作
+## 3. 登记、准备和指派是独立操作
 
 ```text
 澄清并登记 Task
-  → 明确新建 Executor，或选择已有能力的 session
+  → 明确选择工作资源，新建 Executor 或准备符合条件的既有 session
   → 指派工具检查能力和原生可接单状态，固定执行归属
   → 发送一次 assigned 引用
   → Executor 读取完整当前约定并 ACK
   → 明确开始执行，持续维护 Task，完整交付
 ```
 
-`task_create` 只登记；`task_session_create` 通过宿主新建并装配 Task Executor，
-不关联 Task 或发送消息；`task_assign` 只指派 Owner 选定的已有 session，
+`task_create` 只登记，backlog 无需派单；`task_session_create` 通过宿主新建并装配
+Task Executor，可显式准备所选 Skill/MCP。`task_session_prepare` 为已加载空闲、
+无未结束 Task、已应用 Executor 且无待重载角色的既有 session 准备资源。
+两者不关联 Task 或发送消息；不强制优先新建或复用，也不自动匹配候选者。
+选择限于已存在可发现的原生名称，不从 description 推断，不安装、认证或改全局默认值。
+旧创建省略选择时保持兼容；显式准备须有独立宿主能力标记，缺失在副作用前拒绝。
+`task_assign` 只指派 Owner 选定的已有 session，
 不追加角色、安装 Skill、启用 MCP、重载或创建替代者。
 
 宿主提供角色选择、组合、持久化、冷恢复及已有 session 的角色管理。
@@ -119,7 +124,10 @@ Task 保护版本、逐版 ACK、生命周期、首次绑定、单 session 单�
 已实际 ACK 的旧版 activity 可保留原 revision；同次请求的过期状态或成果拒绝，
 必须明确部分应用。读过或确认更高版本不证明被跳过的版本已获确认。
 
-session 已创建、能力就绪、归属已绑定、消息被接受、ACK 和实际执行是不同事实。
+session 已创建、资源准备、能力就绪、归属已绑定、消息被接受、ACK 和实际执行是不同事实。
+Skill enabled 不等于正文已读，MCP connected 不等于工具 offered；Executor 仍须在
+首次需要时自行加载相关 Skill 正文。准备分步效果和最终 readiness 分开保留，
+已知失败先检查回执及当前状态，再明确继续；未知准备不允许盲重试或替换。
 稳定 `request_id` 的相同输入重放不重复副作用；部分失败保留已创建/绑定资源。
 未知、queued 或 accepted 发送不能自动重发。只有已完成且未被消费的回执证明
 固定指派 `assignment=applied`、`message=not_sent` 时，才允许通过

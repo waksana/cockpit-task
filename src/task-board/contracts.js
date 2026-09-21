@@ -56,6 +56,17 @@ const metadata = z.preprocess((value, context) => {
 }, z.record(z.string(), z.unknown()));
 const actor = { actor_session_id: session };
 const mutation = { ...actor, request_id: request };
+const resourceNames = max => z.array(text(200)).max(max)
+  .refine(values => new Set(values).size === values.length, 'Resource names must be unique');
+const resources = {
+  skills: resourceNames(64).optional().describe('Explicitly selected existing native Skill names; enabling does not load their bodies'),
+  mcp_servers: z.array(z.strictObject({
+    name: text(200),
+    tools: resourceNames(256).refine(values => !values.includes('*'), 'Wildcard tools are not supported')
+      .optional().describe('Required exact raw MCP tool names, no wildcard; omitted or empty means at least one offered tool'),
+  })).max(64).refine(values => new Set(values.map(value => value.name)).size === values.length, 'MCP server names must be unique')
+    .optional().describe('Explicitly selected existing native MCP servers; no installation, authentication or filter bypass'),
+};
 const existing = { ...mutation, task_id: id, write_context: text(1000) };
 const pagination = { limit: z.number().int().min(1).max(LIMITS.history).optional(), cursor: text(2000).optional() };
 const readActor = { actor_session_id: session.optional() };
@@ -78,7 +89,8 @@ export const schemas = {
     ...mutation, owner: session, title: text(240), description: text(LIMITS.description),
     references: references.optional(), metadata: metadata.optional(),
   }).refine(definitionFits, 'Combined serialized description and materials exceed 64000 characters'),
-  task_session_create: z.strictObject({ ...mutation, cwd: text(4000) }),
+  task_session_create: z.strictObject({ ...mutation, cwd: text(4000), ...resources }),
+  task_session_prepare: z.strictObject({ ...mutation, session_id: session, ...resources }),
   task_assign: z.strictObject({ ...existing, revision, executor: session, resume_request_id: request.optional() }),
   task_edit: z.strictObject({
     ...existing, revision, reason: text(2000), title: text(240).optional(),

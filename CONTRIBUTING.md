@@ -18,11 +18,16 @@ Synchronize `package.json`, `cockpit.module.json`, both root version entries in
 `package-lock.json`, the embedded MCP server version, tests and current-source
 documentation. Preserve historical release facts. If fresh main already prepares
 the appropriate undelivered version, reuse it rather than repeating its bump:
-the current 0.1.5 preparation already supersedes installed 0.1.4.
+the current 0.1.6 preparation supersedes installed 0.1.5; that installation remains immutable.
 
 Keep the documented UI source pairing
-`9fd5204bda99a8bd65b2c5ef152cc47ce87837d5` and `uiSurfaceVersion: 1`; a module
-version change does not require a new SDK or runtime. Verify the final merged
+`9fd5204bda99a8bd65b2c5ef152cc47ce87837d5` and `uiSurfaceVersion: 1` as the UI
+support baseline, separate from backend resource preparation. Explicit preparation
+requires `context.host.resourcePreparationVersion === 1` and the public
+`session/resources-prepare` contract from [Cockpit #98](https://github.com/waksana/cockpit/pull/98).
+Do not infer a deployed capability or minimum host release from a source merge.
+Legacy creation without resource selections remains compatible with older hosts.
+Verify the final merged
 CI artifact before authorized installation. Never delete installed directories
 or force installer bypasses to reuse a version. Merge does not authorize tags,
 Releases, deployment or restart; those require separate authorization.

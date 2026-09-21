@@ -61,11 +61,30 @@ undo an already-saved report. An unavailable check is not evidence of alignment.
 An ACK reminder describes the assigned Executor's responsibility, not an instruction
 for Owner or another reader to ACK on their behalf.
 
-## Creating and assigning
+## Creating, preparing and assigning
 
-Task registration, Executor-session creation and assignment are distinct actions.
-`task_session_create` assembles a new Executor; it does not assign or start a Task.
+Task registration, Executor-session creation/preparation and assignment are distinct.
+`task_session_create` assembles a new Executor, optionally preparing explicit
+`skills` / `mcp_servers`; it does not assign or start a Task.
+Omitting both selections preserves legacy creation; an explicit empty array still
+requests preparation. Choose existing discoverable native names, never inferred
+resources from Task text. Requested MCP tools are raw names checked against the
+actual filtered offered table; `*` is rejected, and omitted/empty tools still require
+an offered raw tool. Preparation initializes once for null metadata or confirmed
+selected resource enablement, even if metadata remains non-null after MCP enable.
+Already-enabled/no-op selections with non-null metadata and genuinely missing tools
+still fail without speculative rebuild; preserve effects, do not reload or toggle
+unrelated resources. Omitted/empty selections return one actual offered raw-name
+witness, not a catalogue; explicit selections return only requested offered names.
+Receipt errors are at most 2,000 characters, with truncation explicitly marked.
 Choose new versus existing deliberately; creation is not an automatic fallback.
+Owner can use `task_session_prepare` for an already loaded idle Executor with its
+role applied and no pending role reload. Exclude any Executor bound to unfinished
+work even if native idle; there is no `task_id` repair mode. Preparation neither
+creates/renames nor changes model/roles, binds a Task or sends a prompt. It preserves
+unrelated choices, does not install/authenticate, change global defaults, bypass
+policy or reload/cold-load. Unsupported hosts reject explicit preparation before
+effects; do not replace it with manual toggle/initialization choreography.
 `task_assign` checks an existing candidate's capabilities and availability without
 installing missing roles or interrupting a busy session.
 It binds the Task and sends one assigned reference; do not send it again manually.
@@ -74,10 +93,21 @@ or unconfirmed send; inspect the per-step receipt instead of assuming nothing se
 Role labels or earlier readiness are not permanent proof of current capability.
 First assignment does not change the definition, ACK, status or activity.
 
-Creation or dispatch can partially apply. Read the operation receipt using its
+Creation, preparation or dispatch can partially apply. Read the operation receipt using its
 `request_id` before deciding what remains to do. Preserve a confirmed created
 session even when readiness failed. A timeout or error is not proof that no
 session was created or no message was sent.
+For resource-aware create/prepare, inspect `preparation`, host `resources` per-step
+effects and separate final `capability`. Prepared/initialized is not ready; ready
+is not authorization, assignment or execution. Skill enabled is not body loaded.
+After a known preparation failure, read the receipt and current state before an
+explicit new request to continue safely. Unknown effects never justify blind retry,
+replacement or claiming success; replay retains the original effects without
+repeating external actions. Same-target prepare/assign conflicts are rejected for
+the call lifetime within the loaded Task service, not through a new durable lock.
+Caller cancellation gates the next Task-to-host call; a submitted preparation call
+may still complete its selected native steps. Inspect actual receipt effects, not
+an assumption of interruption, rollback or safe retry.
 For capability/availability rejections, inspect `operation.details.reasons` and
 `availability_reasons`. They describe the recorded `observed_at` checkpoint, not
 current live state; receipt reads do not refresh it. Missing diagnostics do not

@@ -7,8 +7,8 @@
 
 ## 1. 工具集合与角色
 
-Task 提供十个工具，模块 ID 与 MCP key 为 `cockpit-task`。
-登记、创建执行 session 和首次指派是独立操作；状态订阅是可选的一次性等待，
+Task 提供十一个工具，模块 ID 与 MCP key 为 `cockpit-task`。
+登记、创建/准备执行 session 和首次指派是独立操作；状态订阅是可选的一次性等待，
 不是默认最终通知、监工或依赖调度。模块只维护 Owner / Executor 两份角色技能，
 另随包提供独立的 `github-coding` 工作 Skill，不改变 Task 工具或引入业务类型。
 
@@ -16,7 +16,8 @@ Task 提供十个工具，模块 ID 与 MCP key 为 `cockpit-task`。
 | --- | --- | --- | --- |
 | `task_read` | 是 | 是 | 按角色关注点读取，说明、历史、成果与操作结果按需展开 |
 | `task_create` | 是 | 否 | 只登记，不指派或创建 session |
-| `task_session_create` | 是 | 否 | 创建 Executor session 并配置执行能力，不关联 Task 或发送派单消息 |
+| `task_session_create` | 是 | 否 | 创建 Executor，可显式准备所选原生资源；不关联 Task 或发送消息 |
+| `task_session_prepare` | 是 | 否 | 为无未结束 Task 的已加载空闲 Executor 准备所选资源，不创建、绑定或发送消息 |
 | `task_assign` | 是 | 否 | 对未分配 Task 首次指派，检查已有能力、更新 Task、发送一次 assigned 引用，不补齐角色配置 |
 | `task_edit` | 是 | 是 | 修改完整 description 或补充资料，不改变执行状态 |
 | `task_ack` | 否 | 是 | 只确认 description 版本 |
@@ -75,7 +76,7 @@ task_edit、definition_check 和 ACK 差异都不自动触发队列清理、中�
 - activity 引用的版本必须有该执行归属下的确认记录，包含本人修订时的自动确认。仅凭当前 acknowledged_revision 大于该版本，不能推断跳过的中间版本也确认过；SQLite 独立确认表逐版保留，不混入 description changelog。
 - session ID 可表示委派方、执行者或操作者等业务上下文，不作为访问权限凭据。作者来源需如实记录，不宣称未经验证的参数具有可信身份保证。
 
-所有变更工具都带 `request_id`；对已有 Task 的变更还带 `task_id` 和对应的 `write_context`，但 `task_unsubscribe` 直接以 `subscription_id` 检查等待状态，不接受 Task 上下文。`task_create` 和独立的 `task_session_create` 不要求已有 Task 上下文。重复请求不重复产生副作用；同 ID 换输入明确冲突。重放原结果时仍重新进行 definition_check，不因结果缓存而漏掉新修订。
+所有变更工具都带 `request_id`；对已有 Task 的变更还带 `task_id` 和对应的 `write_context`，但 `task_unsubscribe` 直接以 `subscription_id` 检查等待状态，不接受 Task 上下文。`task_create`、`task_session_create` 和 `task_session_prepare` 不要求已有 Task 上下文。重复请求不重复产生副作用；同 ID 换输入明确冲突。重放原结果时仍重新进行 definition_check，不因结果缓存而漏掉新修订。
 
 通用引用形状为 `{label, target}`，两项均为字符串；`references` 为该形状的数组。`metadata` 为开放 JSON 对象，不存放凭据，不覆盖固定字段。编辑时提供的 references / metadata 整体替换该字段，省略则保持不变，空数组 / 空对象用于显式清空。description、title、reason 及文本成果不能为空。
 
@@ -143,7 +144,14 @@ Owner 决定新建及所需工作环境；该独立入口通过宿主公开能�
 session、装配 Task 指导与工具并显式检查能力。不要求 Owner 手工拼装，
 也不接受自报“能力已就绪”代替检查。
 
-完整输入：`actor_session_id, request_id, cwd`。不接受 `work_skills`、任意角色或宿主配置透传。Executor 角色通过既有 skillDirectories 声明发现协作 Skill 及共享 `github-coding` 工作 Skill；编码方式不增加本工具参数。模块调用 `context.host.call("session/new",{cwd,roles:[{moduleId:"cockpit-task",roleId:"executor"}]})`，再用 `roles/readiness` 与 `session/get` 检查能力及原生状态。
+完整输入：`actor_session_id, request_id, cwd, skills?, mcp_servers?`。
+可选资源选择见下节；不接受 `work_skills`、任意角色或宿主配置透传。
+Executor 角色仍通过既有 skillDirectories 发现协作 Skill 及共享 `github-coding`。
+模块调用 `session/new`，输入仍为
+`{cwd,roles:[{moduleId:"cockpit-task",roleId:"executor"}]}`。
+省略两个资源字段时保留原创建行为和回执，即使宿主没有新的准备能力也不受影响。
+显式提供任一字段（包括空数组）则请求资源准备：在创建前检查宿主支持标记，
+创建后走与 `task_session_prepare` 相同的准备路径，再检查最终 Executor 能力及空闲状态。
 
 `roles/readiness` 仅在明确请求时读取当下的 Skill、MCP 和工具能力；常规 session 列表、快照、详情不附带该结果，也不持续维护就绪状态或展示 badge。`session/get` 的运行、pending、subagent 等信息是另一类检查，不能把能力可用当作当前可立即接单。
 
@@ -152,6 +160,83 @@ session、装配 Task 指导与工具并显式检查能力。不要求 Owner 手
 这个工具不创建 Task、不绑定 executor、不发送启动消息。创建成功或能力就绪不证明
 之后仍可立即接单，task_assign 会重新检查。宿主管理真实 session 和角色，
 不兼容必须明确拒绝，不降级成未装配 session。
+
+### task_session_prepare
+
+完整输入：`actor_session_id, request_id, session_id, skills?, mcp_servers?`。
+这是 Owner 对已选 Executor 的显式准备，不接受 `task_id` 或修复已绑定 Task 的模式。
+目标必须已加载、原生空闲、Executor 角色已实际应用且无待重载角色；
+任何未结束 Task 的 Executor 都须排除，即使 native 显示 idle。
+完成/取消后的 session 可重新选择，但仍须满足这些条件；不强制优先复用或新建。
+
+该操作不创建 session、改名、改模型/角色、绑定 Task 或发送 prompt，也不加载/重载
+session。已加载 Task 服务内，准备与指派在调用存续期间排斥同目标并发调用，
+而非排队进行隐藏修复；不新增持久锁或锁恢复流程。
+Task 的单 Executor 单项未结束 Task 唯一约束保持不变。
+
+#### 两个入口共用的资源选择与回执
+
+| 选择 | 输入与检查 |
+| --- | --- |
+| `skills?` | 最多 64 个唯一的现有、可发现原生 Skill 名称 |
+| `mcp_servers?` | 最多 64 个唯一 server 名称的 `{name,tools?}` 对象 |
+| 每个 server 的 `tools?` | 最多 256 个唯一原始 MCP 工具名；逐项对照实际过滤后的 offered tool table，不使用猜测的前缀/别名，拒绝 `*` |
+
+不从 Task description 猜资源。省略某 server 的 `tools` 或提供空数组时，仍要求至少一个工具
+实际 offered；显式工具选择不放宽已有原生过滤或安全策略。省略/空的资源数组均不
+清空其他选择；空数组在 create 上仍明确启用准备路径。
+
+两个入口在任何资源感知创建或准备副作用前都要求
+`context.host.resourcePreparationVersion === 1`，否则 `PREPARATION_UNSUPPORTED`。
+不把旧宿主降级成看似成功的结果。通过窄接口 `session/resources-prepare` 验证并
+启用所选资源、初始化原生工具元数据及读回，不安装、不认证、不改全局默认值、
+不绕过策略，不发送初始化消息。未选资源保持不变。
+宿主在整个原生准备过程持有 idle 生命周期保护；Task 再检查最终角色能力和空闲状态。
+
+工具元数据为 `null`，或本次已确认启用所选资源时，宿主初始化一次；
+后者即使元数据非 `null` 也适用，可更新 MCP enable 后保留的旧空表。
+这是已确认配置变化后的初始化，不绕过工具过滤。若资源已启用、没有实际变更且
+元数据非 `null`，真正缺少工具仍明确失败，不猜测性重建，也不重连、重载或切换无关资源。
+后续失败保留已确认的 enable 等分步效果，不把 connected 当作 ready。
+
+准备在被动检查前持久保存已知目标和 `preparation:not_prepared`，
+在调用原生准备前保存 `preparation:unknown`。取消在下一次 Task 到宿主调用开始前
+检查；单次受保护的 `session/resources-prepare` 一旦提交，仍可能完成所选原生步骤。
+不承诺逐个内部 RPC 中断，不回滚或重试；能取得实际结果时如实写入回执。
+
+旧创建回执保留 `creation,session_id,capability,status` 等既有字段。
+资源感知 create 和 prepare 另记录：
+
+| `operation` 字段 | 含义 |
+| --- | --- |
+| `preparation` | `not_prepared` / `unknown` / `prepared` / `unavailable` |
+| `resources` | 获得宿主回执后保存其原生分步结果，见下表；不是长期资源配置或实时状态 |
+| `capability` | 独立的最终 Executor readiness，准备成功不代替它 |
+| `details` | 有界失败时观察，读取回执不刷新宿主 |
+| `status` | `applied` / `rejected` / `partially_applied` / `unconfirmed`，依实际效果判断 |
+
+`resources` 使用宿主 camelCase 形状：
+
+| 字段 | 形状 |
+| --- | --- |
+| `sessionId`, `ok` | 目标 ID 与本次原生准备是否确认成功 |
+| `skills` | 所选项 `{name,effect,enabled}`；`enabled` 为 boolean 或 `null` |
+| `mcpServers` | 所选项 `{name,effect,enabled,status,tools}`；`enabled` 为 boolean 或 `null`，`status` 为原生状态或 `null`，`tools` 为有界原始名称证据数组或 `null` |
+| 每项 `effect` | `not_attempted` / `unchanged` / `enabled` / `unconfirmed` |
+| `tools` | 工具元数据步骤：`not_attempted` / `unchanged` / `initialized` / `unconfirmed` |
+| `error?` | 未完成准备的错误字符串，最多 2,000 字符，截断时明确标记 |
+
+每项 MCP `tools` 不是工具目录：省略/空选择且有实际 offered 工具时，仅返回一个
+实际原始名称作为证据；显式选择仅返回所请求且实际 offered 的名称。
+空数组或 `null` 不证明工具可用。
+
+Skill enabled 不等于正文已读，MCP connected 不等于工具实际 offered，
+工具 initialized 不等于最终 ready；ready 也不是授权、绑定、消息接受、ACK 或执行。
+Executor 首次需要时自行加载相关 Skill 正文，不继承 Owner 的上下文。
+
+部分失败保留已知 session ID 和每步效果；稳定 request_id 重放不重复外部动作。
+继续准备前先读原 operation 和当前状态；仅在已知失败及前提重新满足时用新 request_id
+明确发起后续准备。unknown 不允许盲重试、重建或替换；准备不改变指派的恢复规则。
 
 ### task_assign
 
@@ -176,7 +261,8 @@ Task 类型或状态，也不是命令或调度机制。工具的能力检查、
 
 发送时 Task 的定义与归属必须仍符合该次操作前提，不能拿先前检查冒充现在可发送。已知目标不能安全接收时，在绑定前拒绝；若绑定后重新检查发现忙碌或冲突，返回归属已应用、消息未发送的真实部分结果，不自动重试或换人。适配器在确认 idle 且队列为空后调用 `prompt({sessionId,text,mode:"enqueue"})`，空闲时直接开始；不使用会中断新启动工作的 immediate。检查与发送之间不是原子窗口，竞态下实际 queued 必须作为异常保留，不能宣称严格 idle-only 保证。
 
-新建 session 通常来自 `task_session_create`；复用由 Owner 从宿主列表选择候选者。
+新建 session 通常来自 `task_session_create`；复用由 Owner 从宿主列表选择候选者，
+排除绑定未结束 Task 的 session，需要准备时先显式调用 `task_session_prepare`。
 列表角色标签不代表当前能力就绪。无论来源，指派工具都负责重新检查，
 不把此前创建成功或宿主角色记录当作永久就绪证明。
 
@@ -359,6 +445,10 @@ activity 只能引用固定 Executor 精确 ACK 过的版本，合规自动 ACK 
 | `TASK_STATE_CONFLICT` | 读取当前生命周期状态，不用普通报告恢复已结束任务 |
 | `EXECUTOR_OCCUPIED` | 由 Owner 选择其他安排，不抢占或自动新建 |
 | `CAPABILITY_UNAVAILABLE` | 能力未就绪，不宣称指派完成 |
+| `PREPARATION_UNSUPPORTED` | 宿主没有 resource-preparation v1；资源感知创建/准备未执行副作用，不降级 |
+| `EXECUTOR_ROLE_REQUIRED` | 准备要求已应用 Executor 且无待重载角色；不自动补角色/重载 |
+| `RESOURCE_PREPARATION_FAILED` | 读取资源回执及当前状态，保留已经生效的步骤 |
+| `PREPARATION_UNCONFIRMED` | 未得到可靠资源回执，不盲重试或创建替代者 |
 | `EXECUTOR_NOT_READY` | 当次检查不满足可接单条件，未发送；检查是否已绑定，不自动重试或擅自中断 |
 | `REQUEST_ID_CONFLICT` | 不用同一请求标识提交不同内容 |
 | `TASK_NOT_FOUND` / `OPERATION_NOT_FOUND` / `REVISION_NOT_FOUND` | 指定 Task、操作或修订不存在（404），不编造空记录 |
@@ -393,9 +483,11 @@ Task；renderer 只看 URL 中的显式 event，不从 label 或 Task status 推
 
 ```text
 Owner:
+  选择已授权工作环境及可发现的 Skill/MCP 资源     → 不从 Task 正文猜配置
   task_create(title, description)                 → todo、无 Executor
-  task_session_create(cwd, ...)                   → 新建并配置 Executor 协作能力
-  或 Owner 明确选择已有 session                   → 不隐式新建
+  task_session_create(cwd, skills?, mcp_servers?)  → 新建，可显式准备资源
+  或 task_session_prepare(session_id, ...)        → 准备符合条件的既有 Executor
+  task_read(view=operation, request_id)            → 检查实际步骤；未知不盲重试
   task_read(view=overview, task_id)               → 状态与归属概览、write_context
   task_assign(task_id, executor, ...)             → 确保能力、关联、一次发送 assigned 引用
   task_subscribe(task_id, statuses=[done], ...)   → 仅当 done 后有必要的 Owner 行动时登记；否则省略
@@ -412,7 +504,7 @@ Executor:
               status=done, outcome={...}, ...)    → 完整交付；匹配显式订阅时系统通知 Owner
 ```
 
-每次写入都带 actor_session_id 和新的明确 request_id；已有 Task 写入还带读取返回的 write_context，create/session_create/unsubscribe 不带。相同操作重试保留相同输入和 request_id。Skill 读取也提交自己的 actor_session_id；每次响应都处理 definition_check。
+每次写入都带 actor_session_id 和新的明确 request_id；已有 Task 写入还带读取返回的 write_context，create/session_create/session_prepare/unsubscribe 不带。相同操作重试保留相同输入和 request_id。Skill 读取也提交自己的 actor_session_id；每次响应都处理 definition_check。仅登记 backlog 不创建/准备 Executor 或派单。
 
 重要更新由 Owner 按 Skill 保存并清理 pending 内容，再通过宿主公开发送入口一次发送
 摘要、`[Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新版要求。
@@ -423,10 +515,11 @@ Executor:
 
 模块 HTTP MCP 与普通 HTTP API 挂载于宿主，共用业务服务和独立
 `task-board.sqlite`，不启动额外 daemon。宿主按角色装配配置，
-不为十个业务工具另建注册表。
+不为十一个业务工具另建注册表。
 
 官方 stateful Streamable HTTP transport 让后续 POST 的取消通知关联原调用；
-取消阻止后续副作用，不回滚已完成动作。协议 session 失效不构成重放业务写入的理由。
+取消在下一次 Task 到宿主调用前检查，不回滚已完成动作，也不保证中断已提交
+准备调用的内部原生步骤。协议 session 失效不构成重放业务写入的理由。
 细节见[宿主契约](task-host-contract.md)。
 
 通知恢复要求 `context.serviceReadyVersion === 1`，在 DB 打开或升级前检查。
