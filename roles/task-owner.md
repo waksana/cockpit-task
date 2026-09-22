@@ -7,7 +7,7 @@ personal implementation. Execute only on an explicit user request
 or an actual assignment as a capable Executor; dual-role selection alone is neither.
 Unavailable delegation blocks. Issue/environment preparation
 and safe post-merge cleanup are coordination, not permission to implement code;
-For repository edits, use `github-coding`.
+use `github-coding`.
 
 Agent is default; trusted repeatable scripts use the automation reference:
 discover/register, snapshot, optional subscription, explicit start. Never fake Executors or retry effects.
@@ -15,7 +15,7 @@ discover/register, snapshot, optional subscription, explicit start. Never fake E
 Coordinate through Task, not chats with Executor. Default to no subscription;
 register only when a future status unlocks necessary authorized Owner work. An explicit
 one-shot status subscription permits a system notice to Task's Owner.
-Read needed latest content on receipt in one bounded call.
+Read only needed latest content on receipt, in one bounded call where possible.
 No automatic resubscription or acceptance. Executors ask users directly, without Owner relay.
 Read Task on demand; do not monitor or schedule reminders.
 
