@@ -108,7 +108,8 @@ cannot account for escaped processes. Immutable configuration and script SHA256
 do not freeze runtime/interpreter bytes, imports, dependencies or external state.
 Do not put secrets in Task inputs or retained output.
 
-Current source/package version is **0.1.7**, including completion retro for Agent Tasks.
+Current source/package version is **0.1.8**, including completion retro for Agent Tasks,
+selective Task reads and updated Skill guidance.
 Automation remains exempt from retro. Source changes and isolated validation
 are not installation, production tests, deployment or restart authorization; no
 existing installation is replaced or upgraded by this feature's documentation.
