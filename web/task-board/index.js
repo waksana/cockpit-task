@@ -51,11 +51,34 @@ function validResult(input, data) {
   const revision = (value) => Number.isSafeInteger(value) && value > 0;
   const references = (value) => Array.isArray(value) && value.every((ref) => object(ref) && text(ref.label) && text(ref.target));
   const entry = (value) => object(value) && revision(value.revision) && text(value.author) && text(value.at);
+  const nonnegative = (value) => Number.isSafeInteger(value) && value >= 0;
+  const automation = (value) => object(value) && text(value.run_id) && text(value.script_id) && text(value.state);
   if (!object(data)) return false;
+  if (input.view === 'automation_log') {
+    return data.task_id === input.task_id && text(data.run_id) && nonnegative(data.offset) &&
+      data.offset === (input.offset ?? 0) && text(data.text) && data.text.length <= (input.limit ?? 4096) &&
+      (data.next_offset === null || (nonnegative(data.next_offset) && data.next_offset > data.offset)) &&
+      nonnegative(data.retained_characters) && nonnegative(data.omitted_characters) && typeof data.complete === 'boolean';
+  }
   if (input.view === 'overview' || input.view === 'execution') {
     if (data.id !== input.task_id || !text(data.title) || !text(data.owner) ||
         !(data.executor === null || text(data.executor)) || !text(data.status) ||
         !revision(data.revision) || !(data.acknowledged_revision === null || revision(data.acknowledged_revision))) return false;
+    if (data.kind !== undefined && !['agent', 'automation'].includes(data.kind)) return false;
+    if (data.kind === 'automation') {
+      if (data.executor !== null || data.acknowledged_revision !== null ||
+          !(data.automation === null || automation(data.automation))) return false;
+      if (input.view === 'execution' && data.automation !== null) {
+        const { script, parameters } = data.automation;
+        if (!object(script) || !text(script.script_id) || !text(script.title) || !text(script.description) ||
+            !text(script.executable) || !text(script.script_path) || !text(script.sha256) ||
+            !Array.isArray(script.argv) || !script.argv.every(text) ||
+            !Array.isArray(script.parameters) || !script.parameters.every((parameter) =>
+              object(parameter) && text(parameter.name) && ['string', 'integer', 'boolean'].includes(parameter.type) && text(parameter.description)) ||
+            !object(parameters) || !Object.values(parameters).every((value) =>
+              text(value) || typeof value === 'boolean' || Number.isSafeInteger(value))) return false;
+      }
+    }
     if (input.view === 'execution') return text(data.description) && references(data.references) && object(data.metadata);
     return data.activity === null || (entry(data.activity) && text(data.activity.text) && typeof data.activity.truncated === 'boolean');
   }
@@ -64,7 +87,9 @@ function validResult(input, data) {
   }
   if (!Array.isArray(data.items) || !(data.next_cursor === null || (text(data.next_cursor) && data.next_cursor.length > 0))) return false;
   return data.items.every((item) => entry(item) && (input.view === 'changelog' ? text(item.reason)
-    : text(item.executor) && (input.view === 'activity' ? text(item.text) : text(item.summary) && references(item.references))));
+    : (text(item.executor) || (input.view === 'outcomes' && item.executor === null &&
+        item.source === 'automation' && text(item.run_id) && item.author === `automation:${item.run_id}`)) &&
+      (input.view === 'activity' ? text(item.text) : text(item.summary) && references(item.references))));
 }
 
 export async function readTask(context, input, signal) {
@@ -272,26 +297,88 @@ export function activate(context) {
   }
 
   function TaskFacts({ task }) {
+    const automated = task.kind === 'automation';
     return h('dl', { className: 'tb-facts' },
       h('dt', null, 'Task status'), h('dd', null, statusLabel(task.status)),
       h('dt', null, 'Owner'), h('dd', null, task.owner),
-      h('dt', null, 'Executor'), h('dd', null, task.executor ?? 'Unassigned'),
-      h('dt', null, 'Definition / ACK'), h('dd', null, acknowledgementLabel(task.revision, task.acknowledged_revision)),
+      h('dt', null, 'Executor'), h('dd', null, automated ? 'Automation (no native Executor)' : task.executor ?? 'Unassigned'),
+      h('dt', null, automated ? 'Definition' : 'Definition / ACK'),
+      h('dd', null, automated ? `Definition v${task.revision}` : acknowledgementLabel(task.revision, task.acknowledged_revision)),
     );
   }
 
-  function Execution({ taskId }) {
-    const state = useRead({ view: 'execution', task_id: taskId });
-    return h(ReadState, { state }, (task) => h(React.Fragment, null,
+  function Automation({ automation }) {
+    if (!automation) return h('p', null, 'Automation execution facts unavailable.');
+    const { script, parameters } = automation;
+    const facts = [
+      ['Run ID', automation.run_id], ['Script ID', automation.script_id], ['Run state', automation.state],
+      ['Execution definition', automation.revision === null ? 'Not captured' : `v${automation.revision}`],
+      ['Queued at', formatTimestamp(automation.queued_at)], ['Started at', formatTimestamp(automation.started_at)],
+      ['Finished at', formatTimestamp(automation.finished_at)], ['Exit code', automation.exit_code ?? 'Not available'],
+      ['Signal', automation.signal ?? 'None recorded'], ['Error', automation.error ?? 'None recorded'],
+      ['Cancellation requested', automation.cancel_requested ? 'Yes' : 'No'],
+      ['Process ID', automation.pid ?? 'Not available'], ['Process group', automation.process_group ?? 'Not available'],
+      ['Launch barrier', automation.barrier ? 'Set' : 'Not set'],
+    ];
+    return h(React.Fragment, null,
+      h('h3', null, 'Automation execution'),
+      h('dl', { className: 'tb-facts' }, facts.map(([label, value]) =>
+        h(React.Fragment, { key: label }, h('dt', null, label), h('dd', null, String(value))))),
+      h('h3', null, 'Immutable script snapshot'),
+      h('p', null, script.title),
+      h('p', { className: 'tb-preserve' }, script.description),
+      h('dl', { className: 'tb-facts' },
+        h('dt', null, 'Executable'), h('dd', null, script.executable),
+        h('dt', null, 'Script path'), h('dd', null, script.script_path),
+        h('dt', null, 'Arguments'), h('dd', { className: 'tb-preserve' }, JSON.stringify(script.argv)),
+        h('dt', null, 'SHA-256'), h('dd', null, script.sha256)),
+      h('h3', null, 'Immutable parameter snapshot'),
+      h('pre', { className: 'tb-preserve tb-metadata' }, JSON.stringify(parameters, null, 2)),
+      script.parameters.length ? h('dl', { className: 'tb-facts' }, script.parameters.map((parameter) =>
+        h(React.Fragment, { key: parameter.name },
+          h('dt', null, `${parameter.name} (${parameter.type})`), h('dd', null, parameter.description)))) : null,
+    );
+  }
+
+  function Execution({ task }) {
+    return h(React.Fragment, null,
       h('h3', null, task.title),
+      task.kind === 'automation' ? h('span', { className: 'tb-automation-badge' }, 'Automation') : null,
       h(TaskFacts, { task }),
+      task.kind === 'automation' ? h(Automation, { automation: task.automation }) : null,
       h('h3', null, 'Current definition'),
       h('p', { className: 'tb-preserve' }, task.description),
       h('h3', null, 'Current references'),
       h(References, { references: task.references }),
       h('h3', null, 'Metadata'),
       h('pre', { className: 'tb-preserve tb-metadata' }, JSON.stringify(task.metadata, null, 2)),
-    ));
+    );
+  }
+
+  function AutomationLogs({ taskId }) {
+    const [offsets, setOffsets] = useState([0]);
+    const offset = offsets.at(-1);
+    const state = useRead({ view: 'automation_log', task_id: taskId, offset, limit: 4096 });
+    const pageLabel = useRef(null);
+    const previousOffset = useRef(offset);
+    useEffect(() => {
+      if (previousOffset.current !== offset) {
+        previousOffset.current = offset;
+        pageLabel.current.focus();
+      }
+    }, [offset]);
+    return h(React.Fragment, null,
+      h('p', { className: 'ck-text-secondary' }, 'Bounded automation output, not a native session transcript. No polling; refresh to read current output.'),
+      h(ReadState, { state, subject: 'automation log' }, (page) => h(React.Fragment, null,
+        h('p', { className: 'ck-text-secondary' }, `Run: ${page.run_id} · ${page.retained_characters} retained characters · ${page.omitted_characters} omitted characters · ${page.complete ? 'Complete' : 'Incomplete'}`),
+        h('pre', { className: 'tb-preserve tb-automation-log' }, page.text || 'No output in this page.'))),
+      h('nav', { className: 'tb-page-controls', 'aria-label': 'Automation log pages' },
+        h('button', { type: 'button', className: 'ck-button', disabled: offsets.length === 1, onClick: () => setOffsets((current) => current.slice(0, -1)) }, 'Previous page'),
+        h('span', { ref: pageLabel, tabIndex: -1, role: 'status' }, `Page ${offsets.length} · Offset ${offset}`),
+        h('button', { type: 'button', className: 'ck-button', disabled: state.phase !== 'ready' || state.data.next_offset === null,
+          onClick: () => setOffsets((current) => [...current, state.data.next_offset]) }, 'Next page'),
+        h('button', { type: 'button', className: 'ck-button', onClick: () => { pageLabel.current.focus(); void state.retry(); } }, 'Refresh log')),
+    );
   }
 
   function Revision({ taskId, revision }) {
@@ -342,7 +429,9 @@ export function activate(context) {
               h(RevisionDisclosure, { taskId, revision: entry.revision }))
             : h(React.Fragment, null,
               h('p', { className: 'tb-preserve' }, view === 'activity' ? entry.text : entry.summary),
-              h('p', { className: 'ck-text-secondary' }, `Executor: ${entry.executor}`),
+              h('p', { className: 'ck-text-secondary' }, entry.source === 'automation'
+                ? `Source: Automation · Run: ${entry.run_id} · No native Executor`
+                : `Executor: ${entry.executor}`),
               view === 'outcomes' ? h(References, { references: entry.references }) : null),
         ))) : h('p', null, `No ${view === 'changelog' ? 'definition revisions' : view} recorded.`)),
       h('nav', { className: 'tb-page-controls', 'aria-label': `${view} pages` },
@@ -357,6 +446,15 @@ export function activate(context) {
     const dialog = useRef(null);
     const titleId = useId();
     const [section, setSection] = useState('execution');
+    const state = useRead({ view: 'execution', task_id: taskId });
+    const knownKind = useRef(null);
+    if (state.phase === 'ready') knownKind.current = { taskId, kind: state.data.kind ?? 'agent' };
+    const kind = knownKind.current?.taskId === taskId ? knownKind.current.kind : null;
+    const automated = kind === 'automation';
+    const sections = [['execution', 'Definition'],
+      ...(automated ? [['automation_log', 'Logs']] : [['activity', 'Reported activity'], ['native', 'Native session']]),
+      ['changelog', 'Definition revisions'], ['outcomes', 'Outcomes']];
+    const selected = sections.some(([view]) => view === section) ? section : 'execution';
     useLayoutEffect(() => {
       const element = dialog.current;
       element.showModal();
@@ -375,14 +473,20 @@ export function activate(context) {
       h('button', { type: 'button', className: 'ck-button', onClick: () => dialog.current.close() }, 'Close'),
     ),
     h('p', { className: 'tb-task-id ck-text-secondary' }, taskId),
-    h('p', { className: 'ck-text-secondary' }, 'Current Task read, not a message-time snapshot. Activity and ACK authorship are reported, not authenticated. Reading does not ACK.'),
-    h('p', { className: 'ck-text-secondary' }, 'Reports do not establish what the session is doing now. Read a separate host observation in Native session.'),
-    h('nav', { className: 'tb-sections', 'aria-label': 'Task detail sections' },
-      [['execution', 'Definition'], ['activity', 'Reported activity'], ['native', 'Native session'], ['changelog', 'Definition revisions'], ['outcomes', 'Outcomes']].map(([view, label]) =>
-        h('button', { key: view, type: 'button', className: 'ck-button', 'aria-pressed': section === view, onClick: () => setSection(view) }, label)),
-    ),
-    h('section', { className: 'tb-detail-content', 'aria-label': section },
-      section === 'execution' ? h(Execution, { taskId }) : section === 'native' ? h(NativeSession, { taskId }) : h(History, { key: section, taskId, view: section })),
+    kind === null ? h(ReadState, { state }, () => null) : h(React.Fragment, null,
+        selected !== 'execution' ? h(ReadState, { state }, () => null) : null,
+        h('p', { className: 'ck-text-secondary' }, automated
+          ? 'Current automation Task read, not a message-time snapshot. Execution uses an immutable script and parameter snapshot; no native Executor or manual ACK applies.'
+          : 'Current Task read, not a message-time snapshot. Activity and ACK authorship are reported, not authenticated. Reading does not ACK.'),
+        !automated ? h('p', { className: 'ck-text-secondary' }, 'Reports do not establish what the session is doing now. Read a separate host observation in Native session.') : null,
+        h('nav', { className: 'tb-sections', 'aria-label': 'Task detail sections' }, sections.map(([view, label]) =>
+          h('button', { key: view, type: 'button', className: 'ck-button', 'aria-pressed': selected === view, onClick: () => setSection(view) }, label))),
+        h('section', { className: 'tb-detail-content', 'aria-label': selected },
+          selected === 'execution' ? h(ReadState, { state }, task => h(Execution, { task }))
+            : selected === 'automation_log' ? h(AutomationLogs, { taskId })
+              : selected === 'native' && !automated ? h(NativeSession, { taskId })
+                : h(History, { key: selected, taskId, view: selected })),
+      ),
     h('footer', { className: 'ck-actions tb-dialog-footer' },
       h('button', { type: 'button', className: 'ck-button', onClick: () => dialog.current.close() }, 'Close Task details')),
     ), document.body);
@@ -414,10 +518,15 @@ export function activate(context) {
         'Owner subscription triggered · current state shown below') : null,
       h('span', { className: 'tb-card-title' }, summary),
       task ? h(React.Fragment, null,
-        h('span', { className: 'tb-card-meta' }, `${statusLabel(task.status)} · Executor: ${task.executor ?? 'Unassigned'}`),
-        h('span', { className: 'tb-card-meta' }, acknowledgementLabel(task.revision, task.acknowledged_revision)),
-        h('span', { className: 'tb-card-activity' }, task.activity ? `Reported activity: ${task.activity.text}${task.activity.truncated ? ' (excerpt)' : ''}` : 'No reported activity.'),
-        task.activity ? h('span', { className: 'tb-card-meta' }, `v${task.activity.revision} · ${formatTimestamp(task.activity.at)}`) : null,
+        task.kind === 'automation' ? h(React.Fragment, null,
+          h('span', { className: 'tb-automation-badge' }, 'Automation'),
+          h('span', { className: 'tb-card-meta' }, `${statusLabel(task.status)} · ${task.automation?.state ?? 'Run state unavailable'}`),
+          h('span', { className: 'tb-card-meta' }, `Definition v${task.revision} · Script: ${task.automation?.script_id ?? 'Unavailable'}`),
+        ) : h(React.Fragment, null,
+          h('span', { className: 'tb-card-meta' }, `${statusLabel(task.status)} · Executor: ${task.executor ?? 'Unassigned'}`),
+          h('span', { className: 'tb-card-meta' }, acknowledgementLabel(task.revision, task.acknowledged_revision)),
+          h('span', { className: 'tb-card-activity' }, task.activity ? `Reported activity: ${task.activity.text}${task.activity.truncated ? ' (excerpt)' : ''}` : 'No reported activity.'),
+          task.activity ? h('span', { className: 'tb-card-meta' }, `v${task.activity.revision} · ${formatTimestamp(task.activity.at)}`) : null),
       ) : null),
       open ? h(Detail, { taskId, onClose: () => { setOpen(false); void state.retry(); } }) : null,
     );

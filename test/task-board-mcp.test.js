@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -108,6 +108,57 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     assert.match(descriptions.task_unsubscribe, /Cannot recall a consumed notification/);
     assert.match(descriptions.task_unsubscribe, /planned Owner follow-up is no longer needed/);
   } finally { await f.close(); }
+});
+
+test('official MCP discovers, registers and executes an automation Task without any Agent session', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'task-automation-mcp-'));
+  const store = new TaskStore(root);
+  const errors = [];
+  const service = new TaskService(store, {}, { report: error => errors.push(error) });
+  service.automation.recover();
+  const f = fixture((name, input, options) => service.execute(name, input, options), undefined, toolSchemas);
+  let sequence = 0;
+  const call = async (name, input) => {
+    const response = await f.client.callTool({
+      name, arguments: name.endsWith('_read') ? input : { actor_session_id: 'owner', request_id: `mcp-auto-${++sequence}`, ...input },
+    });
+    assert.equal(response.isError, undefined, JSON.stringify(response));
+    return response.structuredContent.result;
+  };
+  try {
+    await f.connect();
+    const path = join(root, 'synthetic.mjs');
+    writeFileSync(path, 'console.log("mcp automation "+process.argv[2]);');
+    await call('task_script_register', {
+      script_id: 'mcp-script', title: 'MCP script', description: 'Synthetic only',
+      executable: process.execPath, script_path: path,
+      parameters: [{ name: 'value', type: 'string', description: 'Value' }],
+    });
+    assert.equal((await call('task_script_read', {})).items[0].script_id, 'mcp-script');
+    const created = await call('task_create', {
+      title: 'MCP automation', description: 'Execute synthetic only', owner: 'owner',
+      automation: { script_id: 'mcp-script', parameters: { value: 'literal' } },
+    });
+    assert.equal(created.automation.state, 'created');
+    await call('task_automation_start', { task_id: created.task_id, revision: 1, write_context: created.write_context });
+    // Synthetic integration waits for a result; the documented Agent flow never polls.
+    for (let tries = 0; tries < 500 && store.task(created.task_id).status !== 'done'; tries++) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    const execution = await call('task_read', { view: 'execution', task_id: created.task_id });
+    assert.equal(execution.status, 'done');
+    assert.equal(execution.executor, null);
+    const log = await call('task_read', { view: 'automation_log', task_id: created.task_id, offset: 0, limit: 8192 });
+    assert.match(log.text, /mcp automation literal/);
+    assert.equal((await call('task_read', { view: 'outcomes', task_id: created.task_id })).items[0].source, 'automation');
+    assert.deepEqual(errors, []);
+  } finally {
+    await f.close();
+    service.close();
+    for (let tries = 0; !service.closed && tries < 500; tries++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(service.closed, true);
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('real notification failure crosses MCP without erasing Task effects or resending on inspection/replay', async () => {

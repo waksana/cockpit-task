@@ -5,6 +5,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { schemas } from '../src/task-board/contracts.js';
 
 // Enforce a small YAML-safe release format, not a replacement YAML parser:
 // kebab-case names and JSON-quoted descriptions (valid YAML double-quoted scalars).
@@ -23,7 +24,7 @@ const skillDirectory = role => `skills/cockpit-task-${role}/cockpit-task-${role}
 const codingDirectory = 'skills/github-coding/github-coding';
 const skillFiles = role => [
   'SKILL.md',
-  ...[...sharedReferences, ...(role === 'owner' ? ['important-updates.md'] : [])]
+  ...[...sharedReferences, ...(role === 'owner' ? ['important-updates.md', 'automation.md'] : [])]
     .map(name => `references/${name}`),
 ].sort();
 const prose = source => source.replace(/\s+/g, ' ');
@@ -363,6 +364,64 @@ test('public documentation links resolve to active resources rather than retired
   }
 });
 
+test('automation guidance preserves Agent default, explicit service execution and bounded evidence', () => {
+  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  assert.match(owner, /Agent remains the default/);
+  assert.match(owner, /trusted repeatable known script.*not to bypass delegation for arbitrary work/);
+  assert.match(owner, /\[automation\]\(references\/automation.md\)/);
+  const source = readFileSync(join(root, skillDirectory('owner'), 'references/automation.md'), 'utf8');
+  const automation = prose(source);
+  for (const requirement of [
+    /No installation, deployment or production testing is implied/,
+    /Execution is exactly `executable \[\.\.\.argv, script_path, \.\.\.typedStrings\]`, with no shell/,
+    /registration's parameter order, not JSON key order/,
+    /Booleans are the literal strings `true` \/ `false`/,
+    /script selection and inputs can never be edited/,
+    /frozen while queued, starting or running/,
+    /no Executor or fake ACK.*no session assignment slot/,
+    /Do not use `task_assign`, `task_ack` or `task_report`/,
+    /subscribe \*\*before start\*\*/,
+    /persistent single queue.*does not subscribe automatically/,
+    /No automatic resubscription, polling/,
+    /`event.source='automation'`, `event.run_id` and `actor_session_id:null`/,
+    /`executor:null`, `source:'automation'` and `author:'automation:<run_id>'`.*service label, not a native session/,
+    /8192.*65536.*omitted_characters.*truncation/,
+    /Recovery never reruns started work/,
+    /Prelaunch queued work may resume/,
+    /`kill\(-pgid,0\)` returns `ESRCH`/,
+    /both durable PID and process group are absent.*reconciliation needs no probe.*launch handshake/,
+    /including unreaped zombies.*`EPERM` or observation uncertainty.*keeps the barrier/,
+    /until the host reaps them.*never manually edit the database or bypass the barrier/,
+    /Shutdown cannot always prove exit.*blocked plus a barrier/,
+    /does not kill recovered processes, rerun the script, turn blocked into done/,
+    /Any repeat requires fresh authorization and a new Task/,
+    /same-user trusted execution boundary, not a sandbox or authentication/,
+    /must NOT daemonize, detach or escape/,
+    /SHA256.*do not freeze the interpreter, runtime, imports/,
+  ]) assert.match(automation, requirement);
+  assert.doesNotMatch(automation, /\/proc|ignoring zombies|zombies are ignored/);
+
+  const examples = [...source.matchAll(/```json\n([\s\S]*?)\n```/g)].map(([, json]) => JSON.parse(json));
+  const tools = ['task_script_read', 'task_script_register', 'task_create', 'task_subscribe',
+    'task_automation_start', 'task_read', 'task_automation_reconcile'];
+  assert.equal(examples.length, tools.length, 'Keep each complete argument example schema-checked');
+  examples.forEach((example, index) => {
+    const parsed = schemas[tools[index]].safeParse(example);
+    assert.ok(parsed.success, `${tools[index]}: ${parsed.error?.message}`);
+  });
+  const registration = examples[1], inputs = examples[2].automation.parameters;
+  assert.deepEqual(registration.parameters.map(parameter => parameter.type), ['string', 'integer', 'boolean']);
+  assert.deepEqual([...registration.argv, registration.script_path,
+    ...registration.parameters.map(parameter => String(inputs[parameter.name]))],
+  ['-I', '/srv/task-scripts/inventory.py', '/srv/inventory', '25', 'false']);
+
+  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  assert.match(executor, /Automation Tasks are service-managed, not Executor assignments/);
+  assert.match(executor, /do not ACK or report them/);
+  assert.match(executor, /do not grant create\/start or script registration/);
+  assert.match(executor, /Do not create child Tasks or add Owner capabilities/);
+});
+
 test('module packaging carries the role Skills and shared coding Skill without evaluation resources', t => {
   const packaged = spawnSync('npm', ['run', 'package:module'], { cwd: root, encoding: 'utf8' });
   assert.equal(packaged.status, 0, packaged.error?.message ?? `${packaged.stdout}\n${packaged.stderr}`);
@@ -401,7 +460,7 @@ test('module packaging carries the role Skills and shared coding Skill without e
   for (const link of localLinks(readme)) {
     assert.ok(entries.includes(`./${link.split('#')[0]}`), `Packaged README link: ${link}`);
   }
-  t.diagnostic(`npm run package:module produced ${archive} with three Skills and seven runtime references`);
+  t.diagnostic(`npm run package:module produced ${archive} with three Skills and eight runtime references`);
 });
 
 test('unquoted mapping separators in either role description fail release validation', () => {

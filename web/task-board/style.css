@@ -39,6 +39,22 @@
   font-size: var(--ck-text-body);
 }
 
+.tb-automation-badge {
+  display: inline-block;
+  padding-inline: var(--ck-space);
+  border: 1px solid var(--ck-color-border);
+  border-radius: var(--ck-radius);
+  color: var(--ck-color-accent);
+  font-size: var(--ck-text-meta);
+  font-weight: 600;
+}
+
+.tb-automation-log {
+  max-block-size: 360px;
+  overflow: auto;
+  font-size: var(--ck-text-meta);
+}
+
 .tb-dialog {
   box-sizing: border-box;
   inline-size: min(760px, calc(100vw - 32px));

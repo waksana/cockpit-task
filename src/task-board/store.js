@@ -3,6 +3,8 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { LIMITS, TaskError, parseInput, definitionFits } from './contracts.js';
+import { AutomationStore } from './automation-store.js';
+import { groupAlive } from './automation-runner.js';
 
 export { TaskError } from './contracts.js';
 const terminal = status => status === 'done' || status === 'cancelled';
@@ -32,7 +34,7 @@ export class TaskStore {
     try {
       chmodSync(file, 0o600);
       const version = this.db.prepare('PRAGMA user_version').get().user_version;
-      if (version > 2) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
+      if (version > 3) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
       this.db.exec(`
       PRAGMA journal_mode=WAL;
       PRAGMA synchronous=FULL;
@@ -93,9 +95,40 @@ export class TaskStore {
       CREATE UNIQUE INDEX IF NOT EXISTS subscriptions_waiting_owner ON subscriptions(task_id,owner) WHERE state='waiting';
       CREATE INDEX IF NOT EXISTS subscriptions_task ON subscriptions(task_id,seq);
       CREATE INDEX IF NOT EXISTS subscriptions_pending ON subscriptions(seq) WHERE delivery_status='pending';
-      PRAGMA user_version=2;
-      COMMIT;
       `);
+      if (version < 3) this.db.exec(`
+        ALTER TABLE tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'agent';
+        ALTER TABLE outcomes RENAME TO outcomes_old;
+        CREATE TABLE outcomes (
+          seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+          task_id TEXT NOT NULL REFERENCES tasks(id), revision INTEGER NOT NULL,
+          executor TEXT, author TEXT NOT NULL, summary TEXT NOT NULL,
+          refs TEXT NOT NULL, at TEXT NOT NULL, run_id TEXT
+        );
+        INSERT INTO outcomes(seq,id,task_id,revision,executor,author,summary,refs,at)
+          SELECT seq,id,task_id,revision,executor,author,summary,refs,at FROM outcomes_old;
+        DROP TABLE outcomes_old;
+        CREATE INDEX outcomes_task ON outcomes(task_id,seq);
+      `);
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS scripts (
+          seq INTEGER PRIMARY KEY AUTOINCREMENT, script_id TEXT NOT NULL UNIQUE,
+          definition TEXT NOT NULL, author TEXT NOT NULL, at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS automation_runs (
+          seq INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL UNIQUE,
+          task_id TEXT NOT NULL UNIQUE REFERENCES tasks(id), script_id TEXT NOT NULL,
+          script TEXT NOT NULL, parameters TEXT NOT NULL, state TEXT NOT NULL,
+          revision INTEGER, queued_at TEXT, started_at TEXT, finished_at TEXT,
+          pid INTEGER, process_group INTEGER, exit_code INTEGER, signal TEXT, error TEXT,
+          barrier INTEGER NOT NULL DEFAULT 0, cancel_requested INTEGER NOT NULL DEFAULT 0,
+          log TEXT NOT NULL DEFAULT '', omitted_characters INTEGER NOT NULL DEFAULT 0,
+          reconciled_at TEXT, reconciled_by TEXT, reconciliation_reason TEXT
+        );
+        PRAGMA user_version=3;
+        COMMIT;
+      `);
+      this.automation = new AutomationStore(this);
     } catch (error) {
       this.db.close();
       throw error;
@@ -126,6 +159,7 @@ export class TaskStore {
     if (input.revision !== row.revision) fail('DESCRIPTION_UPDATED', 'Task description has changed; read the current definition before retrying');
   }
   executable(row) {
+    if (row.kind === 'automation') fail('AUTOMATION_MANAGED', 'Automation has no Agent Executor or ACK; execution facts are written only by the service');
     if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Terminal Tasks cannot accept execution or acknowledgement');
     if (!row.executor) fail('ASSIGNMENT_REQUIRED', 'Task has no fixed Executor');
   }
@@ -134,14 +168,22 @@ export class TaskStore {
       id: row.id, task_id: row.id, title: row.title, owner: row.owner, executor: row.executor,
       status: row.status, revision: row.revision, acknowledged_revision: row.acknowledged_revision,
       created_at: row.created_at, updated_at: row.updated_at, write_context: this.context(row),
+      kind: row.kind, automation: row.kind === 'automation' ? this.automation.project(this.automation.run(row.id)) : null,
     };
   }
   task(id) {
     const row = this.row(id);
-    return { ...this.summary(row), description: row.description, references: JSON.parse(row.refs), metadata: JSON.parse(row.metadata) };
+    return {
+      ...this.summary(row), description: row.description, references: JSON.parse(row.refs), metadata: JSON.parse(row.metadata),
+      ...(row.kind === 'automation' ? { automation: this.automation.project(this.automation.run(row.id), true) } : {}),
+    };
   }
   effects(row, status = 'applied') {
-    return { status, task_id: row.id, revision: row.revision, acknowledged_revision: row.acknowledged_revision, task_status: row.status, executor: row.executor, write_context: this.context(row) };
+    return {
+      status, task_id: row.id, revision: row.revision, acknowledged_revision: row.acknowledged_revision,
+      task_status: row.status, executor: row.executor, write_context: this.context(row),
+      kind: row.kind, ...(row.kind === 'automation' ? { automation: this.automation.project(this.automation.run(row.id)) } : {}),
+    };
   }
   operation(requestId) {
     const row = this.db.prepare('SELECT * FROM operations WHERE request_id=?').get(requestId);
@@ -205,9 +247,12 @@ export class TaskStore {
   executeLocal(name, rawInput) {
     const input = parseInput(name, rawInput);
     if (name === 'task_read') return this.read(input);
+    if (name === 'task_script_read') return this.automation.script(input);
     const handlers = {
       task_create: 'create', task_edit: 'edit', task_ack: 'ack', task_report: 'report', task_cancel: 'cancel',
       task_subscribe: 'subscribe', task_unsubscribe: 'unsubscribe',
+      task_script_register: 'registerScript', task_automation_start: 'startAutomation',
+      task_automation_reconcile: 'reconcileAutomation',
     };
     if (!handlers[name]) fail('EXTERNAL_OPERATION_REQUIRED', 'This tool requires the host operation service', 400);
     const receipt = this.transaction(() => {
@@ -229,18 +274,25 @@ export class TaskStore {
     if (receipt.error) throw new TaskError(receipt.error.code, receipt.error.message, receipt.error.status || 409, receipt.result);
     return receipt.result;
   }
+  registerScript(input) { return this.automation.register(input); }
+  startAutomation(input) { return this.automation.start(input); }
+  reconcileAutomation(input) { return this.automation.reconcile(input, groupAlive); }
   create(input) {
     const id = randomUUID(), at = now();
     this.db.prepare('INSERT INTO tasks(id,title,description,owner,refs,metadata,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)')
       .run(id, input.title, input.description, input.owner, JSON.stringify(input.references || []), JSON.stringify(input.metadata || {}), at, at);
     this.db.prepare('INSERT INTO definitions(task_id,revision,description,reason,author,at) VALUES(?,?,?,?,?,?)')
       .run(id, 1, input.description, 'Initial definition', input.actor_session_id, at);
+    if (input.automation) this.automation.create(id, input.automation);
     return { result: this.effects(this.row(id)) };
   }
   edit(input) {
     const row = this.row(input.task_id);
     this.checkContext(row, input, true);
     this.currentRevision(row, input);
+    if (row.kind === 'automation' && ['queued', 'starting', 'running'].includes(this.automation.run(row.id).state)) {
+      fail('AUTOMATION_DEFINITION_LOCKED', 'Queued/running automation definitions are frozen; cancel rather than changing an in-flight agreement');
+    }
     const descriptionChanged = input.description !== undefined && input.description !== row.description;
     const references = input.references === undefined ? row.refs : JSON.stringify(input.references);
     const metadata = input.metadata === undefined ? row.metadata : JSON.stringify(input.metadata);
@@ -327,6 +379,7 @@ export class TaskStore {
     this.db.prepare("UPDATE tasks SET status='cancelled',lifecycle=lifecycle+1,cancellation=?,updated_at=? WHERE id=?")
       .run(JSON.stringify(cancellation), cancellation.at, row.id);
     const subscription_ids = this.transitionSubscriptions(row, 'cancelled', input, cancellation.at);
+    if (row.kind === 'automation') this.automation.cancel(row.id);
     return { result: { ...this.effects(this.row(row.id)), cancellation, ...(subscription_ids.length ? { subscription_ids } : {}) } };
   }
   subscription(row) {
@@ -375,7 +428,10 @@ export class TaskStore {
     const ids = [];
     for (const subscription of subscriptions) {
       if (JSON.parse(subscription.statuses).includes(status)) {
-        const event = { event_id: randomUUID(), request_id: input.request_id, from_status: row.status, status, at, actor_session_id: input.actor_session_id };
+        const event = {
+          event_id: randomUUID(), request_id: input.request_id, from_status: row.status, status, at, actor_session_id: input.actor_session_id,
+          ...(input.source === 'automation' ? { source: 'automation', run_id: input.run_id } : {}),
+        };
         this.db.prepare("UPDATE subscriptions SET state='triggered',ended_at=?,event=?,delivery_status='pending' WHERE id=?")
           .run(at, JSON.stringify(event), subscription.id);
         ids.push(subscription.id);
@@ -415,6 +471,7 @@ export class TaskStore {
       if (!receipt || receipt.status !== 'pending') fail('OPERATION_NOT_PENDING', 'Assignment needs its own pending receipt');
       if (receipt.binding_context) fail('ASSIGNMENT_CONFLICT', 'This operation already bound the Task; do not repeat it');
       const row = this.row(input.task_id);
+      if (row.kind === 'automation') fail('AUTOMATION_MANAGED', 'Automation Tasks cannot be assigned to an Agent');
       this.checkContext(row, input);
       this.currentRevision(row, input);
       if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Terminal Tasks cannot be assigned');
@@ -512,6 +569,7 @@ export class TaskStore {
       return this.page(rows, limit, scope, row => this.overview(row, false));
     }
     const row = this.row(input.task_id);
+    if (input.view === 'automation_log') return this.automation.log(input);
     if (input.view === 'subscriptions') {
       const scope = hash({ view: input.view, task_id: row.id });
       const limit = input.limit ?? 5;
@@ -533,7 +591,11 @@ export class TaskStore {
       .all(row.id, this.cursor(input, scope), limit + 1);
     return this.page(rows, limit, scope, entry => {
       const { seq, description, refs, ...fields } = entry;
-      return { ...fields, source: 'reported', ...(refs ? { references: JSON.parse(refs) } : {}), ...(description ? { description_available: true, description_length: description.length } : {}) };
+      return {
+        ...fields, source: fields.run_id ? 'automation' : 'reported',
+        ...(refs ? { references: JSON.parse(refs) } : {}),
+        ...(description ? { description_available: true, description_length: description.length } : {}),
+      };
     }, { task_id: row.id });
   }
   definitionCheck({ task_id, actor_session_id } = {}) {

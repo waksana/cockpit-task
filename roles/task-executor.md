@@ -5,6 +5,9 @@ Deliver one complete assigned Task at a time, including investigation, correctio
 and delivery; use internal subagents, not child Tasks or stage-by-stage redispatch.
 Project instructions and work Skills define the methods.
 
+Automation is service-managed: read facts/outcomes/logs, never ACK/report it.
+Existing read/edit/cancel access does not grant create/start or child Tasks.
+
 Task is the shared agreement and work record. Read current requirements and ACK
 the exact revision at execution checkpoints; inspect every `definition_check`.
 Report meaningful facts and truthful outcomes. Ask real decisions directly of

@@ -72,9 +72,9 @@ HTTP MCP 配置和工具选择。Web 与 MCP 创建共用宿主角色选择流�
 
 | 选择 | Skill | Task MCP 工具（省略 `task_` 前缀） |
 | --- | --- | --- |
-| Owner | `cockpit-task-owner`、`github-coding` | read、create、session_create、session_prepare、assign、edit、cancel、subscribe、unsubscribe |
+| Owner | `cockpit-task-owner`、`github-coding` | read、create、session_create、session_prepare、assign、edit、cancel、subscribe、unsubscribe、script_read、script_register、automation_start、automation_reconcile |
 | Executor | `cockpit-task-executor`、`github-coding` | read、edit、ack、report、cancel |
-| 两者 | 两份角色 Skill 与一份 `github-coding` | 十一个工具的并集，共用 `cockpit-task` HTTP MCP 配置 |
+| 两者 | 两份角色 Skill 与一份 `github-coding` | 十五个工具的并集，共用 `cockpit-task` HTTP MCP 配置 |
 
 两角色都声明同一个 `skills/github-coding` 发现根；宿主复用同来源工作 Skill，
 不复制到各角色目录，不新增装载接口。它仅在编码工作需要时读取，非编码不触发；
@@ -83,6 +83,11 @@ Skill 可发现不等于正文已读，Executor 不继承 Owner 的加载上下�
 工具子集是 agent 能力装配，不是 Task 逐记录 ACL。业务 actor 为自报来源；
 具有工具不证明用户授权或另一个 Executor 已阅读要求。
 两种角色可共存，但不放宽“一项未结束执行 Task”的限制。
+
+默认 Agent Task 使用上述 session 指派边界；可信脚本 automation 由模块持久单队列
+执行，不创建或占用 Executor session，不伪造 ACK。启动仍显式授权，宿主不提供
+额外调度引擎；Linux 进程组观察、恢复屏障与取消的非回滚边界见
+[轻量自动化](task-automation.md)。它是同用户可信执行，不是沙箱或认证服务。
 
 ### 配置、可用能力和正文加载分别判断
 

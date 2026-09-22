@@ -6,9 +6,14 @@
 
 ## 1. 独立工作与责任
 
-一个 Task 对应一个完整结果，由一个固定 Executor session 负责。Owner 可以
+一个 Task 对应一个完整结果；默认 `kind=agent` 由一个固定 Executor session 负责。Owner 可以
 管理多个独立 Task；Executor 内部可拆分步骤或使用 subagent，但不形成父子
 Task、依赖引擎或级联状态。引用其他 Task 只是资料关联。
+
+显式 `kind=automation` 由服务执行不可变脚本/参数快照，`executor` 和 ACK 为 null，
+不占 session 任务槽，也不接受 assign/ack/report。不是另一种 Agent 指派。
+以下 Executor/ACK/报告规则用于 Agent Task；自动化规则见本节末及
+[自动化边界](task-automation.md)。
 
 同一 session 同时最多承担一项未结束 Task，完成或取消后可以复用。
 首次绑定后不能替换 Executor；终态不能恢复执行。Owner / Executor 字段记录
@@ -31,10 +36,12 @@ Task、依赖引擎或级联状态。引用其他 Task 只是资料关联。
 | 字段/记录 | 含义与约束 |
 | --- | --- |
 | `id` | 稳定 Task UUID；不同于 session ID、消息 ID 或完整 `task:` URI |
+| `kind` | `agent`（默认）或 `automation`；创建后不转换 |
+| `automation` | automation 的运行事实；definition/execution 另含不可变脚本与参数快照 |
 | `title` | 可识别的短名称，不代替完整说明 |
 | `description` | 完整当前背景、目标、约束和完成条件；修改传完整正文，不是差量补丁 |
 | `owner` | 登记时明确的委派 session；也是状态订阅的固定接收者 |
-| `executor` | 固定执行 session，未指派为 `null`；无共享执行归属 |
+| `executor` | Agent 的固定执行 session，未指派或 automation 为 `null`；无共享执行归属 |
 | `status` | 工作状态，与 native running/idle/unloaded 无关 |
 | `revision` | description 版本，从 1 开始，仅实际正文变化时递增 |
 | `changelog` | 每版 description 的正文、作者、服务时间与原因，包括初始定义 |
@@ -45,6 +52,18 @@ Task、依赖引擎或级联状态。引用其他 Task 只是资料关联。
 | `references` | `{label,target}` 数组；资料、成果或独立 Task 引用，不形成依赖 |
 | `metadata` | 有界纯 JSON 对象，供补充工作资料；不作为凭据、不覆盖固定字段或触发工作 |
 | 取消记录 | 取消原因、作者、时间；独立于 description changelog 和 Executor activity |
+
+automation 创建为 todo/created，显式 start 后 todo/queued，服务 claim 后 in_progress。
+queued/starting/running 禁止编辑定义和资料；脚本选择及输入永不可变。
+成功由服务原子保存 done 与 outcome，失败/中断保存 blocked 与 outcome；
+取消请求终止进程组，不回滚外部效果，不因 Task cancelled 推断进程已退出。
+恢复不重跑 started work；中断屏障阻止队列继续。已有持久进程组时，显式 reconcile
+要求 Linux 内核探测 `kill(-pgid,0)` 返回 `ESRCH`、证明组已不存在才解除。
+若持久 PID/进程组均为空，则说明启动握手从未发送，显式 reconcile 无需探测即可解除。
+两种情况都不把 blocked 改为 done，也不重跑原 Task。
+仍存在的组（包括未回收 zombie）、`EPERM` 或观察不确定均保留屏障；
+宿主回收前可能持续阻塞，不能手改数据库绕过。关闭不能证明退出时保留 blocked+barrier。
+重做需要新授权和新 Task，不能把 blocked 当作可重启的 Agent 工作。
 
 `actor_session_id` 是调用者自报归因，输出标为 `reported`，不是认证身份。
 ACK 表示对固定 Executor 的确认声明，不验证实际阅读。跨 Task ACK 可调用，
@@ -142,6 +161,10 @@ activity 只能引用固定 Executor 实际确认过的精确 revision，包括�
 不能把卡片状态当成触发时快照。投递失败不回滚 Task 或 outcome，
 `notification_error` 与变更错误分别处理；未知发送不自动重试。
 
+自动执行的订阅转换记录 source=automation、run_id、actor_session_id=null。
+其服务 outcome 记录 executor=null、source=automation、author=`automation:<run_id>`；
+author 只是服务作者标签，不是 native session 或虚构 Executor 身份。
+
 普通更新静默；Executor 不给 Owner 发进度、问题或完成消息。
 首次 assigned、显式重要 updated 与订阅 status_changed 的引用 event
 仅为消息固定元数据，不改变 revision、ACK 或生命周期。格式见
@@ -151,6 +174,9 @@ activity 只能引用固定 Executor 实际确认过的精确 revision，包括�
 
 Owner 默认以显式 owner 筛选 list，单项读 overview；Executor 默认读 execution。
 definition 提供完整当前要求，changelog/activity/outcomes/subscriptions 分别分页。
+automation 的 definition/execution 还包含完整脚本/参数快照；overview/list 仅含运行事实。
+`automation_log` 单独按 offset/limit 读合并 stdout/stderr，limit 默认 4096、最大 8192，
+保留上限 65536 字符并返回 omitted_characters；不能把截断日志当作完整证据。
 角色默认视图不限制读取权限；actor 不等于列表过滤器。最新 activity 直接表示
 最新报告，不额外维护进度摘要，也不与 native 观察混合。
 

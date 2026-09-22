@@ -71,6 +71,20 @@ const existing = { ...mutation, task_id: id, write_context: text(1000) };
 const pagination = { limit: z.number().int().min(1).max(LIMITS.history).optional(), cursor: text(2000).optional() };
 const readActor = { actor_session_id: session.optional() };
 const taskRead = view => z.strictObject({ ...readActor, view: z.literal(view), task_id: id });
+const scriptId = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+const argument = z.string().max(4000).refine(value => !value.includes('\0'), 'Arguments cannot contain NUL');
+const parameterValue = z.union([argument, z.number().int().safe(), z.boolean()]);
+const parameters = z.record(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/), parameterValue)
+  .refine(value => Object.keys(value).length <= 32 && JSON.stringify(value).length <= 8000, 'Parameters exceed bounds');
+export const scriptSchema = z.strictObject({
+  script_id: scriptId, title: text(240), description: text(2000),
+  executable: text(4000), script_path: text(4000),
+  argv: z.array(argument).max(32).default([]),
+  parameters: z.array(z.strictObject({
+    name: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
+    type: z.enum(['string', 'integer', 'boolean']), description: text(1000),
+  })).max(32).refine(values => new Set(values.map(value => value.name)).size === values.length, 'Parameter names must be unique'),
+}).refine(value => JSON.stringify(value).length <= 12000, 'Script registration exceeds 12000 characters');
 export const TASK_STATUSES = Object.freeze(['todo', 'in_progress', 'blocked', 'in_review', 'done', 'cancelled']);
 export const schemas = {
   task_read: z.discriminatedUnion('view', [
@@ -83,12 +97,26 @@ export const schemas = {
     z.strictObject({ ...readActor, view: z.literal('changelog'), task_id: id, ...pagination, revision: revision.optional() })
       .refine(x => x.revision === undefined || (x.cursor === undefined && x.limit === undefined), 'A revision selector cannot be paginated'),
     ...['activity', 'outcomes', 'subscriptions'].map(view => z.strictObject({ ...readActor, view: z.literal(view), task_id: id, ...pagination })),
+    z.strictObject({
+      ...readActor, view: z.literal('automation_log'), task_id: id,
+      offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+      limit: z.number().int().min(1).max(8192).optional(),
+    }),
     z.strictObject({ ...readActor, view: z.literal('operation'), request_id: request }),
   ]),
   task_create: z.strictObject({
     ...mutation, owner: session, title: text(240), description: text(LIMITS.description),
     references: references.optional(), metadata: metadata.optional(),
+    automation: z.strictObject({ script_id: scriptId, parameters }).optional(),
   }).refine(definitionFits, 'Combined serialized description and materials exceed 64000 characters'),
+  task_script_register: z.strictObject({ ...mutation, ...scriptSchema.shape })
+    .refine(value => JSON.stringify(value).length <= 13000, 'Script registration exceeds 13000 characters'),
+  task_script_read: z.strictObject({
+    ...readActor, script_id: scriptId.optional(),
+    limit: z.number().int().min(1).max(50).optional(), cursor: text(2000).optional(),
+  }).refine(value => !value.script_id || (value.limit === undefined && value.cursor === undefined), 'A script selector cannot be paginated'),
+  task_automation_start: z.strictObject({ ...existing, revision }),
+  task_automation_reconcile: z.strictObject({ ...existing, reason: text(2000) }),
   task_session_create: z.strictObject({ ...mutation, cwd: text(4000), ...resources }),
   task_session_prepare: z.strictObject({ ...mutation, session_id: session, ...resources }),
   task_assign: z.strictObject({ ...existing, revision, executor: session, resume_request_id: request.optional() }),
@@ -116,14 +144,15 @@ export const schemas = {
 // The MCP SDK publishes properties only for object roots, not discriminated unions.
 const readToolSchema = z.strictObject({
   ...readActor,
-  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'subscriptions', 'operation']),
+  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'subscriptions', 'automation_log', 'operation']),
   task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes and subscriptions'),
   request_id: request.optional().describe('Required only for the operation view'),
   owner: session.optional().describe('List filter only'),
   executor: session.optional().describe('List filter only'),
   status: z.enum(['todo', 'in_progress', 'blocked', 'in_review', 'done', 'cancelled', 'unfinished', 'all']).optional().describe('List filter only; defaults to unfinished'),
   query: text(200).optional().describe('List title filter only'),
-  limit: z.number().int().min(1).max(LIMITS.list).optional().describe('List: default 20, maximum 50. Histories: default 5, maximum 10'),
+  limit: z.number().int().min(1).max(8192).optional().describe('List: maximum 50. Histories: maximum 10. automation_log: maximum 8192 characters'),
+  offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe('automation_log only: character offset'),
   cursor: text(2000).optional().describe('Continuation cursor for list or history views'),
   revision: revision.optional().describe('Select one complete changelog definition; cannot combine with limit or cursor'),
 }).superRefine((input, context) => {

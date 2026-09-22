@@ -7,7 +7,7 @@
 
 ## 1. 工具集合与角色
 
-Task 提供十一个工具，模块 ID 与 MCP key 为 `cockpit-task`。
+Task 提供十五个工具，模块 ID 与 MCP key 为 `cockpit-task`。
 登记、创建/准备执行 session 和首次指派是独立操作；状态订阅是可选的一次性等待，
 不是默认最终通知、监工或依赖调度。模块只维护 Owner / Executor 两份角色技能，
 另随包提供独立的 `github-coding` 工作 Skill，不改变 Task 工具或引入业务类型。
@@ -16,13 +16,17 @@ Task 提供十一个工具，模块 ID 与 MCP key 为 `cockpit-task`。
 | --- | --- | --- | --- |
 | `task_read` | 是 | 是 | 按角色关注点读取，说明、历史、成果与操作结果按需展开 |
 | `task_create` | 是 | 否 | 只登记，不指派或创建 session |
+| `task_script_read` | 是 | 否 | 发现/读取不可变可信脚本登记 |
+| `task_script_register` | 是 | 否 | 登记现有脚本、固定前缀与有序类型化参数，不执行 |
+| `task_automation_start` | 是 | 否 | 显式入持久单队列，一项 Task 只运行一次 |
+| `task_automation_reconcile` | 是 | 否 | 证明未发送启动握手或进程组已不存在后仅解除屏障，不重跑或标记成功 |
 | `task_session_create` | 是 | 否 | 创建 Executor，可显式准备所选原生资源；不关联 Task 或发送消息 |
 | `task_session_prepare` | 是 | 否 | 为无未结束 Task 的已加载空闲 Executor 准备所选资源，不创建、绑定或发送消息 |
 | `task_assign` | 是 | 否 | 对未分配 Task 首次指派，检查已有能力、更新 Task、发送一次 assigned 引用，不补齐角色配置 |
 | `task_edit` | 是 | 是 | 修改完整 description 或补充资料，不改变执行状态 |
 | `task_ack` | 否 | 是 | 只确认 description 版本 |
 | `task_report` | 否 | 是 | 记录 activity、明确更新状态或提交 outcome，不隐式 ACK |
-| `task_cancel` | 是 | 是 | 明确取消，不停止 session；仅匹配已登记订阅时产生系统状态通知 |
+| `task_cancel` | 是 | 是 | Agent 不停止 session；automation 请求终止进程组，不回滚；仅匹配订阅时通知 |
 | `task_subscribe` | 是 | 否 | 显式登记未来状态的一次性 Owner 通知，当前已匹配则失败 |
 | `task_unsubscribe` | 是 | 否 | 取消仍在等待的订阅，不撤回已触发或发送的通知 |
 
@@ -30,7 +34,10 @@ Task 提供十一个工具，模块 ID 与 MCP key 为 `cockpit-task`。
 owner / executor 用于责任、筛选和追溯，不作为 ACL。版本、状态、逐版 ACK、
 幂等、固定绑定与单 session 单项未结束执行等数据检查仍适用于所有调用者。
 
-Executor 子集没有创建 Task 或订阅工具。宿主负责已有 session 的角色管理；
+Executor 子集没有创建 Task、脚本登记、start/reconcile 或订阅工具。
+默认 Agent Task 保持原指派协议；automation 不接受 assign/ack/report，不伪造 Executor、
+ACK 或 session 占用。Owner 只为可信可重复已知脚本选择 automation，不把任意工作脚本化。
+宿主负责已有 session 的角色管理；
 Task 自身不暴露角色变更，指派不追加角色、Skill 或 MCP。
 已绑定 Executor 不可替换，done / cancelled 不可恢复执行。
 
@@ -76,7 +83,7 @@ task_edit、definition_check 和 ACK 差异都不自动触发队列清理、中�
 - activity 引用的版本必须有该执行归属下的确认记录，包含本人修订时的自动确认。仅凭当前 acknowledged_revision 大于该版本，不能推断跳过的中间版本也确认过；SQLite 独立确认表逐版保留，不混入 description changelog。
 - session ID 可表示委派方、执行者或操作者等业务上下文，不作为访问权限凭据。作者来源需如实记录，不宣称未经验证的参数具有可信身份保证。
 
-所有变更工具都带 `request_id`；对已有 Task 的变更还带 `task_id` 和对应的 `write_context`，但 `task_unsubscribe` 直接以 `subscription_id` 检查等待状态，不接受 Task 上下文。`task_create`、`task_session_create` 和 `task_session_prepare` 不要求已有 Task 上下文。重复请求不重复产生副作用；同 ID 换输入明确冲突。重放原结果时仍重新进行 definition_check，不因结果缓存而漏掉新修订。
+所有变更工具都带 `request_id`；对已有 Task 的变更还带 `task_id` 和对应的 `write_context`，但 `task_unsubscribe` 直接以 `subscription_id` 检查等待状态，不接受 Task 上下文。`task_create`、`task_script_register`、`task_session_create` 和 `task_session_prepare` 不要求已有 Task 上下文。重复请求不重复产生副作用；同 ID 换输入明确冲突。重放原结果时仍重新进行 definition_check，不因结果缓存而漏掉新修订。
 
 通用引用形状为 `{label, target}`，两项均为字符串；`references` 为该形状的数组。`metadata` 为开放 JSON 对象，不存放凭据，不覆盖固定字段。编辑时提供的 references / metadata 整体替换该字段，省略则保持不变，空数组 / 空对象用于显式清空。description、title、reason 及文本成果不能为空。
 
@@ -103,6 +110,7 @@ activity.text 最长 4,000，outcome.summary 最长 8,000；每个 activity/outc
 | `activity` | `task_id`、`limit?`、`cursor?` | Executor 活动页，每条保留其 revision 和作者 |
 | `outcomes` | `task_id`、`limit?`、`cursor?` | 保留的成果页，区分对应定义版本和执行归属 |
 | `subscriptions` | `task_id`、`limit?`、`cursor?` | 有界订阅历史、匹配状态及投递事实，不扫描 Owner 聊天 |
+| `automation_log` | `task_id`、`offset?`、`limit?` | automation 合并 stdout/stderr 的有界保留页与明确遗漏计数 |
 | `operation` | `request_id` | 某次明确操作的结果，特别是指派步骤 |
 
 列表默认只看未结束记录；可显式查询 done / cancelled。Owner 列表侧重各任务的执行者、状态、最新活动摘录、确认差异和成果可用性；Executor 列表侧重本人承接关系、状态与待确认版本。摘要使用现有字段和活动摘录，不生成另一份“进度总结”；摘录标明截断，正文通过专门视图读取，完整 description 不静默截断。
@@ -111,16 +119,34 @@ activity.text 最长 4,000，outcome.summary 最长 8,000；每个 activity/outc
 
 operation 视图返回 `{request_id,tool,status,task_id?,result,error,created_at,updated_at}`；这里 status 是回执的 `pending|final`，与其内部 `result.operation.status` 及 Task 业务 status 不同。已有 Task 的操作从持久输入提供 `task_id`，失败且 `result:null` 时也保留关联，不返回整份输入。外部步骤保存在内部 operation，本地操作保存其原 effects/错误；definition_check 每次响应重新读取，不保存在回执里，也不能因原操作失败而漏掉相关 Task。
 
+Task 返回 `kind=agent|automation`；automation 的 overview/list 含运行事实，
+execution/definition 的 `automation` 另含完整 `script` 和 `parameters` 快照。
+运行事实包括 run_id、script_id、state、revision、排队/开始/结束时间、pid/process_group、
+exit_code/signal/error、cancel_requested、barrier 及 reconciliation 字段。
+automation 没有 ACK 义务，不能为其制造 Executor 或报告。
+
+`automation_log` offset 默认 0，limit 默认 4096、最大 8192 字符，不能混用 cursor。
+返回 `{task_id,run_id,offset,text,next_offset,retained_characters,omitted_characters,complete}`。
+stdout/stderr 合并保留上限 65536 字符，超过部分计入 omitted_characters，明确说明截断；
+JSON 转义预算可能使一页短于 limit，按 next_offset 续读。complete 表示捕获结束，
+不表示成功；next_offset=null 只表示本次没有更多保留文本，不证明执行结束。
+
 subscriptions 视图返回 `{task_id,items,next_cursor}`，默认 5 项、最多 10 项，并遵循共用页预算。终态 Task 仍可读取。每项为：
 
 ```text
 subscription_id, task_id, owner, actor_session_id, statuses,
 state, created_at, ended_at, ended_by,
-event: null | {event_id, request_id, from_status, status, at, actor_session_id},
+event: null | {event_id, request_id, from_status, status, at, actor_session_id, source?, run_id?},
 notification: {status, attempted_at, completed_at, error: null | {code, message}}
 ```
 
 `state` 为 `waiting|triggered|cancelled|expired`；`ended_by` 仅显式取消时记录操作者。进入非目标终态时等待自动变为 expired，不发送通知。event 是实际触发时的持久事实，不随卡片读取的最新状态改变。notification 的状态与订阅状态、Task 状态各自独立，含义见下文。
+
+自动执行触发的订阅转换带 `event.source="automation"`、`event.run_id`，
+`event.actor_session_id=null`，不是伪造的 session。服务 outcome 的
+`executor=null`、`source="automation"`、`author="automation:<run_id>"`；
+该 author 是服务作者标签，不是 native session ID，不可据此查找或联系 Executor。
+用户显式取消等调用的操作者归因仍与自动服务转换分别记录。
 
 UI 可以不提供 actor，不伪造 human session ID；定向读取仍检查该 Task。Skill 在读取也提交自己的 `actor_session_id`，使列表或跨 Task 调用同时检查当前承接的未结束 Task。公开 MCP schema 使用对象根展示 `view` 和 selector，服务仍严格按视图验证，不能混用无关字段。
 
@@ -132,11 +158,63 @@ UI 可以不提供 actor，不伪造 human session ID；定向读取仍检查该
 
 ### task_create
 
-输入：`actor_session_id, request_id, title, description, owner, references?, metadata?`。owner 是明确的委派 session 业务标识，不作为授权凭据，不要求新增可信身份服务。
+输入：`actor_session_id, request_id, title, description, owner, references?, metadata?, automation?`。owner 是明确的委派 session 业务标识，不作为授权凭据，不要求新增可信身份服务。
 
 输出：Task ID、初始状态/版本与 `write_context`，不重复回传输入的完整正文。状态为 todo，executor 和 acknowledged_revision 为 null。description 初始为 v1，保留初始定义记录。
 
 不接受 executor、初始执行状态或 outcome 参数。不创建 session，不注入角色，不发消息。
+
+`automation={script_id,parameters}` 选择已登记脚本并保存不可变配置/SHA256/类型化输入快照；
+省略时为 `kind=agent`。创建 automation 也不执行或自动订阅，必须显式 start。
+script_id 与输入此后不能改变，重新执行须新授权和新 Task。
+
+### task_script_read / task_script_register
+
+read 输入：`actor_session_id?, script_id?`，或 `actor_session_id?, limit?, cursor?`；
+单项选择不能与分页组合。目录默认 20、最大 50 项，返回 items/next_cursor；
+单项返回完整配置、sha256、registered_at、registered_by。
+
+register 输入：`actor_session_id, request_id, script_id, title, description,
+executable, script_path, argv?, parameters`。登记不运行；script_id 必须匹配
+`^[a-z][a-z0-9-]{0,63}$`，已有 ID 不可替换。executable/script_path 为绝对本地路径，
+解析 realpath，前者必须可执行，后者为不超过 8 MiB 的普通文件并记录 SHA256。
+title/description 上限 240/2000 字符；路径上限 4000。argv 默认 []，最多 32 个
+固定前缀字符串，每项最多 4000 字符，不含 NUL。
+parameters 最多 32 个有序 `{name,type,description}`，名字唯一且匹配
+`^[a-z][a-z0-9_]{0,63}$`，type 为 string/integer/boolean，description 上限 1000。
+每个参数必填、不接受额外名字；integer 为安全整数，字符串最多 4000 字符且不含 NUL。
+Task 的输入对象最多 8000 序列化字符；脚本配置整体最多 12000。
+
+执行为 `executable [...argv,script_path,...typedStrings]`，无 shell。参数按登记顺序
+映射位置，不按 JSON 键顺序；布尔值转换为 `"true"` / `"false"`，不做 shell 展开。
+这是同用户可信代码边界，不是 sandbox/auth；脚本不得 daemonize、detach 或逃离进程组。
+不可变配置和脚本 SHA256 不冻结 interpreter/runtime、imports、依赖或外部状态。
+
+### task_automation_start
+
+输入：`actor_session_id, request_id, task_id, write_context, revision`。仅接受
+todo/created automation，在最新 revision/context 下持久排队一次；不发 assigned、
+不创建 session、不 ACK、不自动订阅。Owner 若有具体必要后续行动，应在 start 前
+显式订阅 done/blocked 或必要 cancelled，避免快速完成的竞态。无此需要则不订阅。
+
+服务单队列串行 claim 并执行。queued/starting/running 禁止 task_edit；
+成功 done+服务 outcome，失败/中断 blocked+outcome，已取消的状态保持 cancelled。
+重放不重新执行。重启不重跑 starting/running；转中断并设置持久屏障，尚未启动的
+queued 工作可以恢复，但不能越过屏障。通知后重读最新 Task/outcome，不建立监控循环。
+
+### task_automation_reconcile
+
+输入：`actor_session_id, request_id, task_id, write_context, reason`，不传 revision。
+先检查中断及可能的外部效果。只处理 interrupted/finished 的屏障；已有持久 PID/进程组时，
+Linux 内核进程组探测 `kill(-pgid,0)` 必须返回 `ESRCH`、证明记录的组已不存在。
+若持久 PID/进程组均为空，说明服务不可能已发送启动握手，脚本未启动；
+显式 reconcile 无需探测即可解除屏障，但仍不重跑该 Task。
+任何仍存在的组（包括未回收 zombie）、`EPERM` 或观察不确定都不解除。
+未回收 zombie 可能使屏障一直保留，直到宿主回收；不手改数据库或绕过屏障。
+关闭服务不总能证明退出，blocked+barrier 是正确的保守结果。
+它不杀恢复进程、不重跑、不把 blocked 改为 done、不宣称回滚或成功。
+任何再次执行必须新授权、新 Task。完整操作示例见
+[Owner 自动化参考](../skills/cockpit-task-owner/cockpit-task-owner/references/automation.md)。
 
 ### task_session_create
 
@@ -240,6 +318,8 @@ Executor 首次需要时自行加载相关 Skill 正文，不继承 Owner 的上
 
 ### task_assign
 
+仅适用于 Agent Task；automation 返回 `AUTOMATION_MANAGED`。
+
 输入：共用变更字段，加 `revision, executor, resume_request_id?`。`executor` 为 Owner 已创建或选好的真实 session ID。不提供 mode / reassign 参数；resume_request_id 仅恢复已证实未发送的操作，不续办 Task。
 
 - 仅用于尚未分配的 todo；已有 Executor 不可替换。
@@ -319,6 +399,9 @@ observed_at            该次观察完成的 ISO 时间；回执重放不刷新�
 
 ### task_edit
 
+automation 在 queued/starting/running 返回 `AUTOMATION_DEFINITION_LOCKED`；
+脚本与参数快照没有编辑入口，其他可编辑时机也不能修改它们。
+
 输入：共用变更字段，加 `revision, reason, description?, title?, references?, metadata?`；至少提供一个实际要修改的字段。
 
 description 如提供，必须是完整的新定义，不是让执行者自行拼接的增量文字。实际正文改变时，原子写入 description、新 revision 和一条 changelog。相同正文不制造虚假修订，也不借无变化的编辑隐式 ACK。
@@ -334,6 +417,8 @@ Task 未结束且正文实际改变时，同时确认新 revision；不改变 st
 
 ### task_ack
 
+仅适用于 Agent Task；automation 不存在 Executor 确认，返回 `AUTOMATION_MANAGED`。
+
 输入：共用变更字段，加 `revision`。
 
 具有 ACK 工具即可对指定 Task 提交确认，不按操作者与 Task 的关系拒绝。
@@ -346,6 +431,8 @@ Task 未结束且正文实际改变时，同时确认新 revision；不改变 st
 输出已确认的 revision、保持不变的执行状态及 write_context，不附带整份 Task。
 
 ### task_report
+
+仅适用于 Agent Task；automation 状态与成果由服务维护，返回 `AUTOMATION_MANAGED`。
 
 输入：共用变更字段，加 `revision, activity?, status?, outcome?`，至少有一项。
 
@@ -374,6 +461,9 @@ activity 只能引用固定 Executor 精确 ACK 过的版本，合规自动 ACK 
 报告结果逐项区分 `saved | rejected | not_requested`；部分应用的 MCP 响应保留完整结构并标记失败，不能引导 agent 整单重放。
 
 ### task_cancel
+
+automation 未启动时阻止 launch；运行时请求终止进程组，不证明已退出或回滚。
+读取运行事实、outcome 与屏障后再判断安全性。以下“不停止 session”描述 Agent 路径。
 
 输入：共用变更字段，加 `reason`。
 
@@ -515,7 +605,7 @@ Executor:
 
 模块 HTTP MCP 与普通 HTTP API 挂载于宿主，共用业务服务和独立
 `task-board.sqlite`，不启动额外 daemon。宿主按角色装配配置，
-不为十一个业务工具另建注册表。
+不为十五个业务工具另建注册表。
 
 官方 stateful Streamable HTTP transport 让后续 POST 的取消通知关联原调用；
 取消在下一次 Task 到宿主调用前检查，不回滚已完成动作，也不保证中断已提交

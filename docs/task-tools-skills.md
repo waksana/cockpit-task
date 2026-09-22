@@ -14,10 +14,10 @@ Task 提供 [Owner Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.
 
 | 角色 | 常驻指令 | 注入的 Task 工具 |
 | --- | --- | --- |
-| Owner | [task-owner.md](../roles/task-owner.md) | `task_read`、`task_create`、`task_session_create`、`task_session_prepare`、`task_assign`、`task_edit`、`task_cancel`、`task_subscribe`、`task_unsubscribe` |
+| Owner | [task-owner.md](../roles/task-owner.md) | `task_read`、`task_create`、`task_session_create`、`task_session_prepare`、`task_assign`、`task_edit`、`task_cancel`、`task_subscribe`、`task_unsubscribe`、`task_script_read`、`task_script_register`、`task_automation_start`、`task_automation_reconcile` |
 | Executor | [task-executor.md](../roles/task-executor.md) | `task_read`、`task_edit`、`task_ack`、`task_report`、`task_cancel` |
 
-共十一个工具。宿主可组合两种角色，工具取并集、相同资源去重；角色管理由宿主负责。
+共十五个工具。宿主可组合两种角色，工具取并集、相同资源去重；角色管理由宿主负责。
 Task 不提供给已有 session 追加角色的工具，指派也不补能力。角色是协作能力，
 不是项目身份、实际承接或逐 Task ACL；自报 actor 只是归因。
 
@@ -70,7 +70,7 @@ Task 是共同工作记录，不是原始证据仓库：详细证据用可访问
 支持结论或安全接续必需的精确数值仍应保留。不复制整段聊天，不强制工作表单。区分讨论、调查、登记
 和执行授权；尊重“只讨论”“暂不执行”，不对已授权工作重复索要开工口令。
 
-正常流程：
+默认 Agent 流程：
 
 1. 选择已授权工作环境及现有可发现的 Skill/MCP，`task_create` 登记完整要求；
    不从 Task 正文猜资源，backlog 登记不派单。
@@ -94,7 +94,21 @@ Owner 默认用 `task_read(view=list, owner=<自己的 session ID>)`，单项用
 `outcome.available/current`。编辑前读 definition，判断交付时读 outcomes，
 针对具体疑问再展开 activity/changelog。actor 不是 owner 筛选器。
 
+### 轻量 automation 路径
+
+Agent 仍是默认；Owner 仅为可信、可重复的已知脚本选择服务执行，不把任意工作
+脚本化，也不亲自实施来绕过委派。按需读
+[Owner 脚本参考](../skills/cockpit-task-owner/cockpit-task-owner/references/automation.md)：
+发现/不可变登记 → task_create 保存配置与类型化输入快照 → 可选必要订阅 → 显式 start。
+无 Executor、ACK、session 占用、自动订阅或子任务；服务单队列，不是工作流引擎。
+成功 done+outcome，失败/中断 blocked+outcome；取消不回滚，reconcile 仅证明终止后
+解除队列屏障，不重跑或更改结果。通知后重读最新事实，不安排轮询或自动续订。
+
 ## 3. Executor：完整交付、同步要求
+
+automation 不属于 Executor 指派：可用现有读取工具看 kind、快照、运行事实、
+outcomes 和有界 automation_log，不能 ack/report；现有 edit/cancel 不授予 create/start。
+不为自己的已分配工作建立 automation 子 Task。
 
 Executor 先读 execution 确认真实指派、完整 description、资料、版本与状态，
 不从名称、角色或旧聊天推断承接。内部组织步骤或 subagent，负责调查、实施、

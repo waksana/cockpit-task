@@ -2,7 +2,7 @@
 
 Task 是 Cockpit 模块：用共同的持久化 Task 记录协作，通过 Owner / Executor
 角色组合 System Prompt、Skill 和 HTTP MCP。Task 引用直接在聊天中显示卡片，详情按需读取；
-不保存聊天、不自动监工或调度。默认不发送进度或完成通知；
+不保存聊天、不自动监工或做依赖调度。默认不发送进度或完成通知；
 默认不登记订阅；仅当未来状态会使 Owner 需要作决定、安排后续独立工作等必要行动时，
 由 Owner 自行判断并显式登记一次性订阅，不为追踪进度或确认完成而订阅。
 
@@ -19,11 +19,21 @@ event 只说明这条消息的原因，不是 Task 状态；卡片仍读取当�
 登记时若已处于目标状态则明确失败，不创建订阅或补发消息；只有登记后第一次
 进入目标状态才触发，不重复订阅、不轮询、不打断 Owner 当前工作。
 
-一个 Executor 完整负责一个独立 Task，可在内部使用 subagents。要求直接修改 Task，
+默认 Agent Task 由一个 Executor 完整负责，可在内部使用 subagents。要求直接修改 Task，
 Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的版本。没有子任务树、
 改派或续办。角色协作与工作方法分开：随包提供独立的
 [github-coding](skills/github-coding/github-coding/SKILL.md)，指导 Git/GitHub 编码协作；
 非编码工作仍使用其自身方法。
+
+Owner 也可为已授权、可信、可重复的已知脚本选择轻量 automation Task；不是把任意工作
+转成脚本。先用 `task_script_read` / `task_script_register` 发现或不可变登记，
+`task_create` 保存脚本和类型化参数快照，按必要后续行动选择订阅后，再显式
+`task_automation_start`。服务持久单队列执行，不创建 Executor、不 ACK、不占 session
+任务槽。成功写 done+outcome，失败/中断写 blocked+outcome，不自动重跑。
+Linux 进程组终止屏障只由 `task_automation_reconcile` 在内核确认组已不存在后解除；
+未回收 zombie 也会保持屏障，须由宿主回收，不手改数据库绕过。
+取消不回滚副作用。详见[轻量自动化](docs/task-automation.md)及
+[Owner 脚本参考](skills/cockpit-task-owner/cockpit-task-owner/references/automation.md)。
 
 完整编码流程由 Owner 准备干净最新主线、独立 branch/worktree 和 Issue，再创建关联
 且描述完整的 Task；Executor 负责开发、验证、独立审阅及授权内的 PR 合并；

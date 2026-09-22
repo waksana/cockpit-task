@@ -8,6 +8,13 @@ Read the relevant section for unfamiliar write rules, a version conflict, a part
 report, status subscriptions or uncertain effects. Reuse understood guidance; exact arguments
 belong in tool schemas, not a per-turn checklist.
 
+The assignment, ACK and report sections below describe Agent Tasks. Automation is
+service-managed: no Executor, ACK, session slot or Agent report. Existing read/edit/cancel
+access does not authorize create/start or child Tasks. Script/inputs never change;
+queued/starting/running definitions and materials are frozen. Success writes a service
+done+outcome, failure/interruption blocked+outcome; no automatic rerun. Reconciliation
+only releases a proven-safe process-group barrier, never turns blocked into done.
+
 ## Identity and concurrency
 
 Supply your actual host-provided session ID as `actor_session_id`, including on
@@ -177,6 +184,9 @@ restores default progress/final notifications nor permits Executor-to-Owner mess
 Use cancellation only for an explicit cancellation decision. A cancelled Task
 does not prove its native session stopped; record changes do not reverse external
 effects. Completed/cancelled Tasks cannot resume execution or change Executor.
+For automation, prelaunch cancellation prevents launch and running cancellation requests
+process-group termination, not proof of exit or rollback. Read the run outcome/barrier.
+Started work never reruns on recovery; repeating requires new authorization and a new Task.
 Even a permitted definition edit on a terminal Task does not reopen or ACK it.
 Do not keep performing consequential work after cancellation or invalid execution state.
 
