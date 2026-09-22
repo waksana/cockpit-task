@@ -29,7 +29,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
   timeout: 180_000,
 }, async t => {
   const hostSource = resolve(hostWorktree);
-  const archive = join(repository, 'dist', 'cockpit-task-0.1.6.tgz');
+  const archive = join(repository, 'dist', 'cockpit-task-0.1.7.tgz');
   const originalEnv = { ...process.env };
   const originalCwd = process.cwd();
   const root = await mkdtemp(join(repository, '.task-board-host-integration-'));
@@ -328,7 +328,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     stage = 'installing the real artifact and activating its backend';
     const installed = await installLocalModule(archive, { hostRoot: dirs.host, trustLocalCode: true, enable: true });
     assert.equal(installed.manifest.id, 'cockpit-task');
-    assert.equal(installed.manifest.version, '0.1.6');
+    assert.equal(installed.manifest.version, '0.1.7');
     assert.ok(installed.root.startsWith(`${dirs.host}/modules/installed/`));
     const startModule = async ({ listen = true, port = 0 } = {}) => {
       app = Fastify({ forceCloseConnections: true });
@@ -351,7 +351,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const origin = await startModule();
     const bootstrap = moduleHost.bootstrap();
     assert.deepEqual(bootstrap.errors, []);
-    assert.deepEqual(bootstrap.active, [{ id: 'cockpit-task', version: '0.1.6', digest: installed.digest }]);
+    assert.deepEqual(bootstrap.active, [{ id: 'cockpit-task', version: '0.1.7', digest: installed.digest }]);
     const apiBase = bootstrap.modules[0].apiBase;
     const headers = { 'X-Cockpit-Module-Digest': installed.digest };
     assert.equal((await app.inject(bootstrap.modules[0].entry)).statusCode, 200);
