@@ -89,6 +89,6 @@ npm run package:module
 [Owner](skills/cockpit-task-owner/cockpit-task-owner/SKILL.md) 和
 [Executor](skills/cockpit-task-executor/cockpit-task-executor/SKILL.md)。
 两角色都通过现有装载机制发现同一份 `github-coding` 工作 Skill，双角色不会重复装配，
-选择角色不等于每次都加载正文。准备包版本为 `0.1.7`；不同内容使用新版本，
+选择角色不等于每次都加载正文。准备包版本为 `0.1.8`；不同内容使用新版本，
 不覆盖同版本的既有安装。源码合并、CI 归档均不会自动升级线上。
 持久化仅使用宿主提供的模块目录，不自动导入其他数据库或修改既有安装。
