@@ -121,6 +121,7 @@ Task use `view=overview`. Include your own `actor_session_id`: it is attribution
 | Latest `activity` and its `at` time | A reported fact, not live observation |
 | `revision`, `acknowledged_revision` | Whether the Executor confirmed the current definition |
 | `outcome.available`, `outcome.current` | Whether a result exists and matches the revision, not whether delivery is complete |
+| `retro.status`, `retro.current` | Whether completion reflection was recorded and still matches the definition; not a quality judgment |
 
 These views omit the full definition, materials, histories and outcome text.
 Read `definition` before editing requirements and `outcomes` when judging delivery; expand `activity` or `changelog` for a concrete question. Use the
@@ -129,6 +130,16 @@ Trust complete delivery unless the Task requires review; preserve partial result
 and unexecuted boundaries. When asked, summarize active, waiting, complete or unknown
 work from Task evidence, not a second ledger. Do not infer completion from idle,
 scan chats routinely or schedule monitoring.
+
+Executor completes delivery, then submits a lightweight retro with done: useful
+evidence-based observations or explicit null when there are no findings.
+Read it on demand in `execution` / `definition` or `outcomes`; overview/list show
+only status and attribution, not its text. `recorded` with null is an explicit
+no-findings submission; `not_recorded` is missing history, and `not_applicable`
+is automation, not a failed Agent reflection. The service guarantees submission,
+not quality or thought. Retro does not replace outcome/blockers or authorize
+improvements, scope expansion or dispatch. No mandatory Owner review, new
+notification, subscription or completion gate is added.
 
 ## Preserve state; reuse stable guidance
 

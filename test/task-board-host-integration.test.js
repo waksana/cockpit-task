@@ -706,7 +706,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const completeInput = {
       actor_session_id: executorId, request_id: 'integration-task-done', task_id: taskId,
       revision: subscribedTask.revision, write_context: subscribedTask.write_context,
-      status: 'done', outcome: { summary: 'Synthetic isolated completion' },
+      status: 'done', outcome: { summary: 'Synthetic isolated completion' }, retro: null,
     };
     const complete = await tool('task_report', completeInput);
     assert.equal(complete.notification_error, null);

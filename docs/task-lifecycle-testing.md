@@ -24,9 +24,55 @@ included in the 40/40 result and use the narrower setup documented below.
 - [Subscription-necessity cases N1-N3](#subscription-necessity-cases-n1-n3)
 - [Coding workflow cases G1-G4](#coding-workflow-cases-g1-g4)
 - [Executor preparation: rationale and acceptance](#executor-preparation-rationale-and-acceptance)
+- [Completion retro acceptance](#completion-retro-acceptance)
 - [Coverage and grading](#coverage-and-grading)
 - [Artifacts, review and shutdown](#artifacts-review-and-shutdown)
 - [Baseline observations and untested boundaries](#baseline-observations-and-untested-boundaries)
+
+## Completion retro acceptance
+
+These are current-source acceptance requirements, not additional claims about
+the historical S/N/G baseline results below. Preserve those original outcomes
+and source snapshots; reruns use the current explicit Agent completion contract.
+Scripted Agent fixtures must submit retro too; script automation itself does not
+run an Agent and remains exempt.
+
+Use isolated synthetic data and the existing tests. Check:
+
+- Done with a new outcome and useful retro text, and done with explicit null,
+  persist together. Missing retro, retro on ordinary reports (even null), blank
+  text, over 2,000 characters, or combined serialized `{outcome,retro}` over
+  16,000 characters reject without accidental completion.
+- Exact replay of a completion accepted under the current contract retains its
+  saved result without duplicate outcome/retro. Every incoming done request
+  missing retro, including old-format replay attempts, returns `INVALID_INPUT`
+  before any writes, including activity. Original legacy operations remain
+  untouched and readable through `task_read(view=operation,request_id=<original ID>)`
+  without side effects. Do not auto-fill null or retry changed input under the
+  same request ID. A stale completion
+  can save acknowledged old activity but rejects status/outcome/retro; ACK,
+  lifecycle and write-context protections still apply.
+- Schema v4 migration preserves historical outcomes with `not_recorded`, not
+  invented no-findings text. Fresh writes, restart and bounded history retain
+  the same outcome ID, revision, executor, reported author/source and timestamp.
+- Execution/definition and outcomes expose independent full retro; overview/list
+  expose attribution/status without text. A post-completion description edit
+  preserves the original revision and yields `current:false`; no Task reopens.
+- Automation returns `not_applicable` and keeps its service-generated outcomes.
+  Rendering distinguishes recorded text, explicit no findings, missing legacy
+  history and automation, without mixing retro into the delivery outcome.
+- Existing status subscriptions behave unchanged. No new notices, dispatch,
+  Owner mandatory review or improvement authorization comes from recording retro.
+
+Separately assess model behavior: delivery happens before reflection; findings
+identify useful actionable observed automation candidates, concrete slow/repeated
+sticking points, or Skill/MCP discovery/contract/capability harness gaps with
+locatable evidence. Distinguish observation from hypothesis and external waits;
+do not fabricate timings. No mandatory multi-section template or filler: genuine
+no-findings work uses null. Verify retro does not replace outcome or blockers.
+Passing schema/storage tests proves submission and persistence, not that an
+Agent actually reflected or produced useful text. Do not report a model-behavior
+pass without a separate observed run.
 
 ## Scope and safety
 

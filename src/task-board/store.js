@@ -34,7 +34,7 @@ export class TaskStore {
     try {
       chmodSync(file, 0o600);
       const version = this.db.prepare('PRAGMA user_version').get().user_version;
-      if (version > 3) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
+      if (version > 4) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
       this.db.exec(`
       PRAGMA journal_mode=WAL;
       PRAGMA synchronous=FULL;
@@ -110,6 +110,11 @@ export class TaskStore {
         DROP TABLE outcomes_old;
         CREATE INDEX outcomes_task ON outcomes(task_id,seq);
       `);
+      if (version < 4) this.db.exec(`
+        ALTER TABLE outcomes ADD COLUMN retro TEXT;
+        ALTER TABLE outcomes ADD COLUMN retro_recorded INTEGER NOT NULL DEFAULT 0
+          CHECK(retro_recorded IN (0,1));
+      `);
       this.db.exec(`
         CREATE TABLE IF NOT EXISTS scripts (
           seq INTEGER PRIMARY KEY AUTOINCREMENT, script_id TEXT NOT NULL UNIQUE,
@@ -125,7 +130,7 @@ export class TaskStore {
           log TEXT NOT NULL DEFAULT '', omitted_characters INTEGER NOT NULL DEFAULT 0,
           reconciled_at TEXT, reconciled_by TEXT, reconciliation_reason TEXT
         );
-        PRAGMA user_version=3;
+        PRAGMA user_version=4;
         COMMIT;
       `);
       this.automation = new AutomationStore(this);
@@ -175,6 +180,7 @@ export class TaskStore {
     const row = this.row(id);
     return {
       ...this.summary(row), description: row.description, references: JSON.parse(row.refs), metadata: JSON.parse(row.metadata),
+      retro: this.latestRetro(row, true),
       ...(row.kind === 'automation' ? { automation: this.automation.project(this.automation.run(row.id), true) } : {}),
     };
   }
@@ -328,6 +334,7 @@ export class TaskStore {
     return { result: this.effects(this.row(row.id)) };
   }
   report(input) {
+    input = parseInput('task_report', input);
     const row = this.row(input.task_id);
     this.checkContext(row, input);
     this.executable(row);
@@ -336,7 +343,10 @@ export class TaskStore {
     if (!ack) fail('ACK_REQUIRED', 'The fixed Executor has not acknowledged the specified revision');
     const stale = input.revision !== row.revision;
     const field = requested => ({ status: requested ? 'rejected' : 'not_requested' });
-    const fields = { activity: field(input.activity), task_status: field(input.status), outcome: field(input.outcome) };
+    const fields = {
+      activity: field(input.activity), task_status: field(input.status), outcome: field(input.outcome),
+      retro: field(input.retro !== undefined),
+    };
     const at = now();
     let subscription_ids = [];
     if (input.activity) {
@@ -348,9 +358,11 @@ export class TaskStore {
     if (!stale) {
       if (input.outcome) {
         const id = randomUUID();
-        this.db.prepare('INSERT INTO outcomes(id,task_id,revision,executor,author,summary,refs,at) VALUES(?,?,?,?,?,?,?,?)')
-          .run(id, row.id, input.revision, row.executor, input.actor_session_id, input.outcome.summary, JSON.stringify(input.outcome.references || []), at);
+        this.db.prepare('INSERT INTO outcomes(id,task_id,revision,executor,author,summary,refs,at,retro,retro_recorded) VALUES(?,?,?,?,?,?,?,?,?,?)')
+          .run(id, row.id, input.revision, row.executor, input.actor_session_id, input.outcome.summary, JSON.stringify(input.outcome.references || []), at,
+            input.retro ?? null, Number(input.retro !== undefined));
         fields.outcome = { status: 'saved', id, revision: input.revision };
+        if (input.retro !== undefined) fields.retro = { status: 'saved', outcome_id: id, revision: input.revision };
       }
       if (input.status) {
         this.db.prepare('UPDATE tasks SET status=?,lifecycle=lifecycle+? WHERE id=?').run(input.status, Number(input.status !== row.status), row.id);
@@ -367,7 +379,7 @@ export class TaskStore {
         ...this.effects(this.row(row.id), rejected ? (input.activity ? 'partially_applied' : 'rejected') : 'applied'), ...fields,
         ...(subscription_ids.length ? { subscription_ids } : {}),
       },
-      error: rejected ? { code: 'DESCRIPTION_UPDATED', message: 'Task description has changed; requested status and outcome were not saved. Read the current definition; its acknowledgement belongs to the assigned Executor', status: 409 } : null,
+      error: rejected ? { code: 'DESCRIPTION_UPDATED', message: 'Task description has changed; requested status, outcome and retro were not saved. Read the current definition; its acknowledgement belongs to the assigned Executor', status: 409 } : null,
     };
   }
   cancel(input) {
@@ -525,8 +537,25 @@ export class TaskStore {
       ...this.summary(row),
       activity: activity ? { ...activity, source: 'reported', text: activity.text.slice(0, LIMITS.excerpt), truncated: activity.text.length > LIMITS.excerpt } : null,
       outcome: outcome ? { ...outcome, available: true, current: outcome.revision === row.revision } : { available: false },
+      retro: this.latestRetro(row),
       ...(includeCancellation && row.cancellation ? { cancellation: JSON.parse(row.cancellation) } : {}),
     };
+  }
+  retro(row, outcome, includeText = true) {
+    if (row.kind === 'automation') return { status: 'not_applicable' };
+    if (!outcome?.retro_recorded) return { status: 'not_recorded' };
+    return {
+      status: 'recorded', outcome_id: outcome.id, revision: outcome.revision,
+      executor: outcome.executor, author: outcome.author, at: outcome.at, source: 'reported',
+      current: outcome.revision === row.revision, has_findings: outcome.retro !== null,
+      ...(includeText ? { text: outcome.retro } : {}),
+    };
+  }
+  latestRetro(row, includeText = false) {
+    const outcome = row.kind === 'automation' ? null : this.db.prepare(
+      'SELECT id,revision,executor,author,at,retro,retro_recorded FROM outcomes WHERE task_id=? AND retro_recorded=1 ORDER BY seq DESC LIMIT 1',
+    ).get(row.id);
+    return this.retro(row, outcome, includeText);
   }
   cursor(input, scope) {
     if (!input.cursor) return Number.MAX_SAFE_INTEGER;
@@ -590,9 +619,10 @@ export class TaskStore {
     const rows = this.db.prepare(`SELECT * FROM ${table} WHERE task_id=? AND seq < ? ORDER BY seq DESC LIMIT ?`)
       .all(row.id, this.cursor(input, scope), limit + 1);
     return this.page(rows, limit, scope, entry => {
-      const { seq, description, refs, ...fields } = entry;
+      const { seq, description, refs, retro, retro_recorded, ...fields } = entry;
       return {
         ...fields, source: fields.run_id ? 'automation' : 'reported',
+        ...(input.view === 'outcomes' ? { retro: this.retro(row, entry) } : {}),
         ...(refs ? { references: JSON.parse(refs) } : {}),
         ...(description ? { description_available: true, description_length: description.length } : {}),
       };

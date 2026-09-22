@@ -106,6 +106,7 @@ test('registration/create do not execute; typed literal argv, optional pre-subsc
     assert.equal((await f.write('task_automation_start', start)).error, null);
     const done = await f.finished(id);
     assert.equal(done.status, 'done');
+    assert.deepEqual(done.retro, { status: 'not_applicable' });
     assert.equal(done.automation.state, 'succeeded');
     assert.equal(done.automation.barrier, false);
     assert.equal(existsSync(marker), false);
@@ -119,6 +120,7 @@ test('registration/create do not execute; typed literal argv, optional pre-subsc
     assert.equal(outcomes.length, 1);
     assert.equal(outcomes[0].executor, null);
     assert.equal(outcomes[0].source, 'automation');
+    assert.deepEqual(outcomes[0].retro, { status: 'not_applicable' });
     assert.equal(outcomes[0].run_id, done.automation.run_id);
     await until(() => f.sent.length === 1);
     assert.equal(f.store.read({ view: 'subscriptions', task_id: id }).items[0].event.source, 'automation');
@@ -167,7 +169,7 @@ test('strict script catalog and parameters reject changes, unknown fields and mi
     assert.equal((await f.write('task_script_register', { ...definition, script_id: 'relative', script_path: 'relative.mjs' })).error.code, 'INVALID_SCRIPT');
     const id = await f.create('catalog', { count: 1 });
     for (const name of ['task_ack', 'task_report', 'task_assign']) {
-      const extra = name === 'task_report' ? { status: 'done', outcome: { summary: 'Forged' } }
+      const extra = name === 'task_report' ? { status: 'done', outcome: { summary: 'Forged' }, retro: null }
         : name === 'task_assign' ? { executor: 'fake' } : {};
       assert.equal((await f.change(name, id, extra)).error.code, 'AUTOMATION_MANAGED');
     }
@@ -386,7 +388,7 @@ test('v2 migration preserves Agent outcomes and defaults while allowing null-Exe
     assert.equal(store.task(task.task_id).automation, null);
     assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items[0].summary, 'Legacy result');
     assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items[0].source, 'reported');
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 3);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 4);
     assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
   } finally {
     store?.close();

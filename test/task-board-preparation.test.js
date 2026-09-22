@@ -100,7 +100,7 @@ test('unfinished Task excludes preparation even when idle; completed Executor ca
   await f.write('task_ack', { task_id: taskId, revision: 1, write_context: context, actor_session_id: 'executor' });
   await f.write('task_report', {
     task_id: taskId, revision: 1, write_context: context, actor_session_id: 'executor',
-    status: 'done', outcome: { summary: 'Synthetic complete result' },
+    status: 'done', outcome: { summary: 'Synthetic complete result' }, retro: null,
   });
   assert.equal((await f.write('task_session_prepare', { session_id: 'executor' })).error, null);
 });

@@ -11,7 +11,7 @@ export class TaskError extends Error {
 }
 
 export const LIMITS = Object.freeze({
-  description: 24000, activity: 4000, outcome: 8000, metadata: 8000,
+  description: 24000, activity: 4000, outcome: 8000, retro: 2000, metadata: 8000,
   references: 20, excerpt: 320, list: 50, history: 10,
   page: 24000, definitionPayload: 64000, reportPayload: 16000,
 });
@@ -131,8 +131,14 @@ export const schemas = {
     status: z.enum(['in_progress', 'blocked', 'in_review', 'done']).optional(),
     outcome: z.strictObject({ summary: text(LIMITS.outcome), references: references.optional() })
       .refine(value => JSON.stringify(value).length <= LIMITS.reportPayload, 'Serialized outcome and references exceed 16000 characters').optional(),
+    retro: text(LIMITS.retro).nullable().optional()
+      .describe('Required with done only: useful completion retrospective (max 2000 characters), or explicit null when there are no findings. Never default omitted input to null.'),
   }).refine(x => x.activity !== undefined || x.status !== undefined || x.outcome !== undefined, 'A report field is required')
-    .refine(x => x.status !== 'done' || x.outcome !== undefined, 'done requires a new outcome in this request'),
+    .refine(x => x.status !== 'done' || x.outcome !== undefined, 'done requires a new outcome in this request')
+    .refine(x => x.status !== 'done' || x.retro !== undefined, 'done requires explicit retro (text or null) in this request')
+    .refine(x => x.retro === undefined || x.status === 'done', 'retro is only accepted with done')
+    .refine(x => x.retro === undefined || JSON.stringify({ outcome: x.outcome, retro: x.retro }).length <= LIMITS.reportPayload,
+      'Serialized outcome, references and retro exceed 16000 characters'),
   task_cancel: z.strictObject({ ...existing, reason: text(2000) }),
   task_subscribe: z.strictObject({
     ...existing,

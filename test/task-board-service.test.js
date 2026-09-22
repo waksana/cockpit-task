@@ -54,7 +54,7 @@ test('Task service integrates assignment, ACK, revision reminders and partial re
     const report = {
       request_id: 'old-activity', actor_session_id: 'executor', task_id: task.id,
       revision: 1, write_context: current.write_context,
-      activity: { text: 'Work performed before the update' }, status: 'done', outcome: { summary: 'Old result' },
+      activity: { text: 'Work performed before the update' }, status: 'done', outcome: { summary: 'Old result' }, retro: null,
     };
     const partial = await f.service.execute('task_report', report);
     assert.equal(partial.error.code, 'DESCRIPTION_UPDATED');
@@ -199,7 +199,7 @@ test('business validation failures and unrelated reads still check the acting Ex
     await f.write('task_assign', { task_id: task.id, executor: 'executor', revision: 1, write_context: task.write_context });
     const failure = await f.service.execute('task_report', {
       actor_session_id: 'executor', task_id: task.id, request_id: 'malformed',
-      write_context: f.store.task(task.id).write_context, revision: 1, status: 'done',
+      write_context: f.store.task(task.id).write_context, revision: 1, status: 'done', retro: null,
     });
     assert.equal(failure.error.code, 'INVALID_INPUT');
     assert.equal(failure.definition_check.tasks[0].needs_ack, true);
@@ -238,11 +238,11 @@ test('Task storage is private and a newer schema is rejected rather than overwri
     assert.equal(statSync(join(f.directory, 'task-board.sqlite')).mode & 0o777, 0o600);
     f.service.close();
     const future = new DatabaseSync(join(f.directory, 'task-board.sqlite'));
-    future.exec('PRAGMA user_version=4');
+    future.exec('PRAGMA user_version=5');
     future.close();
     assert.throws(() => new TaskStore(f.directory), error => error.code === 'SCHEMA_TOO_NEW');
     const unchanged = new DatabaseSync(join(f.directory, 'task-board.sqlite'));
-    try { assert.equal(unchanged.prepare('PRAGMA user_version').get().user_version, 4); }
+    try { assert.equal(unchanged.prepare('PRAGMA user_version').get().user_version, 5); }
     finally { unchanged.close(); }
   } finally { f.close(); }
 });

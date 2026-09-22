@@ -112,3 +112,32 @@ test('official MCP publishes optional selections for both preparation entrypoint
     assert.deepEqual(JSON.parse(response.content[0].text), input);
   }
 });
+
+test('official MCP publishes nullable bounded retro and requires explicit completion submission', async t => {
+  const { client, calls } = await fixture(t);
+  const schema = (await client.listTools()).tools.find(tool => tool.name === 'task_report').inputSchema;
+  assert.equal(schema.required.includes('retro'), false, 'Non-completion reports do not require retro');
+  assert.match(schema.properties.retro.description, /Required with done only/);
+  assert.ok(schema.properties.retro.anyOf.some(branch => branch.type === 'null'));
+  assert.ok(schema.properties.retro.anyOf.some(branch => branch.type === 'string' && branch.maxLength === 2000));
+  const base = { actor_session_id: 'executor', request_id: 'retro-schema', task_id, write_context: 'context', revision: 1 };
+  const completed = { ...base, status: 'done', outcome: { summary: 'Delivered' } };
+  for (const input of [
+    completed, { ...completed, retro: '' }, { ...completed, retro: ' \n' },
+    { ...completed, retro: false }, { ...completed, retro: {} }, { ...completed, retro: 'x'.repeat(2001) },
+    { ...base, status: 'in_progress', retro: null }, { ...base, status: 'done', retro: null },
+  ]) {
+    assert.equal(schemas.task_report.safeParse(input).success, false);
+    assert.equal((await client.callTool({ name: 'task_report', arguments: input })).isError, true);
+  }
+  assert.equal(calls.length, 0);
+  for (const input of [
+    { ...completed, retro: null }, { ...completed, retro: 'Automate repeated fixture setup.' },
+    { ...base, activity: { text: 'Actual work' } },
+    ...['in_progress', 'blocked', 'in_review'].map(status => ({ ...base, status })),
+  ]) {
+    const response = await client.callTool({ name: 'task_report', arguments: input });
+    assert.notEqual(response.isError, true);
+    assert.deepEqual(JSON.parse(response.content[0].text), input);
+  }
+});

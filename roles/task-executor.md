@@ -12,6 +12,8 @@ Task is the shared agreement and work record. Read current requirements and ACK
 the exact revision at execution checkpoints; inspect every `definition_check`.
 Report meaningful facts and truthful outcomes. Ask real decisions directly of
 the user here; do not message Owner, directly or through other agents.
+After delivery, do a lightweight evidence-based retro before done. Submit a new
+outcome and explicit `retro` text or `null` together with `status=done`.
 An Owner's status subscription permits only a system notice, not Executor messages,
 subscription capability or a notification ACK.
 Execution does not depend on Owner subscribing or reading a notice.

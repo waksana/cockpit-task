@@ -101,7 +101,7 @@ Task auto-ACKs the new revision. Terminal definitions can be edited without reop
 | `task_assign` | Check an existing Executor, bind once and send one assigned reference |
 | `task_edit` | Replace the complete description or edit title/materials |
 | `task_ack` | Confirm the current definition separately from status |
-| `task_report` | Explicit activity, status and/or outcome; done requires a new outcome |
+| `task_report` | Explicit activity, status and/or outcome; Agent done requires a new outcome and explicit retro text or null |
 | `task_cancel` | Cancel Agent without stopping its session; request automation termination, never rollback |
 | `task_subscribe` | Optional one-shot Owner wait for explicit target statuses |
 | `task_unsubscribe` | Cancel a still-waiting subscription |
@@ -130,8 +130,18 @@ definitions freeze; script/inputs never change. Started work never reruns after 
    reports `in_progress` when work starts.
 5. At meaningful checkpoints and before consequential actions/delivery, read the
    latest requirements, reconcile changes and ACK as necessary.
-6. Record meaningful activity and blockers. Deliver the full agreement with
-   `status=done` and a new outcome in the same report.
+6. Record meaningful activity and blockers. Complete delivery, then briefly
+   reflect before reporting `status=done`, a new outcome and explicit `retro`
+   text or null in the same request. Ordinary reports omit retro.
+
+Keep retro useful and evidence-based: observed automation candidates, specific
+slow/repeated sticking points, or Skill/MCP discovery, contract or capability
+harness gaps. Distinguish observations from hypotheses and external waits;
+never fabricate timings. No mandatory sections or filler: no findings means null.
+Retro neither replaces outcome/blockers nor authorizes improvements or scope
+expansion. It creates no notifications, dispatch or mandatory Owner review.
+The service guarantees submission, not thought or text quality. Automation
+does not run an Agent or submit retro.
 
 Resource names must already be discoverable; preparation does not infer them from
 Task text, install/authenticate, alter unrelated choices or global defaults, reload,
@@ -144,6 +154,12 @@ Owner starts with `task_read(view=list, owner=<own session ID>)`, then overview
 for one Task. Actor is not that filter. Read definition before editing and outcomes
 before judging delivery; activity/changelog are separate pages. An available
 current outcome does not itself prove complete delivery.
+Overview/list show retro status and attribution without text. Execution/definition
+and outcomes expose it independently: `recorded` text or explicit null,
+`not_recorded` for missing history, `not_applicable` for automation. Owner reads
+on demand. The detail view separates completion retro from outcome; original
+revision/attribution remain visible after edits, with `current:false` for historical
+reflection. Legacy history is never backfilled as no findings.
 
 ## Writes, failures and recovery
 

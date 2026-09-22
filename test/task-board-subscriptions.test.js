@@ -162,7 +162,7 @@ test('cancellation triggers only subscribed Tasks; unmatched terminal targets ex
   assert.throws(() => f.subscribe(task, ['done']), code('TASK_STATE_CONFLICT'));
   const unmatched = f.executable();
   f.subscribe(unmatched, ['blocked']);
-  await f.service.execute('task_report', f.reportRequest(unmatched, { status: 'done', outcome: { summary: 'Complete' } }));
+  await f.service.execute('task_report', f.reportRequest(unmatched, { status: 'done', outcome: { summary: 'Complete' }, retro: null }));
   assert.equal(f.subscriptions(unmatched)[0].state, 'expired');
   const ordinary = f.create();
   await f.service.execute('task_cancel', f.request(ordinary, { reason: 'ordinary' }));
@@ -324,7 +324,7 @@ test('storage failure after host acceptance remains unknown durably and cannot r
   assert.equal(f.sent.length, 1);
 });
 
-test('schema 1 upgrade preserves Task rows and receipts while fencing old binaries with version 3', t => {
+test('schema 1 upgrade preserves Task rows and receipts while fencing old binaries with version 4', t => {
   const f = fixture(t), task = f.executable();
   const before = f.store.task(task.task_id);
   const receipts = f.store.db.prepare('SELECT * FROM operations ORDER BY request_id').all();
@@ -338,7 +338,7 @@ test('schema 1 upgrade preserves Task rows and receipts while fencing old binari
   old.close();
   const upgraded = new TaskStore(f.root);
   try {
-    assert.equal(upgraded.db.prepare('PRAGMA user_version').get().user_version, 3);
+    assert.equal(upgraded.db.prepare('PRAGMA user_version').get().user_version, 4);
     assert.deepEqual(upgraded.task(task.task_id), before);
     assert.deepEqual(upgraded.db.prepare('SELECT * FROM operations ORDER BY request_id').all(), receipts);
     assert.deepEqual(upgraded.read({ view: 'subscriptions', task_id: task.task_id }).items, []);

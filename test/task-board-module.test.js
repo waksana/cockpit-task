@@ -63,6 +63,37 @@ function fixture() {
   };
 }
 
+test('HTTP completion requires explicit valid retro with atomic effects and durable detail reads', async () => {
+  const f = fixture();
+  try {
+    for (const retro of [null, 'A useful automation candidate.']) {
+      const create = await f.write('task_create', { title: 'Retro', description: 'Synthetic only', owner: 'owner' });
+      const id = create.body.result.task_id;
+      let task = (await f.read(id)).body.result;
+      await f.write('task_assign', { task_id: id, revision: 1, executor: 'executor', write_context: task.write_context });
+      task = (await f.read(id)).body.result;
+      const base = { task_id: id, revision: 1, write_context: task.write_context };
+      await f.write('task_ack', base);
+      const report = { ...base, status: 'done', outcome: { summary: 'Delivered' }, activity: { text: 'Final activity' } };
+      for (const value of [undefined, '', ' \n', true, {}, 'r'.repeat(2001)]) {
+        const response = await f.write('task_report', { ...report, ...(value === undefined ? {} : { retro: value }) });
+        assert.equal(response.status, 400);
+        assert.equal(response.body.error.code, 'INVALID_INPUT');
+      }
+      assert.equal((await f.read(id)).body.result.status, 'todo');
+      assert.equal((await f.read(id, 'outcomes')).body.result.items.length, 0);
+      assert.equal((await f.read(id, 'activity')).body.result.items.length, 0);
+      assert.equal((await f.write('task_report', { ...report, retro })).body.result.retro.status, 'saved');
+      f.restart();
+      assert.equal((await f.read(id)).body.result.retro.text, retro);
+      const outcome = (await f.read(id, 'outcomes')).body.result.items[0];
+      assert.equal(outcome.retro.text, retro);
+      assert.equal(outcome.summary, 'Delivered');
+    }
+    assert.deepEqual(f.errors, []);
+  } finally { f.close(); }
+});
+
 test('module roles retain tool subsets and share one coding Skill alongside the two role Skills', () => {
   const manifest = JSON.parse(readFileSync(new URL('../cockpit.module.json', import.meta.url), 'utf8'));
   const [owner, executor] = manifest.roles;

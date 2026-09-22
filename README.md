@@ -25,6 +25,12 @@ Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的�
 [github-coding](skills/github-coding/github-coding/SKILL.md)，指导 Git/GitHub 编码协作；
 非编码工作仍使用其自身方法。
 
+Executor 完成交付后、报告 done 前进行轻量复盘：仅记录有实际证据、可行动的自动化
+候选、具体慢点/重复卡点或 Skill/MCP 发现、契约和能力验证缺口；区分观察、假设与外部等待，
+不编造耗时、不套多段模板。done 同次必须提交新 outcome 与显式 `retro` 文本或 `null`
+（无有用发现），普通报告不传 retro。复盘独立于成果和阻塞，不授权改进或扩大范围；
+Owner 按需读取，无新增通知、派单或强制审阅。服务保证提交，不保证思考或文本质量。
+
 Owner 也可为已授权、可信、可重复的已知脚本选择轻量 automation Task；不是把任意工作
 转成脚本。先用 `task_script_read` / `task_script_register` 发现或不可变登记，
 `task_create` 保存脚本和类型化参数快照，按必要后续行动选择订阅后，再显式
