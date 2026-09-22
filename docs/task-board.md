@@ -70,8 +70,9 @@ then reuses or creates an Issue before Task. Executor owns implementation, check
 independent review and authorized PR merge. Owner safely removes only this work's
 merged temporary resources once no longer in use and restores clean current mainline.
 Task done is code delivery, not proof cleanup is complete or the session idle.
-A one-shot done subscription before assignment can resume necessary cleanup;
-it is not progress monitoring or a reason to subscribe when no follow-up is needed.
+Routine cleanup can be deferred and batched; it does not by itself justify waking
+Owner for each Task. Record PR/branch/path and explicit resource-release evidence.
+Subscribe only if the future status unlocks necessary authorized Owner action.
 If cleanup is blocked, ask the user directly about the blocker and what is needed
 to continue. The consumed done subscription will not wake Owner again when it clears.
 After the user's answer, reread current evidence before cleanup; do not create a
@@ -90,7 +91,7 @@ Task auto-ACKs the new revision. Terminal definitions can be edited without reop
 
 | Tool | Use |
 | --- | --- |
-| `task_read` | Fixed bounded views; complete requirements and histories read separately |
+| `task_read` | Bounded views with optional overview include groups; histories/logs stay paginated |
 | `task_create` | Register an Agent todo or immutable automation snapshot; never execute |
 | `task_script_read` | Discover/read immutable trusted local script registrations |
 | `task_script_register` | Register an existing script, fixed argv and ordered typed parameters |
@@ -150,11 +151,16 @@ Tool availability is checked against the actual filtered offered table.
 Skill enabled is not body loaded; MCP connected is not tool offered; initialized
 tools are not final readiness. Executor loads relevant Skill bodies when first needed.
 
-Owner starts with `task_read(view=list, owner=<own session ID>)`, then overview
-for one Task. Actor is not that filter. Read definition before editing and outcomes
-before judging delivery; activity/changelog are separate pages. An available
-current outcome does not itself prove complete delivery.
-Overview/list show retro status and attribution without text. Execution/definition
+Owner finds Tasks with `task_read(view=list, owner=<own session ID>)`; actor is not
+that filter. For one Task, select only needed groups in one overview read:
+`include=["context"]` for status/version, `["activity","outcome"]` when both explain
+the necessary next action. Outcome can be null; no guess-and-fetch sequence is needed.
+Retro, definition, automation and cancellation are also opt-in groups. Omit include
+for existing overview defaults. Selection has a 48,000 serialized-character budget
+and explicit overflow errors, never truncated records. Read full definition before
+editing; Executor still reads execution and ACKs current requirements. History/log
+pagination remains separate. An available current outcome does not itself prove delivery.
+Default overview/list show retro status and attribution without text. Execution/definition
 and outcomes expose it independently: `recorded` text or explicit null,
 `not_recorded` for missing history, `not_applicable` for automation. Owner reads
 on demand. The detail view separates completion retro from outcome; original

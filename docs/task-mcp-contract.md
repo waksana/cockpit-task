@@ -95,15 +95,16 @@ activity.text 最长 4,000，outcome.summary 最长 8,000；每个 activity/outc
 
 ### task_read
 
-`view` 必须明确指定。Owner 默认用 `list` 并显式指定 `owner=自己的 session ID`，
-单项用 `overview`；Executor 默认用 `execution`。这些是 Skill 的信息默认值，
-不一次返回全部内容，也不限制任何持有工具者的读取范围。
+`view` 必须明确指定。Owner 查找任务用 `list` 并显式指定 `owner=自己的 session ID`，
+单项按目的用 `overview` 的 `include` 一次选择所需内容；省略 include 保持原视图响应。
+Executor 开始、恢复及执行要求同步仍读完整 `execution`，不能以选择输出代替。
+这些是信息选择，不限制任何持有工具者的读取范围。
 列表筛选使用显式 owner / executor；actor 只提供归因和定义提醒，不自动筛选列表。
 
 | `view` | 其他输入 | 返回内容 |
 | --- | --- | --- |
 | `list` | `owner?`、`executor?`、`status?`、`query?`、`limit?`、`cursor?` | 按显式筛选的轻量任务摘要页；不含完整说明、资料和历史 |
-| `overview` | `task_id` | Owner 默认视图：标题、归属、状态、revision / ack、最新报告活动的有界摘录、成果是否存在及其版本、write_context |
+| `overview` | `task_id`、`include?` | 省略 include 保持原摘要；提供时只返回当前上下文和所选完整内容组，见下文 |
 | `execution` | `task_id` | Executor 默认视图：标题、归属、状态、完整当前 description、revision / ack、当前 references / metadata、write_context；不夹带活动、修订或成果历史 |
 | `definition` | `task_id` | 双方按需读取完整当前 description、revision、资料和 write_context；Owner 修订前使用 |
 | `changelog` | `task_id`、`limit?`、`cursor?`，或 `task_id,revision` | 默认修订摘要页；指定 revision 返回该版完整 description，不得同时传 limit/cursor |
@@ -115,7 +116,49 @@ activity.text 最长 4,000，outcome.summary 最长 8,000；每个 activity/outc
 
 列表默认只看未结束记录；可显式查询 done / cancelled。Owner 列表侧重各任务的执行者、状态、最新活动摘录、确认差异和成果可用性；Executor 列表侧重本人承接关系、状态与待确认版本。摘要使用现有字段和活动摘录，不生成另一份“进度总结”；摘录标明截断，正文通过专门视图读取，完整 description 不静默截断。
 
-列表 `status` 可为业务状态、`unfinished`（默认）或 `all`；`query` 只匹配标题。overview/execution/definition 返回扁平字段，不包在 `task` 中；列表为 `{items,next_cursor}`，历史为 `{task_id,items,next_cursor}`。overview 的 `activity` 为可空摘录，`outcome` 为 `{available:false}` 或带 `id,revision,at,current` 的可用性记录，不附成果全文。execution/definition 返回当前 `description,references,metadata`，不附 activity/outcome。changelog 摘要带 `description_available,description_length`；选择单版返回 `task_id,revision,description,reason,author,at,source`。
+列表 `status` 可为业务状态、`unfinished`（默认）或 `all`；`query` 只匹配标题。overview/execution/definition 返回扁平字段，不包在 `task` 中；列表为 `{items,next_cursor}`，历史为 `{task_id,items,next_cursor}`。未提供 include 的 overview，其 `activity` 为可空摘录，`outcome` 为 `{available:false}` 或带 `id,revision,at,current` 的可用性记录，不附成果全文。execution/definition 返回当前 `description,references,metadata`，不附 activity/outcome。changelog 摘要带 `description_available,description_length`；选择单版返回 `task_id,revision,description,reason,author,at,source`。
+
+#### 单项按需组合
+
+`include` 仅用于 `view=overview`，为 1–7 个唯一组名组成的数组；空数组、重复、
+未知组名、任意列名/路径以及与其他 view 或 limit/cursor/offset/revision 混用均为
+`INVALID_INPUT`。不是 SQL 或通用查询语言。context 始终返回；显式选择它不重复内容。
+
+| 组名 | 选择后的字段/语义 |
+| --- | --- |
+| `context` | 顶层 `id,task_id,title,owner,executor,status,revision,acknowledged_revision,created_at,updated_at,write_context,kind`；`include=["context"]` 只取这些字段 |
+| `activity` | 最新一条完整记录 `{id,task_id,revision,executor,author,text,at,source:"reported",current}`，无记录为 null；不是 overview 摘录 |
+| `outcome` | 最新一条完整记录 `{id,task_id,revision,executor,author,summary,references,at,run_id,source,current}`，无记录为 null；不附未选的 retro |
+| `retro` | 最新已记录复盘的完整对象，沿用 recorded/not_recorded/not_applicable；recorded 的 text=null 明确表示无发现 |
+| `definition` | 当前 `{revision,author,at,source:"reported",current:true,description,references,metadata}`；作者/时间属于 description 修订，资料为当前值 |
+| `automation` | 完整不可变 script/parameters 快照及运行事实；Agent 为 null，不含日志 |
+| `cancellation` | 完整取消记录或 null |
+
+未选字段完全省略，不默认读取其正文、日志或历史。activity/outcome 按持久写入顺序
+选最新一条；retro 按最新已记录复盘选择，并以 outcome_id 关联，不假定它属于最新
+outcome。记录保留原 revision、作者、时间与来源，`current` 仅比较 description
+版本，不能当作当前完成证明；旧成果不改写成新版本交付。
+
+当前上下文和所选内容在一个 SQLite 只读事务中读取，保持同一次数据库视图。
+`definition_check` 保持原合同，在响应阶段单独刷新，若并发修改发生，可能比所选
+内容更新；仍须处理它，读取从不 ACK。没有新增缓存、持久快照或游标体系。
+
+选择结果整体最多 **48,000 序列化 JSON 字符**（包含转义，不含响应封装和
+definition_check）。超出返回 HTTP 413 / `RESULT_TOO_LARGE`，result 仅含
+`task_id,include,max_characters,serialized_characters,group_characters` 大小诊断，
+不返回看似完整的截断正文。可缩小选择，完整大定义用既有 execution/definition，
+历史和日志仍用各自分页；失败不会创建继续读取状态。
+
+按真实目的选择，不是固定通知模板：
+
+```text
+task_read(view=overview, task_id, include=["context"])             → 只需状态/版本
+task_read(view=overview, task_id, include=["activity","outcome"])  → 需判断阻塞/交付及下一步
+task_read(view=overview, task_id, include=["outcome","retro"])     → 确有交付及复盘问题
+```
+
+同一次选择可处理 done、blocked 或尚无 outcome，不必先猜 outcomes 再补 activity。
+无需某组就不选择；通知也不自动授权验收、复订或转述 Executor 已直接问用户的问题。
 
 operation 视图返回 `{request_id,tool,status,task_id?,result,error,created_at,updated_at}`；这里 status 是回执的 `pending|final`，与其内部 `result.operation.status` 及 Task 业务 status 不同。已有 Task 的操作从持久输入提供 `task_id`，失败且 `result:null` 时也保留关联，不返回整份输入。外部步骤保存在内部 operation，本地操作保存其原 effects/错误；definition_check 每次响应重新读取，不保存在回执里，也不能因原操作失败而漏掉相关 Task。
 
@@ -124,11 +167,11 @@ execution/definition 另含独立 `retro`，outcomes 每项含其对应 retro，
 has_findings 只区分非 null 文本和显式无发现，不评价质量；
 同次完成 outcome 提供全部归因。null 是显式无发现，区别于未记录的
 `{status:'not_recorded'}`；automation 为 `{status:'not_applicable'}`。
-overview/list 返回相同状态、归因和 current，但不含 text。终态 description 编辑
+默认 overview/list 返回相同状态、归因和 current，但不含 text。终态 description 编辑
 保留原记录 revision，显示 `current:false`，不伪造新复盘；迁移不回填历史无发现。
 Owner 可按需读取，不要求审阅，不从 recorded/current 推断文本质量或完整交付。
 
-Task 返回 `kind=agent|automation`；automation 的 overview/list 含运行事实，
+Task 返回 `kind=agent|automation`；automation 的默认 overview/list 含运行事实，
 execution/definition 的 `automation` 另含完整 `script` 和 `parameters` 快照。
 运行事实包括 run_id、script_id、state、revision、排队/开始/结束时间、pid/process_group、
 exit_code/signal/error、cancel_requested、barrier 及 reconciliation 字段。
@@ -569,7 +612,7 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 | `UNSAFE_DISPATCH_RECOVERY` | 原回执不足以证明可恢复，禁止重发 |
 | `UNEXPECTED_QUEUE` | 已发生异常排队，保留真实结果，不再发送 |
 | `REQUEST_CANCELLED` | 请求在后续操作前已取消；已有外部/本地效果以回执为准 |
-| `RESULT_TOO_LARGE` | 单个结果不满足有界页预算（413），不是静默删减 |
+| `RESULT_TOO_LARGE` | 单个记录超出页预算或组合结果超出选择预算（413），不是静默删减；组合结果附各组大小 |
 | `ALREADY_IN_TARGET_STATUS` | 当前已满足订阅目标，本次未登记也不通知；不自动改成持续等待 |
 | `SUBSCRIPTION_EXISTS` | 已有等待订阅，读取并明确决定是否取消，不静默替换 |
 | `SUBSCRIPTION_NOT_FOUND` / `SUBSCRIPTION_NOT_WAITING` | 记录不存在、不属该 Task，或已结束；不能撤回已消费通知 |

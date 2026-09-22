@@ -49,8 +49,9 @@ Task done 是 Executor 的约定结果，不等于 session 空闲或环境已清
 继续所需的决定或条件，不只说“等待”，也不承诺自动醒来。用户答复或明确要求继续后，
 重读 Task/PR 并重新确认占用和文件状态；答复本身不是可以安全删除的证明。
 已经触发的 done 订阅不会在环境解除占用后再次通知，不另建 Task、不重新订阅或轮询。
-需要后续通知恢复这一
-真实清理动作时，可在派单前登记一次 done 订阅；无必要或另有安排时不登记，
+例行清理可延后集中处理，不构成每项 Task 立即唤醒 Owner 的默认理由。
+记录 PR、branch、path 与资源已释放的证据，延后不省略安全检查，不让 Executor 删除自己的 cwd。
+仅当未来状态确实解锁必要且已授权的 Owner 行动时才订阅；不自动新增清理脚本或定时器，
 不轮询或自动续订，也不新建清理 Task/审批门。发布、部署、重启不是默认阶段。
 讨论、非编码和非 GitHub 工作不被强加不适用的步骤。
 
@@ -89,10 +90,11 @@ Task 是共同工作记录，不是原始证据仓库：详细证据用可访问
 Executor 在首次需要时自行加载相关 Skill 正文，不继承 Owner 已读的上下文。
 参数、支持标记和失败恢复见工具 schema 与按需参考，不在角色 Skill 重复底层操作序列。
 
-Owner 默认用 `task_read(view=list, owner=<自己的 session ID>)`，单项用 overview。
-关注 id/title、Executor、状态、最新 activity 及时间、revision/ACK、
-`outcome.available/current`。编辑前读 definition，判断交付时读 outcomes，
-针对具体疑问再展开 activity/changelog。actor 不是 owner 筛选器。
+Owner 查找任务用 `task_read(view=list, owner=<自己的 session ID>)`，actor 不是 owner 筛选器。
+单项按目的用 overview 的 include 一次选择：只需状态用 `["context"]`，需要判断阻塞/交付
+及下一步时用 `["activity","outcome"]`，确有复盘问题才加 retro；不是固定通知模板。
+所选记录完整保留版本、来源和时间；无 outcome 明确为 null，不先猜 outcomes 再补读 activity。
+编辑前读完整 definition，历史有具体疑问才分页，省略 include 保持旧 overview。
 
 ### 轻量 automation 路径
 
@@ -117,6 +119,7 @@ Executor 先读 execution 确认真实指派、完整 description、资料、版
 开工、恢复、重要阶段间、重要外部操作前和交付前读取最新定义，理解并 ACK
 精确 revision。ACK 与状态分开：确认后仍为 todo，开始时明确报告 in_progress。
 每次响应都处理 definition_check，检查不可用不能解释为未变化。
+按需组合不能代替这些完整 execution 读取与精确 ACK。
 
 真实决策、缺少的重要条件及范围变更直接向自己 session 中的用户提出，
 不让 Owner 转述，不向 Owner 直接或经 subagent 发送问题、进展、阻塞或完成消息。
@@ -164,11 +167,12 @@ activity 不自动改状态，outcome 不自动 done。完成最新已确认约�
 
 **默认不订阅。** Owner 只有在未来状态会使自己采取具体、必要的后续行动时，
 才用 task_subscribe；无需等用户明确要求订阅，但不能为此虚构工作、拆分成果或
-增加审批。仅看进度或确认完成不是理由。选择最少必要目标，行动不再需要时
+增加审批。仅看进度、确认完成或重复交付汇报不是理由；Executor 已直接问用户的
+blocked 不让 Owner 再转述。选择最少必要目标，行动不再需要时
 task_unsubscribe 取消仍在等待的订阅。
 
 登记时已匹配则失败，不即时通知。首次实际匹配后由系统 enqueue 给 Task.owner，
-不打断或清队列、不保持原模型轮次等待。Owner 收到后读取最新 Task，重新判断
+不打断或清队列、不保持原模型轮次等待。Owner 收到后按实际目的一次读取所需最新内容，重新判断
 后续行动是否仍必要且已授权，不自动续订或轮询。Executor 不等待订阅或通知被读，
 也不发送、重复或 ACK 这条消息。失败投递不抹去已保存成果，不手工补发未知通知。
 

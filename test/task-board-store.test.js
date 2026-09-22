@@ -4,7 +4,7 @@ import { mkdirSync, rmSync, readdirSync, renameSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { TaskStore } from '../src/task-board/store.js';
-import { parseInput, TaskError, LIMITS } from '../src/task-board/contracts.js';
+import { parseInput, TaskError, LIMITS, READ_GROUPS, toolSchemas } from '../src/task-board/contracts.js';
 
 function fixture(t) {
   const directory = join(process.cwd(), '.task-board-tests', randomUUID());
@@ -102,6 +102,193 @@ test('strict bounded schemas reject unknown identity fields, malformed JSON and 
   rejects(() => parseInput('task_create', { ...input, metadata: JSON.parse('{"__proto__":{"bad":true}}') }), 'INVALID_INPUT');
   rejects(() => parseInput('task_read', { view: 'list', limit: 51 }), 'INVALID_INPUT');
   rejects(() => parseInput('task_read', { view: 'overview', task_id: randomUUID(), cursor: 'x' }), 'INVALID_INPUT');
+});
+
+test('overview include has a strict, unique, bounded allowlist shared by store and MCP schemas', () => {
+  const base = { view: 'overview', task_id: randomUUID(), include: ['context'] };
+  assert.deepEqual(parseInput('task_read', base), base);
+  assert.deepEqual(toolSchemas.task_read.parse({ ...base, include: [...READ_GROUPS] }).include, READ_GROUPS);
+  for (const fields of [
+    { include: [] }, { include: ['context', 'context'] }, { include: ['status'] },
+    { include: ['*'] }, { include: ['log'] }, { include: ['activity.text'] },
+    { include: READ_GROUPS.concat('context') }, { include: 'activity' }, { include: null },
+    { cursor: 'cursor' }, { limit: 1 }, { offset: 0 }, { revision: 1 }, { fields: ['status'] },
+    ...['list', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'subscriptions', 'automation_log', 'operation']
+      .map(view => ({ view })),
+  ]) {
+    const input = { ...base, ...fields };
+    rejects(() => parseInput('task_read', input), 'INVALID_INPUT');
+    assert.equal(toolSchemas.task_read.safeParse(input).success, false);
+  }
+});
+
+test('selected overview returns only requested full latest records, distinguishing absence from explicit null', t => {
+  const f = fixture(t), task = f.bind(f.create());
+  const read = include => f.store.read({ view: 'overview', task_id: task.id, include });
+  const empty = read([...READ_GROUPS]);
+  assert.equal(empty.activity, null);
+  assert.equal(empty.outcome, null);
+  assert.equal(empty.automation, null);
+  assert.equal(empty.cancellation, null);
+  assert.deepEqual(empty.retro, { status: 'not_recorded' });
+  assert.equal(empty.definition.description, 'Complete definition');
+  assert.equal(empty.definition.revision, 1);
+  assert.equal(empty.definition.author, 'owner');
+  assert.equal(empty.definition.source, 'reported');
+  assert.ok(empty.definition.at);
+  assert.equal(f.store.task(task.id).acknowledged_revision, null, 'Reading never ACKs');
+  f.ack(task);
+  const text = 'Full activity beyond the overview excerpt. '.repeat(85);
+  f.report(task, { activity: { text: 'Earlier report' }, outcome: { summary: 'Earlier outcome' } });
+  const blocked = f.report(task, { status: 'blocked', activity: { text } });
+  const selected = read(['activity', 'outcome']);
+  assert.equal(selected.status, 'blocked');
+  assert.equal(selected.write_context, blocked.write_context);
+  assert.equal(selected.activity.text, text);
+  assert.equal(selected.activity.current, true);
+  assert.equal(selected.activity.source, 'reported');
+  assert.equal(selected.activity.executor, 'executor');
+  assert.equal(selected.activity.author, 'executor');
+  assert.ok(selected.activity.at);
+  assert.equal('truncated' in selected.activity, false);
+  assert.equal(selected.outcome.summary, 'Earlier outcome');
+  assert.equal('retro' in selected.outcome, false);
+  for (const key of ['retro', 'definition', 'description', 'automation', 'cancellation']) assert.equal(key in selected, false);
+  const legacy = f.store.read({ view: 'overview', task_id: task.id });
+  assert.equal(legacy.activity.text.length, LIMITS.excerpt);
+  assert.equal(legacy.activity.truncated, true);
+  assert.equal(legacy.outcome.available, true);
+  assert.equal('summary' in legacy.outcome, false);
+  assert.deepEqual(legacy.retro, { status: 'not_recorded' });
+  f.report(blocked, { status: 'done', outcome: { summary: 'Delivered', references: [{ label: 'PR', target: 'https://example.invalid/pr/1' }] }, retro: null });
+  const done = read(['outcome', 'retro']);
+  assert.equal(done.status, 'done');
+  assert.equal(done.outcome.summary, 'Delivered');
+  assert.deepEqual(done.outcome.references, [{ label: 'PR', target: 'https://example.invalid/pr/1' }]);
+  assert.equal(done.outcome.current, true);
+  assert.equal(done.retro.status, 'recorded');
+  assert.equal(done.retro.text, null);
+  assert.equal(done.retro.has_findings, false);
+  assert.equal(done.retro.outcome_id, done.outcome.id);
+  const context = read(['context']);
+  assert.deepEqual(Object.keys(context).sort(), [
+    'id', 'task_id', 'title', 'owner', 'executor', 'status', 'revision', 'acknowledged_revision',
+    'created_at', 'updated_at', 'write_context', 'kind',
+  ].sort());
+  assert.equal(context.status, 'done');
+  f.edit(context, { description: 'Revised after completion' });
+  const revised = read(['activity', 'outcome', 'retro', 'definition']);
+  assert.equal(revised.revision, 2);
+  for (const key of ['activity', 'outcome', 'retro']) {
+    assert.equal(revised[key].revision, 1);
+    assert.equal(revised[key].current, false, `${key} must not claim to satisfy the revised requirements`);
+  }
+  assert.equal(revised.definition.revision, 2);
+  assert.equal(revised.definition.description, 'Revised after completion');
+  assert.equal(revised.definition.current, true);
+  rejects(() => f.store.read({ view: 'overview', task_id: randomUUID(), include: ['context'] }), 'TASK_NOT_FOUND');
+});
+
+test('selected cancellation is explicit and current Task context never implies an outcome', t => {
+  const f = fixture(t), task = f.create();
+  const { revision, ...input } = f.input(task, { reason: 'No longer required' });
+  f.store.executeLocal('task_cancel', input);
+  const selected = f.store.read({ view: 'overview', task_id: task.task_id, include: ['cancellation', 'outcome'] });
+  assert.equal(selected.status, 'cancelled');
+  assert.equal(selected.outcome, null);
+  assert.equal(selected.cancellation.reason, 'No longer required');
+});
+
+test('selection uses one SQLite read snapshot even when another connection commits new requirements and reports', t => {
+  const f = fixture(t), task = f.bind(f.create());
+  f.ack(task);
+  f.report(task, { activity: { text: 'Revision one' }, outcome: { summary: 'Revision one result' } });
+  const other = new TaskStore(f.directory);
+  const prepare = f.store.db.prepare.bind(f.store.db);
+  let changed = false;
+  f.store.db.prepare = sql => {
+    const statement = prepare(sql);
+    if (!changed && sql.includes('FROM tasks WHERE id=?')) {
+      const get = statement.get.bind(statement);
+      statement.get = (...args) => {
+        const row = get(...args);
+        changed = true;
+        const current = other.executeLocal('task_edit', f.input(task, {
+          actor_session_id: 'executor', reason: 'New requirement', description: 'Revision two',
+        }));
+        other.executeLocal('task_report', f.input(current, {
+          actor_session_id: 'executor', status: 'done', activity: { text: 'Revision two' },
+          outcome: { summary: 'Revision two result' }, retro: 'New finding',
+        }));
+        return row;
+      };
+    }
+    return statement;
+  };
+  try {
+    const selected = f.store.read({ view: 'overview', task_id: task.id, include: ['activity', 'outcome', 'retro', 'definition'] });
+    assert.equal(changed, true);
+    assert.equal(selected.revision, 1);
+    assert.equal(selected.status, 'todo');
+    assert.equal(selected.activity.text, 'Revision one');
+    assert.equal(selected.activity.current, true);
+    assert.equal(selected.outcome.summary, 'Revision one result');
+    assert.equal(selected.outcome.current, true);
+    assert.deepEqual(selected.retro, { status: 'not_recorded' });
+    assert.equal(selected.definition.description, 'Complete definition');
+    assert.equal(f.store.task(task.id).revision, 2);
+    assert.equal(f.store.task(task.id).status, 'done');
+  } finally {
+    f.store.db.prepare = prepare;
+    other.close();
+  }
+});
+
+test('selection does not load unrequested bodies or histories, including definition_check', t => {
+  const f = fixture(t), task = f.create();
+  const prepare = f.store.db.prepare.bind(f.store.db), queries = [];
+  f.store.db.prepare = sql => { queries.push(sql); return prepare(sql); };
+  f.store.read({ view: 'overview', task_id: task.task_id, include: ['context'] });
+  f.store.definitionCheck({ task_id: task.task_id, actor_session_id: 'owner' });
+  assert.equal(queries.length, 2);
+  for (const query of queries) assert.doesNotMatch(query, /\*|description|refs|metadata|activities|outcomes|automation_runs|cancellation/);
+  queries.length = 0;
+  f.store.read({ view: 'overview', task_id: task.task_id, include: ['retro'] });
+  assert.equal(queries.length, 2);
+  assert.match(queries[1], /retro_recorded=1 ORDER BY seq DESC LIMIT 1/);
+  assert.doesNotMatch(queries[1], /\*|summary|refs/);
+});
+
+test('selection budget includes JSON escaping and fails explicitly without truncating valid definitions', t => {
+  const f = fixture(t);
+  const task = f.create({ description: '\u0001'.repeat(9000) });
+  const before = f.store.read({ view: 'definition', task_id: task.task_id });
+  assert.throws(() => f.store.read({ view: 'overview', task_id: task.task_id, include: ['definition', 'activity'] }), error => {
+    assert.equal(error.code, 'RESULT_TOO_LARGE');
+    assert.equal(error.status, 413);
+    assert.equal(error.result.max_characters, LIMITS.selection);
+    assert.ok(error.result.serialized_characters > LIMITS.selection);
+    assert.ok(error.result.group_characters.definition > LIMITS.selection);
+    assert.deepEqual(error.result.include, ['definition', 'activity']);
+    assert.equal('definition' in error.result, false);
+    return true;
+  });
+  assert.deepEqual(f.store.read({ view: 'definition', task_id: task.task_id }), before);
+  assert.equal(f.store.read({ view: 'overview', task_id: task.task_id, include: ['context'] }).revision, 1);
+});
+
+test('notification-sized selection fits large legal activity, outcome and retro without a second read', t => {
+  const f = fixture(t), task = f.bind(f.create());
+  f.ack(task);
+  const activity = { text: '\u0001'.repeat(2600) };
+  const outcome = { summary: '\u0001'.repeat(600) };
+  const retro = '\u0001'.repeat(2000);
+  f.report(task, { status: 'done', activity, outcome, retro });
+  const selected = f.store.read({ view: 'overview', task_id: task.id, include: ['activity', 'outcome', 'retro'] });
+  assert.equal(selected.activity.text, activity.text);
+  assert.equal(selected.outcome.summary, outcome.summary);
+  assert.equal(selected.retro.text, retro);
+  assert.ok(JSON.stringify(selected).length < LIMITS.selection);
 });
 
 test('ACK is separate from activity/status and reported actor is not an ACL', t => {

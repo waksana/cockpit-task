@@ -51,13 +51,13 @@ optional `metadata` for repository, target/working branches and worktree, and
 GitHub holds review and repository facts; Task holds the agreement and meaningful
 work facts. Link them rather than mirroring every comment or log.
 
-Identify who will clean up. If you need a later notification to resume your necessary
-post-merge cleanup, register one `done` subscription before assignment so fast
-completion cannot race registration. This is a concrete Owner action, not progress
-watching or an approval gate. Do not subscribe when there is no such follow-up,
-another explicit cleanup arrangement suffices, or this is not a full coding flow.
-Use existing one-shot subscription guidance; do not poll, renew automatically or
-manually send a completion notice.
+Identify who will clean up and record the PR, branch and worktree path as they become
+known. Routine post-merge worktree cleanup may be deferred or batched; it does not
+automatically require an immediate per-Task Owner wakeup. Default to no subscription.
+Only if a future status unlocks specific necessary authorized Owner work, register
+the smallest one-shot subscription before assignment to avoid a fast-completion race.
+Completion confirmation or repeated reporting is not that work. Follow the existing
+subscription guidance without polling, automatic renewal or a new script/timer.
 
 ## Executor: deliver through the authorized boundary
 
@@ -83,7 +83,10 @@ If blocked, preserve the branch and report the actual blocker rather than claimi
 delivery or transferring routine completion to Owner.
 
 When the agreed boundary is met, record an outcome with Issue/PR links, the actual
-merge or limited-delivery result, useful evidence and any remaining cleanup.
+merge or limited-delivery result, useful evidence, PR/branch/worktree path and
+any remaining cleanup. Record explicit release evidence: which workers have stopped
+using the worktree, any outstanding users and artifacts to preserve. Do not claim
+release while you or subagents still use it; Executor must not delete its own cwd.
 Report done against the latest acknowledged agreement with that new outcome.
 Do not manually message Owner, directly or through subagents, even if notification
 delivery fails. Task done means Executor's agreed code result, not resource cleanup
@@ -91,7 +94,8 @@ or an idle native session.
 
 ## Owner: finish the environment cleanup
 
-Read current Task and actual Issue/PR results when resuming; a status card alone is
+When resuming cleanup, read only necessary latest Task content (usually selected
+outcome with its context) and actual Issue/PR results; a status card alone is
 not evidence of merge or permission to remove files. Confirm the agreed result is
 merged and the worktree is no longer used by Executor, subagents or other work.
 Neither Task done nor an idle label alone establishes that. If use is uncertain,
@@ -100,7 +104,7 @@ preserve the environment and explain the remaining cleanup instead of deleting i
 If cleanup is blocked, ask the user directly in this session about the specific
 blocker and the decision or condition needed to continue, using `ask_user` when
 available. Ask one focused question at a time. Do not merely say you are waiting or imply you will wake automatically:
-the consumed done subscription does not notify again when the environment clears.
+any consumed done subscription does not notify again when the environment clears.
 On the user's answer or explicit continuation, reread Task/PR and recheck workspace
 use and files before resuming cleanup; an answer alone does not prove it is safe.
 Do not create another Task, resubscribe to done or start polling.

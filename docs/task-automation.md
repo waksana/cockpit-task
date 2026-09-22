@@ -18,7 +18,8 @@ Registration, Task creation, optional subscription and execution are separate.
 3. Use `task_create` with `automation={script_id,parameters}` to snapshot the script
    configuration, SHA256 and typed inputs. Omit `automation` for an Agent Task.
    Creation never runs code. Script selection/input snapshots are never editable.
-4. Only if a future state enables a concrete necessary Owner action, register a
+4. Default to no subscription. Only if a future state enables a concrete necessary
+   authorized Owner action, register a
    one-shot subscription **before start**. Prefer `done` / `blocked`, adding
    `cancelled` only when necessary. There is no automatic subscription.
 5. Explicitly call `task_automation_start` with actor, stable request ID, Task ID,
@@ -55,10 +56,13 @@ Automatic subscription transitions record `event.source='automation'`,
 `source:'automation'` and `author:'automation:<run_id>'`. That author is a service
 label, not a native session to inspect, contact or treat as an Executor.
 
-Task overview/list carry runtime facts in `automation`; `definition` / `execution`
+Default Task overview/list carry runtime facts in `automation`; `definition` / `execution`
 also carry the immutable `script` / `parameters` snapshot. Runtime facts include
 run identity/state, timestamps, PID/process group, exit code/signal/error,
-cancellation request and barrier/reconciliation facts. Read `outcomes` separately.
+cancellation request and barrier/reconciliation facts. When the next action needs
+both run facts and delivery, read `overview` with `include=["automation","outcome"]`
+once; this returns the full snapshot/facts and latest complete outcome without logs.
+Use `include=["context"]` if only status/version is needed. History remains separate.
 
 `task_read(view="automation_log",task_id,offset?,limit?)` reads retained combined
 stdout/stderr, not chat. Offset defaults to 0; limit defaults to 4096, maximum 8192
@@ -68,7 +72,7 @@ nonzero omitted counts explicitly mean truncated evidence, not an empty successf
 JSON escaping can shorten a page; use returned offsets. A null next offset means
 no further retained text at that read, not that the process has finished.
 
-On an optional status notice, read the latest Task and actual outcome, then perform
+On an optional status notice, select only the latest information needed, then perform
 only still-needed authorized follow-up. Do not poll, automatically resubscribe,
 schedule monitoring or keep an Agent turn open just to watch execution.
 

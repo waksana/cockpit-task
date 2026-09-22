@@ -43,8 +43,16 @@ Linux 进程组终止屏障只由 `task_automation_reconcile` 在内核确认组
 
 完整编码流程由 Owner 准备干净最新主线、独立 branch/worktree 和 Issue，再创建关联
 且描述完整的 Task；Executor 负责开发、验证、独立审阅及授权内的 PR 合并；
-Owner 安全清理本次已合并环境并恢复主目录。必要的收尾可使用一次性 done 订阅，
-不恢复默认通知或轮询。仅讨论、仅 PR 和非 GitHub 工作保留各自边界；合并不等于部署。
+Owner 安全清理本次已合并环境并恢复主目录。例行清理可延后集中处理，不作为每项 Task
+立即订阅 done 的默认理由；保留 PR/branch/path 和资源释放证据，安全检查不省略。
+仅未来状态解锁必要且已授权的行动时订阅，不恢复默认通知或轮询。
+仅讨论、仅 PR 和非 GitHub 工作保留各自边界；合并不等于部署。
+
+单项 `task_read(view=overview,include=[...])` 可一次选择当前需要的完整内容：
+只看状态用 `["context"]`，需判断阻塞/交付时可组合 `["activity","outcome"]`；
+retro、definition、automation、cancellation 按目的选取，不默认 read-all。
+未选正文不加载，超预算明确报错；省略 include 保持旧视图，历史/日志仍分页。
+Executor 开始、恢复与要求同步仍完整读取 execution 并精确 ACK。
 
 Owner 明确选择现有可发现的 Skill/MCP 资源，以 `task_session_create` 新建并准备，
 或用 `task_session_prepare` 准备已加载空闲、无未结束 Task 的既有 Executor；

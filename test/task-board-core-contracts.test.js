@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { schemas, toolSchemas, TOOL_NAMES } from '../src/task-board/contracts.js';
+import { schemas, toolSchemas, TOOL_NAMES, READ_GROUPS } from '../src/task-board/contracts.js';
 
 const task_id = 'de33dc0a-2f93-4c5a-b14e-87111940d520';
 
@@ -33,7 +33,7 @@ test('official MCP tools/list publishes all Task read selectors and a required v
   assert.equal(schema.additionalProperties, false);
   assert.deepEqual(schema.required, ['view']);
   assert.deepEqual(Object.keys(schema.properties).sort(), [
-    'actor_session_id', 'cursor', 'executor', 'limit', 'offset', 'owner', 'query',
+    'actor_session_id', 'cursor', 'executor', 'include', 'limit', 'offset', 'owner', 'query',
     'request_id', 'revision', 'status', 'task_id', 'view',
   ].sort());
   assert.deepEqual(schema.properties.view.enum, [
@@ -43,6 +43,9 @@ test('official MCP tools/list publishes all Task read selectors and a required v
   assert.equal(schema.properties.task_id.format, 'uuid');
   assert.equal(schema.properties.limit.maximum, 8192);
   assert.equal(schema.properties.revision.minimum, 1);
+  assert.deepEqual(schema.properties.include.items.enum, READ_GROUPS);
+  assert.equal(schema.properties.include.minItems, 1);
+  assert.equal(schema.properties.include.maxItems, READ_GROUPS.length);
   for (const tool of listed.tools) assert.ok(Object.keys(tool.inputSchema.properties).length > 0, tool.name);
 });
 
@@ -52,6 +55,8 @@ test('official MCP tools/call retains strict per-view requirements despite the p
     { view: 'list' },
     { view: 'list', actor_session_id: 'executor', owner: 'owner', executor: 'executor', status: 'unfinished', query: 'word', limit: 50 },
     ...['overview', 'execution', 'definition'].map(view => ({ view, task_id })),
+    { view: 'overview', task_id, include: ['context'] },
+    { view: 'overview', task_id, include: ['activity', 'outcome', 'retro'] },
     { view: 'changelog', task_id, limit: 10, cursor: 'opaque-cursor' },
     { view: 'changelog', task_id, revision: 2 },
     { view: 'activity', task_id, limit: 10 },
@@ -70,6 +75,11 @@ test('official MCP tools/call retains strict per-view requirements despite the p
     {}, { view: 'unknown' }, { view: 'list', task_id }, { view: 'list', revision: 1 },
     { view: 'list', limit: 51 }, { view: 'list', extra: true },
     { view: 'overview' }, { view: 'overview', task_id, limit: 1 },
+    { view: 'overview', task_id, include: [] },
+    { view: 'overview', task_id, include: ['outcome', 'outcome'] },
+    { view: 'overview', task_id, include: ['summary'] },
+    { view: 'overview', task_id, include: ['activity'], cursor: 'cursor' },
+    { view: 'execution', task_id, include: ['context'] },
     { view: 'execution', task_id, owner: 'owner' },
     { view: 'definition', task_id, revision: 1 },
     { view: 'changelog', task_id, revision: 1, limit: 1 },

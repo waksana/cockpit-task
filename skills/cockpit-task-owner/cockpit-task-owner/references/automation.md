@@ -87,9 +87,12 @@ The script selection and inputs can never be edited; title/description/materials
 are also frozen while queued, starting or running. Record scope changes before
 start where permitted; changed inputs require a newly authorized Task.
 
-Default to no subscription. If a concrete necessary Owner follow-up already exists,
-subscribe **before start** so fast completion cannot race registration. Choose
-`done`, `blocked`, and only necessary `cancelled`, according to that follow-up:
+Default to no subscription, just as for Agent work. If the next necessary authorized
+Owner action needs the result, subscribe **before start** so fast completion cannot
+race registration. Completion confirmation or repeated reporting is not such an action.
+Choose only statuses that unlock that action. In this example the already-requested
+inventory decision needs success evidence or the failure reason, so it uses
+`done` and `blocked`; `cancelled` is not needed:
 
 ```json
 {
@@ -126,12 +129,24 @@ becomes `blocked` with an outcome. These are service facts, not Executor reports
 Automatic subscription transitions have `event.source='automation'`, `event.run_id`
 and `actor_session_id:null`. Outcomes have `executor:null`, `source:'automation'`
 and `author:'automation:<run_id>'`; the author is a service label, not a native session.
-On a one-shot status notice, read the latest Task and `outcomes`, then do only the
-still-necessary authorized follow-up. No automatic resubscription, polling,
+On a one-shot status notice, select only needed latest content in one bounded
+overview call where possible, then do only the still-necessary authorized follow-up.
+For the inventory decision, `include=["outcome"]` supplies the latest full result
+and current context; add `automation` only if run facts or the immutable snapshot
+are necessary:
+
+```json
+{"actor_session_id":"owner-session","view":"overview","task_id":"11111111-1111-4111-8111-111111111111","include":["outcome"]}
+```
+
+No automatic resubscription, acceptance, polling,
 scheduled monitor or turn held open waiting for completion.
 
-`task_read` exposes `kind` and `automation` runtime facts. `definition` / `execution`
-add the full stored script and parameter snapshot. Inspect run state, exit code,
+`task_read` without `include` preserves existing views. Select `automation` on
+overview for the full stored script/parameter snapshot and run facts, without logs;
+`definition` / `execution` also retain the snapshot. See
+[selective reads](reading-tasks.md#select-the-latest-content-for-the-decision).
+Inspect run state, exit code,
 signal, error, cancellation and barrier separately from Task status.
 Read retained combined stdout/stderr only for a concrete question:
 

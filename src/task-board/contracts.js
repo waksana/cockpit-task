@@ -13,7 +13,7 @@ export class TaskError extends Error {
 export const LIMITS = Object.freeze({
   description: 24000, activity: 4000, outcome: 8000, retro: 2000, metadata: 8000,
   references: 20, excerpt: 320, list: 50, history: 10,
-  page: 24000, definitionPayload: 64000, reportPayload: 16000,
+  page: 24000, selection: 48000, definitionPayload: 64000, reportPayload: 16000,
 });
 export const definitionFits = ({ description, references = [], metadata = {} }) =>
   JSON.stringify({ description, references, metadata }).length <= LIMITS.definitionPayload;
@@ -86,6 +86,10 @@ export const scriptSchema = z.strictObject({
   })).max(32).refine(values => new Set(values.map(value => value.name)).size === values.length, 'Parameter names must be unique'),
 }).refine(value => JSON.stringify(value).length <= 12000, 'Script registration exceeds 12000 characters');
 export const TASK_STATUSES = Object.freeze(['todo', 'in_progress', 'blocked', 'in_review', 'done', 'cancelled']);
+export const READ_GROUPS = Object.freeze(['context', 'activity', 'outcome', 'retro', 'definition', 'automation', 'cancellation']);
+const readInclude = z.array(z.enum(READ_GROUPS)).min(1).max(READ_GROUPS.length)
+  .refine(values => new Set(values).size === values.length, 'Include groups must be unique')
+  .describe('overview only: select complete latest content groups instead of default excerpts. Context is always returned; ["context"] reads only status/identity/version/write_context. No histories or logs. Unique, nonempty; 48000 serialized JSON character result budget, explicit RESULT_TOO_LARGE on overflow.');
 export const schemas = {
   task_read: z.discriminatedUnion('view', [
     z.strictObject({
@@ -93,7 +97,8 @@ export const schemas = {
       status: z.enum(['todo', 'in_progress', 'blocked', 'in_review', 'done', 'cancelled', 'unfinished', 'all']).optional(),
       query: text(200).optional(), limit: z.number().int().min(1).max(LIMITS.list).optional(), cursor: text(2000).optional(),
     }),
-    ...['overview', 'execution', 'definition'].map(taskRead),
+    taskRead('overview').extend({ include: readInclude.optional() }),
+    ...['execution', 'definition'].map(taskRead),
     z.strictObject({ ...readActor, view: z.literal('changelog'), task_id: id, ...pagination, revision: revision.optional() })
       .refine(x => x.revision === undefined || (x.cursor === undefined && x.limit === undefined), 'A revision selector cannot be paginated'),
     ...['activity', 'outcomes', 'subscriptions'].map(view => z.strictObject({ ...readActor, view: z.literal(view), task_id: id, ...pagination })),
@@ -151,7 +156,8 @@ export const schemas = {
 const readToolSchema = z.strictObject({
   ...readActor,
   view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'subscriptions', 'automation_log', 'operation']),
-  task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes and subscriptions'),
+  task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes, subscriptions and automation_log'),
+  include: readInclude.optional(),
   request_id: request.optional().describe('Required only for the operation view'),
   owner: session.optional().describe('List filter only'),
   executor: session.optional().describe('List filter only'),

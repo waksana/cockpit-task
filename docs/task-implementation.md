@@ -283,17 +283,39 @@ work records its outcome. There is no exactly-once guarantee for host prompt.
 
 Read views are fixed, not arbitrary projections:
 `list`, `overview`, `execution`, `definition`, `changelog`, `activity`, `outcomes`,
-`subscriptions`, `operation`. Owner defaults to explicit owner-filtered list and
-overview; Executor defaults to execution. These are information defaults, not ACLs.
+`subscriptions`, `automation_log`, `operation`. Owner discovers through an explicit
+owner-filtered list and selects single-Task content by purpose; Executor reads full
+execution requirements at start/resumption and synchronization checkpoints.
+These are information choices, not ACLs.
 Full current description appears in execution/definition or a selected changelog
-revision, never silently truncated into an overview.
+revision, and optionally in overview's selected definition, never silently truncated.
+
+`overview` accepts optional `include`, a nonempty unique allowlist of at most seven
+groups: context, activity, outcome, retro, definition, automation, cancellation.
+It cannot mix with other views or pagination/revision selectors. Omission preserves
+all existing response shapes. Context is always returned; `["context"]` reads only
+identity/status/revision/ACK/timestamps/write_context/kind. Other groups are opt-in:
+latest complete activity/outcome (null if absent), latest recorded retro, current
+definition/materials, full automation snapshot/facts without logs, cancellation.
+Outcome excludes unselected retro. Records retain revision/current/source and
+attribution; current is a revision comparison, not proof of delivery.
+
+Selection uses a single deferred SQLite read transaction and explicit column
+projections, including a body-free definition-check query. No unselected bodies,
+histories or logs are loaded. The response's definition_check remains a separate
+fresh checkpoint and may observe a newer revision after the read transaction.
+The result has a fixed 48,000 serialized JSON character budget including escaping,
+excluding the envelope/check. Overflow yields RESULT_TOO_LARGE (413) with selected
+group sizes, not truncated content; narrow include or use existing complete
+definition/execution and history/log pagination. No cache, saved snapshot or new
+cursor lifecycle is introduced.
 
 Execution/definition return an independent latest recorded `retro`; each outcomes
 history item has its own retro projection:
 `{status:'recorded',text:string|null,revision,executor,author,source:'reported',at,outcome_id,current,has_findings}`.
 `has_findings` means text is non-null, not that its contents are useful.
 Null text means explicit no findings. Missing records yield `{status:'not_recorded'}`;
-automation yields `{status:'not_applicable'}`. Overview/list omit text while
+automation yields `{status:'not_applicable'}`. Default overview/list omit text while
 retaining status and attribution. Owner may read on demand, without required review.
 
 | Data | Bound |
@@ -309,6 +331,7 @@ retaining status and attribution. Owner may read on demand, without required rev
 | Overview activity excerpt | 320 characters with explicit `truncated` |
 | List / history item counts | Default 20 / 5; maximum 50 / 10 |
 | List/history page payload | 24,000 serialized characters, cursor for every remainder |
+| Selected overview result | 48,000 serialized characters; explicit error and group sizes on overflow |
 
 Page budgets exclude the envelope and definition check; requested counts are
 upper bounds, not guarantees. Opaque keyset cursors are tied to view/filter/Task.

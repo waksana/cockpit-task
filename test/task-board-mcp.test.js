@@ -10,7 +10,7 @@ import { z } from 'zod/v4';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { assignExecutor } from '../src/task-board/operations.js';
 import { createMcpRoutes } from '../src/task-board/mcp.js';
-import { toolSchemas } from '../src/task-board/contracts.js';
+import { toolSchemas, READ_GROUPS } from '../src/task-board/contracts.js';
 import { TaskService } from '../src/task-board/service.js';
 import { TaskStore } from '../src/task-board/store.js';
 
@@ -91,6 +91,12 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     assert.match(descriptions.task_read, /list, explicitly filter by owner or executor/);
     assert.match(descriptions.task_read, /actor_session_id.*not an automatic list filter or authentication/);
     assert.match(descriptions.task_read, /Reads never acknowledge/);
+    const readSchema = tools.find(tool => tool.name === 'task_read').inputSchema;
+    assert.deepEqual(readSchema.properties.include.items.enum, READ_GROUPS);
+    assert.equal(readSchema.properties.include.minItems, 1);
+    assert.equal(readSchema.properties.include.maxItems, READ_GROUPS.length);
+    assert.match(readSchema.properties.include.description, /overview only.*48000.*RESULT_TOO_LARGE/);
+    assert.match(descriptions.task_read, /overview\+include.*one consistent read/);
     assert.match(descriptions.task_assign, /send one assigned reference/);
     assert.match(descriptions.task_assign, /without installing capability or proactively interrupting/);
     assert.match(descriptions.task_assign, /not atomic.*queued or unconfirmed/);
@@ -109,6 +115,91 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     assert.match(descriptions.task_unsubscribe, /Cannot recall a consumed notification/);
     assert.match(descriptions.task_unsubscribe, /planned Owner follow-up is no longer needed/);
   } finally { await f.close(); }
+});
+
+test('a status notification needs only one selective MCP read for done, blocked and absent outcomes', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'task-selective-mcp-'));
+  const store = new TaskStore(root), sent = [], reads = [];
+  const service = new TaskService(store, {
+    ownerExists: async () => true,
+    async send(owner, text) { sent.push({ owner, text }); return { ok: true, queued: false }; },
+  });
+  const f = fixture((name, input, options) => {
+    if (name === 'task_read') reads.push(input);
+    return service.execute(name, input, options);
+  }, undefined, toolSchemas);
+  try {
+    await f.connect();
+    for (const [index, status, hasOutcome] of [[0, 'done', true], [1, 'blocked', true], [2, 'blocked', false]]) {
+      const created = store.executeLocal('task_create', {
+        actor_session_id: 'owner', request_id: `create-${index}`, owner: 'owner', title: 'Selective notification', description: 'Synthetic only',
+      });
+      const assignment = {
+        actor_session_id: 'owner', request_id: `assign-${index}`, task_id: created.task_id,
+        revision: 1, write_context: created.write_context, executor: `executor-${index}`,
+      };
+      store.reserveOperation('task_assign', assignment);
+      const task = store.bindAssignment(assignment);
+      const base = { task_id: task.task_id, revision: 1, write_context: task.write_context, actor_session_id: task.executor };
+      store.executeLocal('task_ack', { ...base, request_id: `ack-${index}` });
+      const { revision, ...subscription } = base;
+      store.executeLocal('task_subscribe', { ...subscription, request_id: `subscribe-${index}`, statuses: [status] });
+      const text = `${'Full activity. '.repeat(80)}${status === 'blocked' ? 'Asked the user directly; no Owner relay needed.' : 'Delivered.'}`;
+      const report = await f.client.callTool({ name: 'task_report', arguments: {
+        ...base, request_id: `report-${index}`, status, activity: { text },
+        ...(hasOutcome ? { outcome: { summary: `Result ${index}` } } : {}),
+        ...(status === 'done' ? { retro: null } : {}),
+      } });
+      assert.notEqual(report.isError, true);
+      assert.equal(sent.length, index + 1);
+      assert.deepEqual(sent[index], { owner: 'owner', text: `[Task status updated](task:${task.task_id}?event=status_changed)` });
+      const count = reads.length;
+      const response = await f.client.callTool({ name: 'task_read', arguments: {
+        view: 'overview', task_id: task.task_id, actor_session_id: 'owner', include: ['activity', 'outcome', 'retro'],
+      } });
+      assert.notEqual(response.isError, true);
+      assert.equal(reads.length, count + 1);
+      const selected = response.structuredContent.result;
+      assert.equal(selected.status, status);
+      assert.equal(selected.activity.text, text);
+      assert.equal(selected.activity.current, true);
+      if (hasOutcome) assert.equal(selected.outcome.summary, `Result ${index}`);
+      else assert.equal(selected.outcome, null);
+      assert.deepEqual(selected.retro.status, status === 'done' ? 'recorded' : 'not_recorded');
+      assert.equal('description' in selected, false);
+      assert.deepEqual(JSON.parse(response.content[0].text), response.structuredContent);
+      const context = await f.client.callTool({ name: 'task_read', arguments: {
+        view: 'overview', task_id: task.task_id, include: ['context'],
+      } });
+      assert.equal(context.structuredContent.result.status, status);
+      for (const key of ['activity', 'outcome', 'retro']) assert.equal(key in context.structuredContent.result, false);
+      for (const invalid of [{ include: ['outcome', 'outcome'] }, { view: 'execution', include: ['outcome'] }, { include: ['summary'] }]) {
+        const rejected = await f.client.callTool({ name: 'task_read', arguments: {
+          view: 'overview', task_id: task.task_id, actor_session_id: task.executor, ...invalid,
+        } });
+        assert.equal(rejected.isError, true);
+        assert.equal(rejected.structuredContent.error.code, 'INVALID_INPUT');
+        assert.equal(rejected.structuredContent.definition_check.status, 'checked');
+      }
+    }
+    const large = store.executeLocal('task_create', {
+      actor_session_id: 'owner', request_id: 'large-definition', owner: 'owner',
+      title: 'Large definition', description: '\u0001'.repeat(9000),
+    });
+    const oversized = await f.client.callTool({ name: 'task_read', arguments: {
+      view: 'overview', task_id: large.task_id, include: ['definition', 'outcome'],
+    } });
+    assert.equal(oversized.isError, true);
+    assert.equal(oversized.structuredContent.error.code, 'RESULT_TOO_LARGE');
+    assert.equal(oversized.structuredContent.error.status, 413);
+    assert.ok(oversized.structuredContent.result.group_characters.definition > 48000);
+    assert.equal('definition' in oversized.structuredContent.result, false);
+    assert.equal(oversized.structuredContent.definition_check.status, 'checked');
+  } finally {
+    await f.close();
+    service.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('real MCP completion never defaults missing retro and persists text or null exactly once', async () => {
@@ -195,6 +286,20 @@ test('official MCP discovers, registers and executes an automation Task without 
     const log = await call('task_read', { view: 'automation_log', task_id: created.task_id, offset: 0, limit: 8192 });
     assert.match(log.text, /mcp automation literal/);
     assert.equal((await call('task_read', { view: 'outcomes', task_id: created.task_id })).items[0].source, 'automation');
+    const prepare = store.db.prepare.bind(store.db), queries = [];
+    store.db.prepare = sql => { queries.push(sql); return prepare(sql); };
+    const selected = await call('task_read', {
+      view: 'overview', task_id: created.task_id, include: ['automation', 'outcome', 'retro', 'activity'],
+    });
+    store.db.prepare = prepare;
+    assert.deepEqual(selected.automation, execution.automation);
+    assert.equal(selected.outcome.source, 'automation');
+    assert.equal(selected.outcome.executor, null);
+    assert.equal(selected.outcome.run_id, execution.automation.run_id);
+    assert.equal(selected.outcome.current, true);
+    assert.deepEqual(selected.retro, { status: 'not_applicable' });
+    assert.equal(selected.activity, null);
+    for (const query of queries) assert.doesNotMatch(query, /\*|\blog\b/);
     assert.deepEqual(errors, []);
   } finally {
     await f.close();

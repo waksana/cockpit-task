@@ -42,9 +42,9 @@ function fixture() {
     get meta() { return meta; },
     set capability(value) { capability = value; },
     get invalidations() { return invalidations; },
-    async read(taskId, view = 'execution') {
+    async read(taskId, view = 'execution', fields = {}) {
       return module.routes.find(route => route.path === '/read').handler({
-        body: { task_id: taskId, view }, signal: controller.signal,
+        body: { task_id: taskId, view, ...fields }, signal: controller.signal,
       });
     },
     async native(taskId) {
@@ -90,6 +90,65 @@ test('HTTP completion requires explicit valid retro with atomic effects and dura
       assert.equal(outcome.retro.text, retro);
       assert.equal(outcome.summary, 'Delivered');
     }
+    assert.deepEqual(f.errors, []);
+  } finally { f.close(); }
+});
+
+test('HTTP selective reads preserve legacy defaults, errors, revision checks and exact chosen groups', async () => {
+  const f = fixture();
+  try {
+    const create = await f.write('task_create', { title: 'Selective HTTP', description: 'Synthetic only', owner: 'owner' });
+    const id = create.body.result.task_id;
+    let task = (await f.read(id)).body.result;
+    await f.write('task_assign', { task_id: id, revision: 1, executor: 'executor', write_context: task.write_context });
+    task = (await f.read(id)).body.result;
+    const base = { task_id: id, revision: 1, write_context: task.write_context };
+    const fresh = await f.read(id, 'overview', { include: ['activity', 'outcome', 'retro'] });
+    assert.equal(fresh.status, 200);
+    assert.equal(fresh.body.result.activity, null);
+    assert.equal(fresh.body.result.outcome, null);
+    assert.deepEqual(fresh.body.result.retro, { status: 'not_recorded' });
+    assert.equal(fresh.body.definition_check.tasks[0].needs_ack, true);
+    await f.write('task_ack', base);
+    const text = `${'Activity '.repeat(90)}Asked the user directly.`;
+    const blocked = await f.write('task_report', { ...base, status: 'blocked', activity: { text } });
+    const selected = await f.read(id, 'overview', { include: ['activity', 'outcome'] });
+    assert.equal(selected.body.result.status, 'blocked');
+    assert.equal(selected.body.result.activity.text, text);
+    assert.equal(selected.body.result.outcome, null);
+    assert.equal('retro' in selected.body.result, false);
+    const legacy = await f.read(id, 'overview');
+    assert.equal(legacy.body.result.activity.truncated, true);
+    assert.deepEqual(legacy.body.result.outcome, { available: false });
+    const done = await f.write('task_report', {
+      ...base, write_context: blocked.body.result.write_context, status: 'done',
+      outcome: { summary: 'Delivered' }, retro: null,
+    });
+    assert.equal(done.status, 200);
+    const edited = await f.write('task_edit', {
+      ...base, write_context: done.body.result.write_context, reason: 'Revised definition after completion',
+      description: '\u0001'.repeat(9000),
+    });
+    assert.equal(edited.status, 200);
+    const revised = await f.read(id, 'overview', { include: ['outcome', 'retro'] });
+    assert.equal(revised.body.result.revision, 2);
+    assert.equal(revised.body.result.outcome.current, false);
+    assert.equal(revised.body.result.retro.current, false);
+    assert.equal(revised.body.result.retro.text, null);
+    assert.equal(revised.body.definition_check.tasks[0].revision, 2);
+    const context = await f.read(id, 'overview', { include: ['context'] });
+    for (const field of ['description', 'outcome', 'activity', 'retro']) assert.equal(field in context.body.result, false);
+    const oversized = await f.read(id, 'overview', { include: ['definition', 'outcome'] });
+    assert.equal(oversized.status, 413);
+    assert.equal(oversized.body.error.code, 'RESULT_TOO_LARGE');
+    assert.ok(oversized.body.result.group_characters.definition > 48000);
+    assert.equal(oversized.body.definition_check.status, 'checked');
+    for (const fields of [{ include: [] }, { include: ['retro', 'retro'] }, { include: ['outcome'], limit: 1 }]) {
+      const rejected = await f.read(id, 'overview', fields);
+      assert.equal(rejected.status, 400);
+      assert.equal(rejected.body.error.code, 'INVALID_INPUT');
+    }
+    assert.equal((await f.read(id, 'execution', { include: ['context'] })).status, 400);
     assert.deepEqual(f.errors, []);
   } finally { f.close(); }
 });
