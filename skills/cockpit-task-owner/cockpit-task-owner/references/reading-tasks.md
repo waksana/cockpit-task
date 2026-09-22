@@ -2,16 +2,17 @@
 
 Read this when view selection, a returned field or a truncated excerpt needs
 explanation. Familiar reads do not require reloading it. These are the implemented
-`task_read` projections, not a new Owner-specific API or a proposed fields engine.
+`task_read` projections, including opt-in overview groups, not an arbitrary fields engine.
 
 ## Owner's default view
 
 For an overview of your work, use `view=list` with `owner` set to your session ID.
-For one Task, use `view=overview` with its `task_id`.
+For one Task, use `view=overview` with its `task_id` and select only needed groups
+with `include`. Context alone is `include=["context"]`.
 Include your own `actor_session_id` on reads. This is reported attribution and
 definition-reminder context; it is not authentication or an automatic owner filter.
 
-The single-Task overview contains:
+Without `include`, the single-Task overview retains its existing compact shape:
 
 | Fields | Meaning |
 | --- | --- |
@@ -28,7 +29,7 @@ The single-Task overview contains:
 | `cancellation` | Reason, author and time when cancelled; single overview only |
 
 List items use the same compact projection without the cancellation detail.
-Neither view includes `description`, `references`, `metadata`, full outcome text,
+These legacy projections omit `description`, `references`, `metadata`, full outcome text,
 all activities or the definition history. List pagination does not expand every
 Task into its execution view.
 
@@ -37,14 +38,82 @@ currently reading, stuck or idle. `outcome.current` only compares its revision
 with the current definition. An available/current outcome can still be partial;
 combine its actual text with Task status and requirements before claiming delivery.
 
+## Select the latest content for the decision
+
+`include` is valid only with `view="overview"`: a nonempty array of at most seven
+unique group names from `context`, `activity`, `outcome`, `retro`, `definition`,
+`automation`, `cancellation`. Unknown names, duplicates, empty arrays and use with
+other views are invalid. Omitting `include` preserves every existing view's shape.
+This selects content groups, not arbitrary columns or a role-dependent projection.
+
+Every selected response includes compact current context: `id`, `task_id`, `title`,
+`owner`, `executor`, `status`, `revision`, `acknowledged_revision`, `created_at`,
+`updated_at`, `write_context`, `kind`. Context is always returned even if not explicit;
+`include=["context"]` returns only that context.
+
+| Group | Additional content |
+| --- | --- |
+| `activity` | Latest complete activity record or null, not the legacy excerpt |
+| `outcome` | Latest complete outcome record or null, including result references, excluding nested retro |
+| `retro` | Independent completion reflection, with text including explicit null and provenance |
+| `definition` | Current full description, references and metadata nested with revision, author, at, source and current |
+| `automation` | Full immutable script/parameter snapshot and run facts, or null; no logs |
+| `cancellation` | Cancellation object or null |
+
+Activity/outcome records retain IDs, revision, `current`, source, author, Executor
+and `at`; `current` compares revisions, not truth or delivery quality. Retro uses
+`not_recorded`, `not_applicable` or `recorded`; the latest recorded retro is independent
+of the latest outcome. Selecting outcome does not implicitly select retro.
+Definition author and `at` identify the description revision, not later material edits.
+
+Choose groups from the decision that prompted the read. A notice is only a pointer:
+read necessary latest content in one bounded call where possible, not a fixed
+overview-plus-outcomes sequence, speculative outcomes-then-activity, or every group.
+These are independent synthetic `task_read` examples, not a checklist:
+
+Status/assignment question, with no body needed:
+
+```json
+{"actor_session_id":"owner-session","view":"overview","task_id":"11111111-1111-4111-8111-111111111111","include":["context"]}
+```
+
+A done notice unlocks an already-authorized decision needing delivery evidence:
+
+```json
+{"actor_session_id":"owner-session","view":"overview","task_id":"11111111-1111-4111-8111-111111111111","include":["outcome"]}
+```
+
+A specific diagnosis needs both the latest blocker activity and partial result:
+
+```json
+{"actor_session_id":"owner-session","view":"overview","task_id":"11111111-1111-4111-8111-111111111111","include":["activity","outcome"]}
+```
+
+A concrete reflection question needs the recorded findings, not routine acceptance:
+
+```json
+{"actor_session_id":"owner-session","view":"overview","task_id":"11111111-1111-4111-8111-111111111111","include":["retro"]}
+```
+
+All selected content comes from one SQLite read transaction. Unselected bodies,
+logs and histories are not retrieved. The result has a fixed 48,000 serialized
+JSON character budget. An oversized result returns explicit `RESULT_TOO_LARGE`
+(413) with group sizes, not truncation, a cursor or a cached continuation. Narrow
+the groups or use existing full `execution` / `definition` views or bounded history
+and log pages as appropriate to the question; do not loop through everything.
+
+`definition_check` is unchanged and reads never ACK. Executor still reads full
+`execution` at start, resume and checkpoints and ACKs the exact current revision.
+Selecting `definition` or any other overview groups cannot replace that requirement.
+
 ## Expand for a specific question
 
 | Need | View |
 | --- | --- |
 | Current full agreement before editing | `definition` |
 | Assigned work before execution or at a synchronization checkpoint | `execution` |
-| Exact recent progress or an excerpt's full text | `activity` |
-| Actual result text and result references | `outcomes` |
+| Latest full progress/result | `overview` with only needed `include` groups |
+| Earlier progress or results | `activity` / `outcomes` histories |
 | Why requirements changed | `changelog` |
 | Complete text of one past definition | `changelog` with `revision` |
 | Whether a failed or uncertain request had an effect | `operation` with `request_id` |
@@ -65,14 +134,15 @@ includes its own retro, without changing the saved outcome content:
 - `{status:"not_applicable"}` is the script-automation path, with no Agent retro.
 
 `has_findings` distinguishes non-null text from explicit no findings, not quality.
-Overview/list return the same status and attribution without `text`. A later
+Without `include`, overview/list return the same status and attribution without `text`. A later
 description edit preserves the recorded revision and sets `current:false`.
 Recorded/current is not proof of thought, quality or delivery. Owner may read
 text on demand, with no required review or new notification; retro does not
 replace outcome/blockers or authorize improvements or scope expansion.
 
 For automation, `definition` / `execution` also include immutable `automation.script`
-and `automation.parameters`; overview/list contain runtime facts only. Inspect run
+and `automation.parameters`; overview without `include` and lists contain runtime
+facts only. Inspect run
 state, exit code/signal/error, cancellation request and barrier independently of Task
 status. Service-generated outcomes have automation provenance and a run ID, not a
 fabricated Executor: `executor:null`, `source:'automation'`,
@@ -100,7 +170,7 @@ same view, Task and filters.
 Use `task_read(view=subscriptions)` only for a concrete subscription question.
 Follow its schema and returned pagination cursor; do not poll while waiting.
 A subscription/delivery record is not proof the Owner read a notice or the Task
-is now complete. Re-read current Task state and actual outcomes to assess delivery.
+is now complete. Select the latest evidence needed for the planned decision.
 See [subscription handling](task-writes-and-recovery.md#one-shot-status-subscriptions)
 for the one-shot lifecycle and uncertain effects.
 
@@ -122,8 +192,8 @@ can still record an unknown external effect. Use
 
 ## Projection and response boundaries
 
-Views are fixed response projections selected by the caller. There is no arbitrary
-`fields` selector and no automatic restriction based on the caller's role. Having
+Views retain their existing projections; overview alone supports opt-in content
+groups. There is no arbitrary `fields` selector and no automatic restriction based on the caller's role. Having
 selected Owner does not force `overview`, and `actor_session_id` does not select
 only that session's owned Tasks.
 

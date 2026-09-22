@@ -47,6 +47,8 @@ Task ACK that revision; unchanged text or metadata-only edits do not.
 ## ACK, activity and delivery
 
 `task_ack` confirms a revision without starting execution or adding activity.
+Executor reads full `execution` at start, resume and checkpoints before confirming
+the exact current revision; selected overview groups never replace that read.
 It does not send messages. An already-confirmed current revision needs no duplicate
 ACK. Report actual status changes explicitly with `task_report`; activity alone
 does not change status, and outcome alone does not mark done.
@@ -194,7 +196,8 @@ An accepted message is not an ACK or evidence of actual work.
 ## One-shot status subscriptions
 
 Default to no subscription. Owner registers only when a future state enables a
-concrete, necessary Owner follow-up, not simply to track progress or know completion.
+concrete, necessary authorized Owner follow-up, not simply to track progress, know
+completion or repeat a report.
 For example, evidence may be needed for an Owner decision or another authorized
 independent Task; a standalone delivery with no Owner action needs no wait.
 Owner judges this need without asking the user to name or approve the subscription.
@@ -203,6 +206,8 @@ Choose the fewest target states that enable the needed action. If that action is
 no longer needed, withdraw the still-waiting subscription instead of retaining a
 completion reminder. Executor's authorized work never waits for Owner to subscribe
 or read a notice.
+An Executor's direct user question, even when blocked, stays in that session;
+Owner does not subscribe to relay it or turn it into an acceptance step.
 
 Owner can explicitly register with `task_subscribe`, withdraw with `task_unsubscribe`,
 and inspect records with `task_read(view=subscriptions)`. Use current tool schemas
@@ -224,7 +229,12 @@ The system sends a separate `status_changed` card to the Owner as a new prompt.
 It does not keep the subscribing turn suspended; host enqueue queues it when busy
 without interrupting. This is not the `updated` handoff to Executor: do not clear
 queues, interrupt work or request a notification ACK for a status subscription.
-Read the current Task on receipt and reassess the planned follow-up; act only if
+Read only necessary latest content on receipt in one bounded
+`task_read(view=overview, include=[...])` call where possible, choosing groups for
+the decision, not a fixed bundle. Use `["outcome"]` for delivery evidence,
+`["activity","outcome"]` only when diagnosis needs both, or `["context"]` for status.
+See [selective reads](reading-tasks.md#select-the-latest-content-for-the-decision)
+for the group and size contract. Reassess the planned follow-up; act only if
 it is still needed and authorized; do not automatically resubscribe or turn this
 into ongoing monitoring.
 

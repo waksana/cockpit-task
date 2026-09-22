@@ -141,8 +141,8 @@ export class TaskStore {
   }
 
   close() { this.db.close(); }
-  transaction(fn) {
-    this.db.exec('BEGIN IMMEDIATE');
+  transaction(fn, { readOnly = false } = {}) {
+    this.db.exec(readOnly ? 'BEGIN' : 'BEGIN IMMEDIATE');
     try { const result = fn(); this.db.exec('COMMIT'); return result; }
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
@@ -168,12 +168,18 @@ export class TaskStore {
     if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Terminal Tasks cannot accept execution or acknowledgement');
     if (!row.executor) fail('ASSIGNMENT_REQUIRED', 'Task has no fixed Executor');
   }
-  summary(row) {
+  identity(row) {
     return {
       id: row.id, task_id: row.id, title: row.title, owner: row.owner, executor: row.executor,
       status: row.status, revision: row.revision, acknowledged_revision: row.acknowledged_revision,
       created_at: row.created_at, updated_at: row.updated_at, write_context: this.context(row),
-      kind: row.kind, automation: row.kind === 'automation' ? this.automation.project(this.automation.run(row.id)) : null,
+      kind: row.kind,
+    };
+  }
+  summary(row) {
+    return {
+      ...this.identity(row),
+      automation: row.kind === 'automation' ? this.automation.project(this.automation.run(row.id)) : null,
     };
   }
   task(id) {
@@ -557,6 +563,55 @@ export class TaskStore {
     ).get(row.id);
     return this.retro(row, outcome, includeText);
   }
+  selected(input) {
+    const include = new Set(input.include);
+    // Explicit projections keep unrequested bodies out of the read, not just the response.
+    const columns = [
+      'id', 'title', 'owner', 'executor', 'status', 'revision', 'acknowledged_revision',
+      'created_at', 'updated_at', 'lifecycle', 'editable', 'kind',
+      ...(include.has('definition') ? ['description', 'refs', 'metadata'] : []),
+      ...(include.has('cancellation') ? ['cancellation'] : []),
+    ];
+    const row = this.db.prepare(`SELECT ${columns.join(',')} FROM tasks WHERE id=?`).get(input.task_id);
+    if (!row) fail('TASK_NOT_FOUND', `Task ${input.task_id} does not exist`, 404);
+    const result = this.identity(row);
+    if (include.has('activity')) {
+      const entry = this.db.prepare('SELECT id,task_id,revision,executor,author,text,at FROM activities WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
+      result.activity = entry ? { ...entry, current: entry.revision === row.revision, source: 'reported' } : null;
+    }
+    if (include.has('outcome')) {
+      const entry = this.db.prepare('SELECT id,task_id,revision,executor,author,summary,refs,at,run_id FROM outcomes WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
+      if (entry) {
+        const { refs, ...fields } = entry;
+        result.outcome = {
+          ...fields, references: JSON.parse(refs), current: entry.revision === row.revision,
+          source: entry.run_id ? 'automation' : 'reported',
+        };
+      } else result.outcome = null;
+    }
+    if (include.has('retro')) result.retro = this.latestRetro(row, true);
+    if (include.has('definition')) {
+      const entry = this.db.prepare('SELECT revision,author,at FROM definitions WHERE task_id=? AND revision=?').get(row.id, row.revision);
+      result.definition = {
+        ...entry, source: 'reported', current: true, description: row.description,
+        references: JSON.parse(row.refs), metadata: JSON.parse(row.metadata),
+      };
+    }
+    if (include.has('automation')) result.automation = row.kind === 'automation'
+      ? this.automation.project(this.automation.run(row.id, { includeLog: false }), true) : null;
+    if (include.has('cancellation')) result.cancellation = row.cancellation ? JSON.parse(row.cancellation) : null;
+    const size = JSON.stringify(result).length;
+    if (size > LIMITS.selection) {
+      const { activity, outcome, retro, definition, automation, cancellation, ...context } = result;
+      const groups = { context, activity, outcome, retro, definition, automation, cancellation };
+      fail('RESULT_TOO_LARGE', 'Selected content exceeds 48000 serialized JSON characters; narrow include or use existing definition/execution and paginated history/log views', 413, {
+        task_id: row.id, include: input.include, max_characters: LIMITS.selection, serialized_characters: size,
+        group_characters: Object.fromEntries(Object.entries(groups)
+          .filter(([, value]) => value !== undefined).map(([key, value]) => [key, JSON.stringify(value).length])),
+      });
+    }
+    return result;
+  }
   cursor(input, scope) {
     if (!input.cursor) return Number.MAX_SAFE_INTEGER;
     const value = decode(input.cursor, 'INVALID_CURSOR');
@@ -583,6 +638,7 @@ export class TaskStore {
   }
   read(rawInput) {
     const input = parseInput('task_read', rawInput);
+    if (input.include) return this.transaction(() => this.selected(input), { readOnly: true });
     if (input.view === 'operation') return this.operation(input.request_id);
     if (input.view === 'list') {
       const { owner, executor, query, status = 'unfinished' } = input;
@@ -630,7 +686,7 @@ export class TaskStore {
   }
   definitionCheck({ task_id, actor_session_id } = {}) {
     try {
-      const rows = this.db.prepare("SELECT * FROM tasks WHERE id=? OR (executor=? AND status NOT IN ('done','cancelled'))")
+      const rows = this.db.prepare("SELECT id,executor,status,revision,acknowledged_revision FROM tasks WHERE id=? OR (executor=? AND status NOT IN ('done','cancelled'))")
         .all(task_id ?? null, actor_session_id ?? null);
       if (task_id && !rows.some(row => row.id === task_id)) fail('TASK_NOT_FOUND', `Task ${task_id} does not exist`, 404);
       if (!rows.length) return { status: 'not_applicable', tasks: [] };

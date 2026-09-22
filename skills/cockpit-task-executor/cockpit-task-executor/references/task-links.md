@@ -16,7 +16,7 @@ Replace `<uuid>` with the actual Task ID. Tool inputs take only that UUID, not t
 whole URI or its query. Do not copy the Task description into a dispatch message
 or send a second assignment after `task_assign`.
 
-For `assigned` or `updated`, as the assigned Executor, read the current Task, confirm assignment and valid
+For `assigned` or `updated`, as the assigned Executor, read full current `execution`, confirm assignment and valid
 execution state, and ACK its exact current revision if not already acknowledged.
 A delayed or duplicated notice does not authorize restarting a terminal Task or
 taking over someone else's assignment. The notice identifies why it was sent,
@@ -26,9 +26,13 @@ summaries do not override the current agreement.
 `status_changed` is a separate system card for the Owner's one-shot subscription,
 not an Executor instruction or a request to ACK a notification. It is distinct from
 `updated`, which asks Executor to read and ACK the current definition.
-Owner reads the latest Task and relevant outcome before deciding any follow-up;
-receiving the card does not establish complete delivery. It does not authorize
-automatic resubscription, polling or manual Executor messages to Owner.
+Owner selects only the latest content needed for the authorized follow-up, in one
+bounded overview call where possible: `include=["outcome"]` for delivery evidence,
+`["activity","outcome"]` only if diagnosis needs both, or `["context"]` for status.
+See [selective reads](reading-tasks.md#select-the-latest-content-for-the-decision);
+there is no universal read bundle. Receiving the card does not establish complete
+delivery or authorize automatic resubscription, acceptance, polling or manual
+Executor messages to Owner. A blocked Executor's user question is not an Owner relay.
 
 Only lowercase `assigned`, `updated` and `status_changed` are supported event values. Event metadata
 belongs to the message/reference, not a Task status, type or action to execute.

@@ -41,8 +41,11 @@ export function scriptArguments(script, parameters) {
 
 export class AutomationStore {
   constructor(store) { this.store = store; this.db = store.db; }
-  run(taskId) {
-    const row = this.db.prepare('SELECT * FROM automation_runs WHERE task_id=?').get(taskId);
+  run(taskId, { includeLog = true } = {}) {
+    const row = this.db.prepare(includeLog ? 'SELECT * FROM automation_runs WHERE task_id=?'
+      : `SELECT run_id,task_id,script_id,script,parameters,state,revision,queued_at,started_at,finished_at,
+        pid,process_group,exit_code,signal,error,barrier,cancel_requested,reconciled_at,reconciled_by,reconciliation_reason
+        FROM automation_runs WHERE task_id=?`).get(taskId);
     if (!row) fail('NOT_AUTOMATION', 'This operation requires an automation Task');
     return row;
   }

@@ -43,7 +43,7 @@ followed by:
 
 ```text
 [Task updated](task:<uuid>?event=updated)
-Read the current Task and acknowledge its latest revision before continuing.
+Read the full current Task execution view and acknowledge its exact revision before continuing.
 ```
 
 Use the real Task UUID. Omit the summary only if there was no pending context.

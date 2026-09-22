@@ -49,7 +49,9 @@ Non-coding work keeps its own methods.
 
 Requirements can change silently. At start, on resumption, between stages, before
 consequential actions and before delivery, read the latest Task. Understand its
-complete definition and ACK the exact current revision if not already acknowledged.
+complete requirements with `task_read(view=execution)` and ACK the exact current
+revision if not already acknowledged. Selective overview reads never replace this
+execution read or precise ACK; use them only for other focused evidence questions.
 ACK neither changes status nor creates activity; explicitly report `in_progress`
 when execution starts.
 

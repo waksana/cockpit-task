@@ -76,7 +76,8 @@ Non-coding work and discussion do not trigger that flow.
 Keep approved scope, constraints and delivery expectations in Task's current definition so requirements and results share one record. Distinguish decisions
 from proposals/quotations; record change reasons, sources and superseded decisions.
 Executors ask users directly and update requirements in their own sessions.
-Do not become their relay or ACK on their behalf.
+Even when blocked, their direct user question is not yours to relay or answer on
+their behalf; ACK remains the Executor's responsibility.
 
 Do not chat with Executor to ask for progress, clarify requirements, chase work or
 request confirmation; read or update Task instead. Executor communicates with the
@@ -93,9 +94,9 @@ before handling pending messages or interrupting; preserve context rather than
 starting a monitoring or conversation loop.
 
 Default to no subscription. Before registering, identify the concrete, necessary
-Owner action that a future Task state enables, such as making a decision from the
+authorized Owner action that a future Task state enables, such as making a decision from the
 result or arranging another authorized independent Task. Merely knowing progress
-or confirming completion is not a reason to subscribe. Judge the need yourself;
+or confirming completion, including repeated reporting, is not a reason to subscribe. Judge the need yourself;
 the user need not explicitly request a subscription. Do not invent follow-up work,
 split a complete outcome or add an approval gate to justify a wait.
 
@@ -104,8 +105,9 @@ follow-up. Choose the fewest target states that enable it; withdraw a still-wait
 subscription if the follow-up is no longer needed. The first real matching transition
 ends the subscription; already matching at registration means failure, not an
 immediate notice.
-On `[Task status updated](task:<uuid>?event=status_changed)`, read the latest Task
-and reassess the planned follow-up; act only if it is still needed and authorized.
+On `[Task status updated](task:<uuid>?event=status_changed)`, read only necessary
+latest content in one bounded call where possible and reassess the planned follow-up;
+act only if it is still needed and authorized.
 The card is not proof of complete delivery or an Executor definition-ACK instruction. Do not automatically resubscribe, poll or hold this turn open waiting.
 See [subscription handling](references/task-writes-and-recovery.md#one-shot-status-subscriptions)
 for registration, withdrawal and uncertain delivery.
@@ -113,19 +115,19 @@ for registration, withdrawal and uncertain delivery.
 ## Follow bounded evidence
 
 Start your portfolio with `task_read(view=list, owner=<your session ID>)`; for one
-Task use `view=overview`. Include your own `actor_session_id`: it is attribution, not authentication, an owner filter or a role-based read restriction. Focus on:
+Task use `view=overview` with `include` chosen for the question. Include your own
+`actor_session_id`: attribution, not authentication, an owner filter or a role-based read restriction.
 
-| Information | What it tells you |
-| --- | --- |
-| `id`, `title`, `kind`, `executor`, `status`, `automation` | Agent assignment or automation runtime facts and the recorded state |
-| Latest `activity` and its `at` time | A reported fact, not live observation |
-| `revision`, `acknowledged_revision` | Whether the Executor confirmed the current definition |
-| `outcome.available`, `outcome.current` | Whether a result exists and matches the revision, not whether delivery is complete |
-| `retro.status`, `retro.current` | Whether completion reflection was recorded and still matches the definition; not a quality judgment |
+Context always supplies identity, assignment, status, revision/ACK and write context.
+For status alone use `include=["context"]`; for a delivery-dependent action use
+`include=["outcome"]`. Select `["activity","outcome"]` only when diagnosis needs both.
+Select `retro` only for a concrete reflection question, not routine acceptance.
+Omitting `include` retains the legacy compact overview, not complete result text.
 
-These views omit the full definition, materials, histories and outcome text.
-Read `definition` before editing requirements and `outcomes` when judging delivery; expand `activity` or `changelog` for a concrete question. Use the
-[Task views and fields](references/reading-tasks.md) for fields, truncation and pagination.
+Read `definition` before editing requirements; use histories only for a historical
+question. Avoid a fixed overview-then-outcomes sequence, guessing outcomes then
+activity, or reading every group. See [Task views and fields](references/reading-tasks.md)
+for complete selected records, provenance, size errors and bounded alternatives.
 Trust complete delivery unless the Task requires review; preserve partial results
 and unexecuted boundaries. When asked, summarize active, waiting, complete or unknown
 work from Task evidence, not a second ledger. Do not infer completion from idle,
@@ -133,7 +135,7 @@ scan chats routinely or schedule monitoring.
 
 Executor completes delivery, then submits a lightweight retro with done: useful
 evidence-based observations or explicit null when there are no findings.
-Read it on demand in `execution` / `definition` or `outcomes`; overview/list show
+Read it on demand with `include=["retro"]`; overview without `include` and lists show
 only status and attribution, not its text. `recorded` with null is an explicit
 no-findings submission; `not_recorded` is missing history, and `not_applicable`
 is automation, not a failed Agent reflection. The service guarantees submission,

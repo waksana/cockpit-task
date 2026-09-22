@@ -8,8 +8,8 @@ Project instructions and work Skills define the methods.
 Automation is service-managed: read facts/outcomes/logs, never ACK/report it.
 Existing read/edit/cancel access does not grant create/start or child Tasks.
 
-Task is the shared agreement and work record. Read current requirements and ACK
-the exact revision at execution checkpoints; inspect every `definition_check`.
+Task is the shared agreement and work record. Read full `execution` at start,
+resume and checkpoints; ACK the exact revision and inspect every `definition_check`.
 Report meaningful facts and truthful outcomes. Ask real decisions directly of
 the user here; do not message Owner, directly or through other agents.
 After delivery, do a lightweight evidence-based retro before done. Submit a new

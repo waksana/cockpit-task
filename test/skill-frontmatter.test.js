@@ -148,8 +148,13 @@ test('coding guidance composes with roles without widening implementation or sub
     /one Task for the complete result/,
     /`references`.*`metadata`.*`outcome.references`/,
     /Link them rather than mirroring every comment or log/,
-    /register one `done` subscription before assignment/,
-    /Do not subscribe when there is no such follow-up, another explicit cleanup arrangement suffices/,
+    /Routine post-merge worktree cleanup may be deferred or batched/,
+    /does not automatically require an immediate per-Task Owner wakeup/,
+    /Default to no subscription/,
+    /future status unlocks specific necessary authorized Owner work/,
+    /smallest one-shot subscription before assignment/,
+    /Completion confirmation or repeated reporting is not that work/,
+    /without polling, automatic renewal or a new script\/timer/,
     /Read the latest Task, linked Issue and repository instructions/,
     /Do not assume you inherited Owner's Skill context/,
     /independent read-only review and fixes/,
@@ -158,6 +163,10 @@ test('coding guidance composes with roles without widening implementation or sub
     /Merge normally only within the authorized boundary and repository protections; never bypass them/,
     /Do not manually message Owner, directly or through subagents/,
     /Task done means Executor's agreed code result, not resource cleanup or an idle native session/,
+    /PR\/branch\/worktree path/,
+    /explicit release evidence: which workers have stopped using the worktree, any outstanding users and artifacts to preserve/,
+    /Do not claim release while you or subagents still use it/,
+    /Executor must not delete its own cwd/,
     /worktree is no longer used by Executor, subagents or other work/,
     /If cleanup is blocked, ask the user directly in this session about the specific blocker and the decision or condition needed to continue, using `ask_user` when available/,
     /Ask one focused question at a time/,
@@ -207,16 +216,17 @@ test('role prompts stay short while the Skills preserve delegation, communicatio
   assert.match(owner, /`task_assign` sends the first assigned reference itself; do not send a duplicate/);
   assert.match(owner, /task_read\(view=list, owner=<your session ID>\)/);
   assert.match(owner, /view=overview/);
-  for (const field of ['id', 'title', 'executor', 'status', 'activity', 'at', 'revision',
-    'acknowledged_revision', 'outcome.available', 'outcome.current']) {
-    assert.ok(owner.includes(`\`${field}\``), `Owner needs an explicit default focus on ${field}`);
-  }
-  assert.match(owner, /Read `definition` before editing requirements and `outcomes` when judging delivery/);
+  assert.match(owner, /Context always supplies identity, assignment, status, revision\/ACK and write context/);
+  assert.match(owner, /Read `definition` before editing requirements/);
+  assert.match(owner, /use histories only for a historical question/);
+  assert.match(owner, /Avoid a fixed overview-then-outcomes sequence, guessing outcomes then activity, or reading every group/);
   assert.match(owner, /scan chats routinely or schedule monitoring/);
 
   const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
   assert.match(executor, /task_read\(view=execution\)/);
   assert.match(executor, /At start, on resumption, between stages, before consequential actions and before delivery, read the latest Task/);
+  assert.match(executor, /complete requirements with `task_read\(view=execution\)` and ACK the exact current revision/);
+  assert.match(executor, /Selective overview reads never replace this execution read or precise ACK/);
   assert.match(executor, /Inspect `definition_check` on every Task response, including errors and replays/);
   assert.match(executor, /later ACKs do not confirm skipped revisions/);
   assert.match(executor, /complete updated Task definition with reason\/source and the decision superseded/);
@@ -270,12 +280,13 @@ test('explicit one-shot subscriptions preserve silent defaults, role boundaries 
   assert.match(owner, /Owner may explicitly subscribe to specified Task states/);
   assert.match(owner, /first real matching transition ends the subscription/);
   assert.match(owner, /already matching at registration means failure, not an immediate notice/);
-  assert.match(owner, /read the latest Task and reassess the planned follow-up/);
+  assert.match(owner, /read only necessary latest content in one bounded call where possible and reassess the planned follow-up/);
   assert.match(owner, /card is not proof of complete delivery or an Executor definition-ACK instruction/);
   assert.match(owner, /Do not automatically resubscribe, poll or hold this turn open waiting/);
   const ownerPrompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
   assert.match(ownerPrompt, /explicit one-shot status subscription permits a system notice to Task's Owner/);
-  assert.match(ownerPrompt, /Read the latest Task on receipt; do not automatically resubscribe/);
+  assert.match(ownerPrompt, /Read only needed latest content on receipt, in one bounded call where possible/);
+  assert.match(ownerPrompt, /No automatic resubscription or acceptance/);
   const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
   assert.match(executor, /Only the system sends that one-shot notice/);
   assert.match(executor, /no subscription capability or permission to notify Owner/);
@@ -326,15 +337,17 @@ test('explicit one-shot subscriptions preserve silent defaults, role boundaries 
 test('subscription guidance requires necessary Owner follow-up without gating Executor work', () => {
   const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
   assert.match(owner, /Default to no subscription/);
-  assert.match(owner, /identify the concrete, necessary Owner action that a future Task state enables/);
-  assert.match(owner, /Merely knowing progress or confirming completion is not a reason to subscribe/);
+  assert.match(owner, /identify the concrete, necessary authorized Owner action that a future Task state enables/);
+  assert.match(owner, /Merely knowing progress or confirming completion, including repeated reporting, is not a reason to subscribe/);
+  assert.match(owner, /Even when blocked, their direct user question is not yours to relay or answer on their behalf/);
   assert.match(owner, /Judge the need yourself; the user need not explicitly request a subscription/);
   assert.match(owner, /Do not invent follow-up work, split a complete outcome or add an approval gate/);
   assert.match(owner, /Choose the fewest target states that enable it/);
   assert.match(owner, /withdraw a still-waiting subscription if the follow-up is no longer needed/);
   assert.match(owner, /act only if it is still needed and authorized/);
   const ownerPrompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
-  assert.match(ownerPrompt, /Default to no subscription; register only for necessary Owner follow-up, not progress tracking/);
+  assert.match(ownerPrompt, /Default to no subscription; register only when a future status unlocks necessary authorized Owner work/);
+  assert.match(ownerPrompt, /Executors ask users directly, without Owner relay/);
   const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
   assert.match(executor, /Do not wait for Owner to subscribe or read a notice before continuing authorized work or delivering it/);
   const executorPrompt = prose(readFileSync(join(root, 'roles/task-executor.md'), 'utf8'));
@@ -342,7 +355,9 @@ test('subscription guidance requires necessary Owner follow-up without gating Ex
   for (const role of ['owner', 'executor']) {
     const writes = prose(readFileSync(join(root, skillDirectory(role), 'references/task-writes-and-recovery.md'), 'utf8'));
     assert.match(writes, /Default to no subscription/);
-    assert.match(writes, /concrete, necessary Owner follow-up, not simply to track progress or know completion/);
+    assert.match(writes, /concrete, necessary authorized Owner follow-up, not simply to track progress, know completion or repeat a report/);
+    assert.match(writes, /direct user question, even when blocked, stays in that session/);
+    assert.match(writes, /Owner does not subscribe to relay it or turn it into an acceptance step/);
     assert.match(writes, /standalone delivery with no Owner action needs no wait/);
     assert.match(writes, /Owner judges this need without asking the user to name or approve the subscription/);
     assert.match(writes, /If that action is no longer needed, withdraw the still-waiting subscription/);
@@ -364,6 +379,69 @@ test('public documentation links resolve to active resources rather than retired
   }
 });
 
+test('selective read examples match the overview contract without replacing execution checkpoints', () => {
+  for (const role of ['owner', 'executor']) {
+    const source = readFileSync(join(root, skillDirectory(role), 'references/reading-tasks.md'), 'utf8');
+    const reading = prose(source);
+    for (const requirement of [
+      /`include` is valid only with `view="overview"`/,
+      /nonempty array of at most seven unique group names/,
+      /Unknown names, duplicates, empty arrays and use with other views are invalid/,
+      /Omitting `include` preserves every existing view's shape/,
+      /not arbitrary columns or a role-dependent projection/,
+      /Context is always returned even if not explicit/,
+      /Latest complete activity record or null/,
+      /Latest complete outcome record or null.*excluding nested retro/,
+      /text including explicit null and provenance/,
+      /Current full description, references and metadata nested with revision, author, at, source and current/,
+      /Definition author and `at` identify the description revision, not later material edits/,
+      /Full immutable script\/parameter snapshot and run facts, or null; no logs/,
+      /Cancellation object or null/,
+      /retain IDs, revision, `current`, source, author, Executor and `at`/,
+      /latest recorded retro is independent of the latest outcome/,
+      /Selecting outcome does not implicitly select retro/,
+      /one bounded call where possible, not a fixed overview-plus-outcomes sequence/,
+      /speculative outcomes-then-activity, or every group/,
+      /one SQLite read transaction/,
+      /Unselected bodies, logs and histories are not retrieved/,
+      /48,000 serialized JSON character budget/,
+      /`RESULT_TOO_LARGE` \(413\) with group sizes/,
+      /not truncation, a cursor or a cached continuation/,
+      /Narrow the groups or use existing full `execution` \/ `definition` views or bounded history and log pages/,
+      /`definition_check` is unchanged and reads never ACK/,
+      /Executor still reads full `execution` at start, resume and checkpoints and ACKs the exact current revision/,
+      /Selecting `definition` or any other overview groups cannot replace that requirement/,
+    ]) assert.match(reading, requirement, `${role}: ${requirement}`);
+    for (const field of ['id', 'task_id', 'title', 'owner', 'executor', 'status', 'revision',
+      'acknowledged_revision', 'created_at', 'updated_at', 'write_context', 'kind']) {
+      const context = reading.match(/Every selected response includes compact current context: (.*?)\. Context/)?.[1];
+      assert.ok(context?.includes(`\`${field}\``), `${role}: always-returned context field ${field}`);
+    }
+    const examples = [...source.matchAll(/```json\n([\s\S]*?)\n```/g)].map(([, json]) => JSON.parse(json));
+    assert.deepEqual(examples.map(example => example.include),
+      [['context'], ['outcome'], ['activity', 'outcome'], ['retro']],
+      'Each question selects only its needed content; examples are not a universal bundle');
+    for (const example of examples) {
+      const parsed = schemas.task_read.safeParse(example);
+      assert.ok(parsed.success, parsed.error?.message);
+      assert.deepEqual(parsed.data, example, 'Selections must be preserved, not silently stripped');
+    }
+    const base = examples[0];
+    for (const include of [[], ['context', 'context'], ['description'], ['logs']]) {
+      assert.equal(schemas.task_read.safeParse({ ...base, include }).success, false);
+    }
+    for (const view of ['execution', 'definition', 'activity', 'outcomes']) {
+      assert.equal(schemas.task_read.safeParse({ ...base, view }).success, false,
+        `include must not silently alter ${view}`);
+    }
+    assert.ok(schemas.task_read.safeParse({ ...base,
+      include: ['context', 'activity', 'outcome', 'retro', 'definition', 'automation', 'cancellation'],
+    }).success, 'All seven groups are supported, but not recommended as a default');
+    const { include, ...legacy } = base;
+    assert.deepEqual(schemas.task_read.parse(legacy), legacy, 'Omission retains the legacy read contract');
+  }
+});
+
 test('automation guidance preserves Agent default, explicit service execution and bounded evidence', () => {
   const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
   assert.match(owner, /Agent remains the default/);
@@ -382,7 +460,11 @@ test('automation guidance preserves Agent default, explicit service execution an
     /Do not use `task_assign`, `task_ack` or `task_report`/,
     /subscribe \*\*before start\*\*/,
     /persistent single queue.*does not subscribe automatically/,
-    /No automatic resubscription, polling/,
+    /Default to no subscription, just as for Agent work/,
+    /next necessary authorized Owner action needs the result, subscribe \*\*before start\*\*/,
+    /Completion confirmation or repeated reporting is not such an action/,
+    /select only needed latest content in one bounded overview call where possible/,
+    /No automatic resubscription, acceptance, polling/,
     /`event.source='automation'`, `event.run_id` and `actor_session_id:null`/,
     /`executor:null`, `source:'automation'` and `author:'automation:<run_id>'`.*service label, not a native session/,
     /8192.*65536.*omitted_characters.*truncation/,
@@ -403,12 +485,14 @@ test('automation guidance preserves Agent default, explicit service execution an
 
   const examples = [...source.matchAll(/```json\n([\s\S]*?)\n```/g)].map(([, json]) => JSON.parse(json));
   const tools = ['task_script_read', 'task_script_register', 'task_create', 'task_subscribe',
-    'task_automation_start', 'task_read', 'task_automation_reconcile'];
+    'task_automation_start', 'task_read', 'task_read', 'task_automation_reconcile'];
   assert.equal(examples.length, tools.length, 'Keep each complete argument example schema-checked');
   examples.forEach((example, index) => {
     const parsed = schemas[tools[index]].safeParse(example);
     assert.ok(parsed.success, `${tools[index]}: ${parsed.error?.message}`);
   });
+  assert.deepEqual(examples[5].include, ['outcome'], 'The result-dependent decision reads one selected result, not a fixed bundle');
+  assert.deepEqual(examples[3].statuses, ['done', 'blocked'], 'Only statuses needed by the documented decision');
   const registration = examples[1], inputs = examples[2].automation.parameters;
   assert.deepEqual(registration.parameters.map(parameter => parameter.type), ['string', 'integer', 'boolean']);
   assert.deepEqual([...registration.argv, registration.script_path,
@@ -469,7 +553,7 @@ test('completion retro guidance separates evidence-based reflection from deliver
     }
     const reading = prose(readFileSync(join(root, skillDirectory(roleName), 'references/reading-tasks.md'), 'utf8'));
     for (const status of ['recorded', 'not_recorded', 'not_applicable']) assert.ok(reading.includes(status));
-    assert.match(reading, /Overview\/list return the same status and attribution without `text`/);
+    assert.match(reading, /Without `include`, overview\/list return the same status and attribution without `text`/);
     assert.match(reading, /description edit preserves the recorded revision and sets `current:false`/);
     assert.match(reading, /migration never invents old reflections/);
     assert.match(reading, /`has_findings` distinguishes non-null text from explicit no findings, not quality/);

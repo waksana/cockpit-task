@@ -25,6 +25,7 @@ included in the 40/40 result and use the narrower setup documented below.
 - [Coding workflow cases G1-G4](#coding-workflow-cases-g1-g4)
 - [Executor preparation: rationale and acceptance](#executor-preparation-rationale-and-acceptance)
 - [Completion retro acceptance](#completion-retro-acceptance)
+- [Selective reading and follow-up acceptance](#selective-reading-and-follow-up-acceptance)
 - [Coverage and grading](#coverage-and-grading)
 - [Artifacts, review and shutdown](#artifacts-review-and-shutdown)
 - [Baseline observations and untested boundaries](#baseline-observations-and-untested-boundaries)
@@ -55,7 +56,7 @@ Use isolated synthetic data and the existing tests. Check:
 - Schema v4 migration preserves historical outcomes with `not_recorded`, not
   invented no-findings text. Fresh writes, restart and bounded history retain
   the same outcome ID, revision, executor, reported author/source and timestamp.
-- Execution/definition and outcomes expose independent full retro; overview/list
+- Execution/definition and outcomes expose independent full retro; default overview/list
   expose attribution/status without text. A post-completion description edit
   preserves the original revision and yields `current:false`; no Task reopens.
 - Automation returns `not_applicable` and keeps its service-generated outcomes.
@@ -73,6 +74,37 @@ no-findings work uses null. Verify retro does not replace outcome or blockers.
 Passing schema/storage tests proves submission and persistence, not that an
 Agent actually reflected or produced useful text. Do not report a model-behavior
 pass without a separate observed run.
+
+## Selective reading and follow-up acceptance
+
+These current-source requirements supersede historical fixed-view and routine
+cleanup-subscription examples, not the recorded S/N/G observations or their counts.
+Use only synthetic stores/hosts and the existing store, MCP, module and Skill tests.
+
+- Discover `overview.include` through the real MCP tools/list schema; reject empty,
+  duplicate, unknown or cross-view selections and pagination/revision combinations.
+  A context-only read must not load or return body/history/log columns.
+- After actual synthetic done/blocked notifications, one selected read must yield
+  current context and complete requested activity/outcome/retro, including blocked
+  with no outcome. Check old revision/current/source/author/time and distinguish
+  absent records, explicit retro null and unselected keys.
+- Concurrent commits from another SQLite connection must not mix revisions within
+  one selected result. Keep the separately refreshed definition_check and all ACK,
+  actor, replay and write-conflict behavior unchanged.
+- JSON escaping counts toward the 48,000-character result budget. Overflow is an
+  explicit error with group sizes, not an excerpt. Legacy views stay compatible;
+  history and automation logs remain paginated. HTTP and MCP share validation.
+- Skill examples choose content by purpose rather than a fixed notification bundle.
+  Executor still reads full execution requirements and ACKs the exact revision.
+  Default no subscription applies to Agent and automation. Only necessary authorized
+  future Owner action justifies a wait; direct Executor questions need no Owner relay.
+- Routine merged-worktree cleanup may be deferred/batched. Record PR/branch/path
+  and release evidence, retain Owner safety checks, and never imply new cleanup
+  scripts/timers or deletion of Executor's cwd.
+
+These scripted assertions do not establish autonomous model behavior. A new model
+exercise must separately observe selective reading and subscription judgment;
+do not relabel the older supervised trials as evidence for the new guidance.
 
 ## Scope and safety
 

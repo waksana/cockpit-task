@@ -156,14 +156,16 @@ execution/definition 和各 outcomes 项返回独立 retro 对象：
 `{status:'recorded',text:string|null,revision,executor,author,source:'reported',at,outcome_id,current,has_findings}`；
 has_findings 仅表示文本非 null，不代表质量；
 未记录为 `{status:'not_recorded'}`，automation 为 `{status:'not_applicable'}`。
-overview/list 只返回状态及归因摘要，不含 text。文本最多 2,000 字符，
+默认 overview/list 只返回状态及归因摘要，不含 text；overview 显式选择 retro 时返回全文。文本最多 2,000 字符，
 `{outcome,retro}` 合并序列化最多 16,000 字符，历史分页预算保持不变。
 
 ## 5. 状态订阅与消息
 
 订阅是独立持久记录，不是 Task 类型、依赖或状态。Owner 默认不订阅；
 只有未来状态会使自己采取具体必要行动时才登记，不为看进度或确认完成注册，
-不自动续订。后续行动不再需要时撤销等待；Executor 不等待订阅或通知被读。
+不自动续订。例行合并后清理可延后集中处理，不是逐 Task 立即唤醒的默认理由；
+Executor 已直接问用户的阻塞不由 Owner 重复转述。
+后续行动不再需要时撤销等待；Executor 不等待订阅或通知被读。
 
 每个 Task 最多一个 waiting 订阅，目标为显式状态集合，接收者固定取 Task.owner。
 事务中检查当前状态：已匹配则失败，不登记或即时发送；其他终态同样不能新建等待。
@@ -194,13 +196,23 @@ author 只是服务作者标签，不是 native session 或虚构 Executor 身�
 
 ## 6. 有界读取与一致性
 
-Owner 默认以显式 owner 筛选 list，单项读 overview；Executor 默认读 execution。
+Owner 查找任务以显式 owner 筛选 list，单项按目的用 overview 的 include 一次组合所需信息；
+Executor 开始、恢复及执行同步仍完整读 execution 并精确 ACK，选择输出不能替代。
 definition 提供完整当前要求，changelog/activity/outcomes/subscriptions 分别分页。
-automation 的 definition/execution 还包含完整脚本/参数快照；overview/list 仅含运行事实。
+automation 的 definition/execution 还包含完整脚本/参数快照；默认 overview/list 仅含运行事实。
 `automation_log` 单独按 offset/limit 读合并 stdout/stderr，limit 默认 4096、最大 8192，
 保留上限 65536 字符并返回 omitted_characters；不能把截断日志当作完整证据。
 角色默认视图不限制读取权限；actor 不等于列表过滤器。最新 activity 直接表示
 最新报告，不额外维护进度摘要，也不与 native 观察混合。
+
+overview 的可选 include 为非空唯一白名单：context/activity/outcome/retro/definition/automation/cancellation，
+只用于单项 overview，不与分页或 revision 混用。当前身份、状态、revision/ACK、
+write_context 始终返回，`include=["context"]` 不带正文。其余仅按选择加载/返回；
+activity/outcome 为最新完整记录或 null，retro 沿用缺记录与显式 text=null 的区别。
+记录保留 revision/current/source/作者/时间，current 不是完成证明。
+上下文和所选数据在同一 SQLite 只读事务取得，不增加持久快照或缓存。
+组合结果上限 48,000 序列化字符，超限明确报错并给出各组大小，不静默截断；
+definition_check 仍在响应检查点独立刷新，不因选择而省略要求或确认义务。
 
 列表默认 20、最多 50，历史默认 5、最多 10，每页另受 24,000 序列化字符预算。
 完整当前 description 与显式单版 changelog 不静默截断；摘要和全文按需分开读。
