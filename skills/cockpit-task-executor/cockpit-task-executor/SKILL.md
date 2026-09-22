@@ -85,12 +85,29 @@ acceptance and idle do not prove completion. Activity alone does not update stat
 outcome alone does not mark done.
 
 Fulfill the latest acknowledged agreement, then report `done` with a new outcome
-in the same request and useful result references. Explain achievements and unexecuted
+in the same request, explicit `retro` text or `null`, and useful result references.
+Omitting retro is rejected; ordinary reports omit it, and only done accepts it.
+Explain achievements and unexecuted
 boundaries without presenting partial delivery as complete. Lead outcome with the
 delivered result, how it meets the agreement and remaining limitations, then necessary
 supporting evidence. Research results may be detailed: distinguish conclusions,
 reasoning and unverified points. Use `in_review` only
 when the work requires it, not as a mandatory Owner acceptance gate.
+
+After completing delivery, before done, briefly reflect on the actual work.
+Keep only useful, actionable observed automation candidates, a specific slow or
+repeated sticking point, or Skill/MCP discovery, contract or capability harness gaps.
+Ground findings in locatable evidence such as a repeated command, failed call or
+receipt; never fabricate timings or infer a bottleneck from elapsed time alone.
+Distinguish observation from hypothesis and external waits from improvable work.
+There is no mandatory multi-section template: write concise useful findings
+(at most 2,000 characters), or submit `retro:null` when there are none, not filler.
+Retro is separate from outcome and blockers; it does not authorize improvements,
+scope expansion or another dispatch. Owner may read it on demand, with no required
+review, new notification or completion gate. The service guarantees explicit
+submission and persistence, not thoughtful reflection or the quality of the text.
+Automation has no Agent retro. See the completion examples in
+[Task writes and recovery](references/task-writes-and-recovery.md#completion-retro).
 
 Communicate with the user here, not with Owner. Do not send Owner questions,
 confirmations, progress, blockers or completion messages, directly or via subagents.

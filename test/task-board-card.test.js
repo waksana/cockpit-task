@@ -433,7 +433,7 @@ const automation = {
   finished_at: null, exit_code: null, signal: null, error: null, cancel_requested: false,
   process_group: 123, pid: 123, barrier: true, revision: 1,
 };
-const automatedOverview = { ...result, kind: 'automation', automation };
+const automatedOverview = { ...result, kind: 'automation', automation, retro: { status: 'not_applicable' } };
 const automatedExecution = {
   ...automatedOverview, description: 'Run a synthetic check', references: [], metadata: {},
   automation: {
@@ -450,6 +450,7 @@ const automatedExecution = {
 const automatedOutcome = {
   revision: 1, at: '2026-09-20T01:02:05Z', author: `automation:${automation.run_id}`,
   source: 'automation', run_id: automation.run_id, executor: null, summary: 'Script exited with code 0.', references: [],
+  retro: { status: 'not_applicable' },
 };
 const automationLog = {
   task_id: taskId, run_id: automation.run_id, offset: 0, text: '<script>literal output</script>',
@@ -605,6 +606,7 @@ test('mounted automation UI shows immutable facts and logs, paginates on demand,
     assert.match(textContent(tree), /"enabled": false/);
     assert.match(textContent(tree), /<script>literal<\/script>/);
     assert.match(textContent(tree), /Launch barrier Set/);
+    assert.match(textContent(tree), /Not applicable to script automation/);
     assert.equal(button(tree, 'Native session'), undefined);
     assert.equal(button(tree, 'Reported activity'), undefined);
     assert.equal(elements(tree).some(node => node.type === 'script'), false);
@@ -642,6 +644,7 @@ test('mounted automation UI shows immutable facts and logs, paginates on demand,
     await settle();
     tree = harness.render();
     assert.match(textContent(tree), /Source: Automation/);
+    assert.match(textContent(tree), /Not applicable to script automation/);
     assert.match(textContent(tree), new RegExp(`Reported author: automation:${automation.run_id}`));
     assert.doesNotMatch(textContent(tree), /Executor: null/);
     assert.equal(f.requests.every(request => request.path === '/read'), true);
@@ -670,6 +673,7 @@ test('legacy agent details retain ACK, activity and lazy native session observat
     await settle();
     tree = harness.render();
     assert.ok(button(tree, 'Reported activity'));
+    assert.match(textContent(tree), /No retro recorded/);
     assert.equal(button(tree, 'Logs'), undefined);
     assert.equal(f.requests.length, 2);
     button(tree, 'Native session').props.onClick();
@@ -682,6 +686,70 @@ test('legacy agent details retain ACK, activity and lazy native session observat
     assert.match(textContent(tree), /Native state idle/);
   } finally {
     harness.stop();
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+  }
+});
+
+test('retro detail reads reject malformed recorded content instead of presenting no findings', async () => {
+  const execution = { ...result, description: 'Definition', references: [], metadata: {} };
+  const recorded = {
+    status: 'recorded', text: null, has_findings: false, revision: 1, executor: 'executor',
+    author: 'executor', source: 'reported', outcome_id: 'outcome-id', at: '2026-09-20T01:02:05Z', current: true,
+  };
+  for (const retro of [
+    { ...recorded, text: undefined }, { ...recorded, text: '' }, { ...recorded, has_findings: true, text: ' ' },
+    { ...recorded, has_findings: true, text: 'x'.repeat(2001) }, { ...recorded, revision: 0 },
+    { ...recorded, current: undefined }, { status: 'unknown' }, null,
+  ]) await assert.rejects(readTask({ request: async () => response({ ...execution, retro }) },
+    { view: 'execution', task_id: taskId }), /invalid result/);
+});
+
+test('mounted retro detail and outcomes distinguish findings, null, historical missing and superseded definition', async () => {
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  const recorded = {
+    status: 'recorded', text: '<script>Automate repeated setup</script>', has_findings: true,
+    revision: 1, executor: 'executor', author: 'executor', source: 'reported',
+    outcome_id: 'outcome-id', at: '2026-09-20T01:02:05Z', current: false,
+  };
+  try {
+    for (const [retro, expected] of [
+      [recorded, /Automate repeated setup/],
+      [{ ...recorded, current: true, has_findings: false, text: null }, /Explicitly reported no findings/],
+      [{ status: 'not_recorded' }, /No retro recorded.*does not establish that reflection occurred/],
+    ]) {
+      const f = fixture(), harness = componentHarness(f.context);
+      try {
+        harness.render();
+        const { text, ...summary } = retro;
+        f.requests[0].resolve(response({ ...result, status: 'done', retro: summary }));
+        await settle();
+        let tree = harness.render();
+        assert.doesNotMatch(textContent(tree), /Automate repeated setup/);
+        elements(tree).find(node => node.props.className === 'ck-button tb-card').props.onClick();
+        harness.render();
+        f.requests[1].resolve(response({ ...result, description: 'Current definition', references: [], metadata: {}, retro }));
+        await settle();
+        tree = harness.render();
+        assert.match(textContent(tree), expected);
+        if (retro.current === false) assert.match(textContent(tree), /Historical retro; not a retrospective on the current definition/);
+        assert.equal(elements(tree).some(node => node.type === 'script'), false);
+        button(tree, 'Outcomes').props.onClick();
+        harness.render();
+        f.requests[2].resolve(response({ items: [{
+          id: 'outcome-id', revision: 1, executor: 'executor', author: 'executor', source: 'reported',
+          at: recorded.at, summary: 'Delivered result', references: [], retro,
+        }], next_cursor: null }));
+        await settle();
+        tree = harness.render();
+        assert.match(textContent(tree), expected);
+        assert.match(textContent(tree), /Delivered result/);
+        assert.equal(elements(tree).some(node => node.type === 'script'), false);
+        assert.equal(f.requests.length, 3);
+      } finally { harness.stop(); }
+    }
+  } finally {
     if (oldDocument === undefined) delete globalThis.document;
     else globalThis.document = oldDocument;
   }

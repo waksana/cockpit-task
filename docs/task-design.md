@@ -52,6 +52,7 @@ Task 保存完整当前约定、资料、修订、执行动态和成果。聊天
 | `acknowledged_revision` | 固定 Executor 已确认的 description 版本；逐版确认另有记录 |
 | `activity` | Executor 报告的执行事实，指向实际依据且已确认过的 revision |
 | `status` / `outcome` | 明确的工作状态与成果；不从 activity 文本或 session 状态推断 |
+| `retro` | Agent 交付后的轻量复盘，独立于成果，随同次完成记录保存 |
 | `references` / `metadata` | 补充资料；不形成依赖或新的 Task 子类型，不隐藏工作要求 |
 
 Owner 修改 description 不替 Executor ACK，也不生成 Executor activity。当前
@@ -60,6 +61,14 @@ Executor 亲自成功修改未结束 Task 的正文时，同时确认新 revisio
 
 状态、归属、动态和 ACK 不推进 description revision。旧成果保留原版本；
 定义改变后，旧成果不能冒充新要求已交付的证明。终态定义可以编辑，但不会重开执行。
+
+Executor 完成交付后、done 前简短回顾：保留有证据、可行动的自动化候选、具体慢点或
+重复卡点、Skill/MCP 发现/契约/能力验证缺口；区分观察、假设、外部等待，不编造耗时。
+不要求多段模板或填充内容；无有用发现传 null。Agent done 同次必须显式提交新
+outcome 和 `retro` 文本或 null，普通报告不传；服务保证提交，不保证思考或文本质量。
+Owner 按需读取全文，轻量视图只显示状态与归因；历史未记录不冒充无发现。
+复盘不代替成果和阻塞、不授权改进或扩大范围，不新增通知、派单、强制审阅或完成门槛。
+脚本 automation 不运行 Agent、也不需要 retro；现有服务成果和生命周期保持不变。
 
 ## 3. 登记、准备和指派是独立操作
 

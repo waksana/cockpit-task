@@ -103,7 +103,7 @@ test('each current Skill has an independent relative reference closure without r
     const metadata = skillMetadata(source);
     assert.equal(metadata.name, `cockpit-task-${role}`);
     assert.match(metadata.description, /first|reuse/i);
-    assert.ok(source.split('\n').length < 150, 'The body should remain a concise principles guide');
+    assert.ok(source.split('\n').length < 165, 'Keep role and completion-retro principles concise; details belong in references');
     assert.match(source, /Load only the reference needed, not the whole set/);
     assert.match(source, /Reuse this Skill while it remains in context/);
     assert.match(source, /fresh Task/);
@@ -420,6 +420,60 @@ test('automation guidance preserves Agent default, explicit service execution an
   assert.match(executor, /do not ACK or report them/);
   assert.match(executor, /do not grant create\/start or script registration/);
   assert.match(executor, /Do not create child Tasks or add Owner capabilities/);
+});
+
+test('completion retro guidance separates evidence-based reflection from delivery and authority', () => {
+  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  for (const requirement of [
+    /After completing delivery, before done/,
+    /actionable observed automation candidates/,
+    /specific slow or repeated sticking point/,
+    /Skill\/MCP discovery, contract or capability harness gaps/,
+    /never fabricate timings/,
+    /Distinguish observation from hypothesis and external waits/,
+    /no mandatory multi-section template/,
+    /`retro:null` when there are none, not filler/,
+    /Retro is separate from outcome and blockers/,
+    /does not authorize improvements, scope expansion or another dispatch/,
+    /service guarantees explicit submission and persistence, not thoughtful reflection or the quality/,
+    /Automation has no Agent retro/,
+  ]) assert.match(executor, requirement);
+  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  assert.match(owner, /Read it on demand/);
+  assert.match(owner, /No mandatory Owner review, new notification, subscription or completion gate/);
+  const role = prose(readFileSync(join(root, 'roles/task-executor.md'), 'utf8'));
+  assert.match(role, /After delivery, do a lightweight evidence-based retro before done/);
+  assert.match(role, /explicit `retro` text or `null` together with `status=done`/);
+
+  for (const roleName of ['owner', 'executor']) {
+    const source = readFileSync(join(root, skillDirectory(roleName), 'references/task-writes-and-recovery.md'), 'utf8');
+    const writes = prose(source);
+    assert.match(writes, /Ordinary reports omit retro; only done accepts it/);
+    assert.match(writes, /Missing retro is rejected, not interpreted as no findings/);
+    assert.match(writes, /including an old-format replay, returns `INVALID_INPUT` before any writes/);
+    assert.match(writes, /Do not auto-fill null or retry modified input with the same request ID/);
+    assert.match(writes, /completion status, new outcome and retro save atomically/);
+    assert.match(writes, /combined serialized `\{outcome,retro\}` is at most 16,000 characters/);
+    const examples = [...source.matchAll(/```json\n([\s\S]*?)\n```/g)].map(([, json]) => JSON.parse(json));
+    assert.equal(examples.length, 2, 'Include both explicit text and no-findings done examples');
+    assert.equal(typeof examples[0].retro, 'string');
+    assert.equal(examples[1].retro, null);
+    for (const example of examples) {
+      const parsed = schemas.task_report.safeParse(example);
+      assert.ok(parsed.success, parsed.error?.message);
+      assert.equal(example.status, 'done');
+      assert.ok(example.outcome.summary);
+      const { retro, ...omitted } = example;
+      assert.equal(schemas.task_report.safeParse(omitted).success, false);
+      assert.equal(schemas.task_report.safeParse({ ...example, status: 'in_progress' }).success, false);
+    }
+    const reading = prose(readFileSync(join(root, skillDirectory(roleName), 'references/reading-tasks.md'), 'utf8'));
+    for (const status of ['recorded', 'not_recorded', 'not_applicable']) assert.ok(reading.includes(status));
+    assert.match(reading, /Overview\/list return the same status and attribution without `text`/);
+    assert.match(reading, /description edit preserves the recorded revision and sets `current:false`/);
+    assert.match(reading, /migration never invents old reflections/);
+    assert.match(reading, /`has_findings` distinguishes non-null text from explicit no findings, not quality/);
+  }
 });
 
 test('module packaging carries the role Skills and shared coding Skill without evaluation resources', t => {

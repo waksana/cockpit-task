@@ -51,6 +51,13 @@ function validResult(input, data) {
   const revision = (value) => Number.isSafeInteger(value) && value > 0;
   const references = (value) => Array.isArray(value) && value.every((ref) => object(ref) && text(ref.label) && text(ref.target));
   const entry = (value) => object(value) && revision(value.revision) && text(value.author) && text(value.at);
+  const retro = (value, full) => value === undefined || (object(value) && (
+    ['not_recorded', 'not_applicable'].includes(value.status) ||
+    (value.status === 'recorded' && entry(value) && text(value.executor) &&
+      text(value.outcome_id) && value.source === 'reported' && typeof value.current === 'boolean' &&
+      typeof value.has_findings === 'boolean' && (!full ||
+        (value.has_findings ? text(value.text) && value.text.trim().length > 0 && value.text.length <= 2000 : value.text === null)))
+  ));
   const nonnegative = (value) => Number.isSafeInteger(value) && value >= 0;
   const automation = (value) => object(value) && text(value.run_id) && text(value.script_id) && text(value.state);
   if (!object(data)) return false;
@@ -65,6 +72,7 @@ function validResult(input, data) {
         !(data.executor === null || text(data.executor)) || !text(data.status) ||
         !revision(data.revision) || !(data.acknowledged_revision === null || revision(data.acknowledged_revision))) return false;
     if (data.kind !== undefined && !['agent', 'automation'].includes(data.kind)) return false;
+    if (!retro(data.retro, input.view === 'execution')) return false;
     if (data.kind === 'automation') {
       if (data.executor !== null || data.acknowledged_revision !== null ||
           !(data.automation === null || automation(data.automation))) return false;
@@ -89,7 +97,7 @@ function validResult(input, data) {
   return data.items.every((item) => entry(item) && (input.view === 'changelog' ? text(item.reason)
     : (text(item.executor) || (input.view === 'outcomes' && item.executor === null &&
         item.source === 'automation' && text(item.run_id) && item.author === `automation:${item.run_id}`)) &&
-      (input.view === 'activity' ? text(item.text) : text(item.summary) && references(item.references))));
+      (input.view === 'activity' ? text(item.text) : text(item.summary) && references(item.references) && retro(item.retro, true))));
 }
 
 export async function readTask(context, input, signal) {
@@ -307,6 +315,20 @@ export function activate(context) {
     );
   }
 
+  function Retro({ retro }) {
+    return h('section', { 'aria-label': 'Completion retro' },
+      h('h3', null, 'Completion retro'),
+      retro?.status === 'recorded' ? h(React.Fragment, null,
+        h('p', { className: 'ck-text-secondary' },
+          `Definition v${retro.revision} · Executor: ${retro.executor} · Reported author: ${retro.author} · ${formatTimestamp(retro.at)}`),
+        !retro.current ? h('p', { className: 'ck-text-secondary' }, 'Historical retro; not a retrospective on the current definition.') : null,
+        h('p', { className: 'tb-preserve' }, retro.has_findings ? retro.text : 'Explicitly reported no findings.'),
+      ) : h('p', { className: 'ck-text-secondary' }, retro?.status === 'not_applicable'
+        ? 'Not applicable to script automation; no Agent retrospective required.'
+        : 'No retro recorded. This does not establish that reflection occurred.'),
+    );
+  }
+
   function Automation({ automation }) {
     if (!automation) return h('p', null, 'Automation execution facts unavailable.');
     const { script, parameters } = automation;
@@ -352,6 +374,7 @@ export function activate(context) {
       h(References, { references: task.references }),
       h('h3', null, 'Metadata'),
       h('pre', { className: 'tb-preserve tb-metadata' }, JSON.stringify(task.metadata, null, 2)),
+      h(Retro, { retro: task.retro }),
     );
   }
 
@@ -432,7 +455,9 @@ export function activate(context) {
               h('p', { className: 'ck-text-secondary' }, entry.source === 'automation'
                 ? `Source: Automation · Run: ${entry.run_id} · No native Executor`
                 : `Executor: ${entry.executor}`),
-              view === 'outcomes' ? h(References, { references: entry.references }) : null),
+              view === 'outcomes' ? h(React.Fragment, null,
+                h(References, { references: entry.references }),
+                h(Retro, { retro: entry.retro })) : null),
         ))) : h('p', null, `No ${view === 'changelog' ? 'definition revisions' : view} recorded.`)),
       h('nav', { className: 'tb-page-controls', 'aria-label': `${view} pages` },
         h('button', { type: 'button', className: 'ck-button', disabled: cursors.length === 1, onClick: () => setCursors((current) => current.slice(0, -1)) }, 'Previous page'),

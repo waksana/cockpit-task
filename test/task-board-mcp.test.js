@@ -100,7 +100,8 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     assert.match(descriptions.task_edit, /unchanged text and metadata-only edits do not/);
     assert.match(descriptions.task_edit, /Does not send messages or change execution status/);
     assert.match(descriptions.task_report, /done requires a new outcome in the same request/);
-    assert.match(descriptions.task_report, /Stale activity may save while stale status\/outcome are rejected/);
+    assert.match(descriptions.task_report, /Stale activity may save while stale status\/outcome\/retro are rejected/);
+    assert.match(descriptions.task_report, /explicit retro: useful text or null for no findings; omission is rejected/);
     assert.match(descriptions.task_subscribe, /Rejects an already-matching status/);
     assert.match(descriptions.task_subscribe, /derived from the Task, not the actor/);
     assert.match(descriptions.task_subscribe, /Optional: default to no subscription/);
@@ -108,6 +109,49 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     assert.match(descriptions.task_unsubscribe, /Cannot recall a consumed notification/);
     assert.match(descriptions.task_unsubscribe, /planned Owner follow-up is no longer needed/);
   } finally { await f.close(); }
+});
+
+test('real MCP completion never defaults missing retro and persists text or null exactly once', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'task-retro-mcp-'));
+  const store = new TaskStore(root);
+  const service = new TaskService(store, {});
+  const f = fixture((name, input, options) => service.execute(name, input, options), undefined, toolSchemas);
+  try {
+    await f.connect();
+    for (const retro of [null, 'Automate the repeated deterministic setup.']) {
+      const created = store.executeLocal('task_create', {
+        actor_session_id: 'owner', request_id: `create-${retro}`, owner: 'owner', title: 'Retro', description: 'Synthetic completion',
+      });
+      const assign = {
+        actor_session_id: 'owner', request_id: `assign-${retro}`, task_id: created.task_id,
+        write_context: created.write_context, revision: 1, executor: 'executor',
+      };
+      store.reserveOperation('task_assign', assign);
+      const task = store.bindAssignment(assign);
+      const base = { actor_session_id: 'executor', task_id: task.task_id, revision: 1, write_context: task.write_context };
+      store.executeLocal('task_ack', { ...base, request_id: `ack-${retro}` });
+      const request = { ...base, request_id: `done-${retro}`, status: 'done', outcome: { summary: 'Delivered' } };
+      for (const value of [undefined, '', ' \t', 0, {}, [], 'r'.repeat(2001)]) {
+        const response = await f.client.callTool({ name: 'task_report', arguments: { ...request, ...(value === undefined ? {} : { retro: value }) } });
+        assert.equal(response.isError, true);
+        assert.equal(response.structuredContent.error.code, 'INVALID_INPUT');
+        assert.equal(response.structuredContent.definition_check.tasks[0].needs_ack, false);
+      }
+      assert.equal(store.task(task.task_id).status, 'todo');
+      assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items.length, 0);
+      const completed = await f.client.callTool({ name: 'task_report', arguments: { ...request, retro } });
+      assert.notEqual(completed.isError, true);
+      const replay = await f.client.callTool({ name: 'task_report', arguments: { ...request, retro } });
+      assert.deepEqual(replay.structuredContent.result, completed.structuredContent.result);
+      const read = await f.client.callTool({ name: 'task_read', arguments: { view: 'execution', task_id: task.task_id } });
+      assert.equal(read.structuredContent.result.retro.text, retro);
+      assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items.length, 1);
+    }
+  } finally {
+    await f.close();
+    service.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('official MCP discovers, registers and executes an automation Task without any Agent session', async () => {

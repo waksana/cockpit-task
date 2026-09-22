@@ -22,11 +22,15 @@ operation receipts, subscriptions, script registrations and automation runs. A p
 Executor to one unfinished Task. Subscription uniqueness permits one waiting
 subscription per Task Owner; Owner is fixed for the Task.
 
-Schema version 3 adds Task kind, immutable scripts and automation run/log facts to
+Schema version 4 adds nullable `outcomes.retro TEXT` and
+`outcomes.retro_recorded INTEGER NOT NULL DEFAULT 0` (restricted to 0/1).
+Version 3 added Task kind, immutable scripts and automation run/log facts to
 the v2 subscription and notification evidence. Opening a supported older Task
 database upgrades it transactionally, preserving Agent Tasks and receipt rows;
 unsupported newer schema versions fail with `SCHEMA_TOO_NEW`. Service-assigned
 timestamps and retained histories are not caller-authenticated evidence.
+Migration does not fabricate reflection or backfill historical outcomes as
+explicit no-findings submissions.
 
 Activation requires Module API v1, the exact module identity,
 `context.serviceReadyVersion === 1` and `context.host.call` before storage opens
@@ -91,11 +95,26 @@ Executor. A later ACK does not cover skipped revisions. An acknowledged older
 activity may save while stale status/outcome are rejected with
 `DESCRIPTION_UPDATED`; no other report validation failure partially saves
 activity. Results distinguish saved, rejected and not_requested fields.
-`done` requires a new outcome in that same request.
+Agent `done` requires a new outcome and explicit `retro` nonblank string or null
+in that same request; omission is rejected, not defaulted to null. Only done
+accepts retro; ordinary reports omit it. Completion status, outcome and retro
+save atomically; the retro field also reports saved/rejected/not_requested.
+All incoming done requests missing retro, including old-format replay attempts,
+reject with `INVALID_INPUT` before any writes, including activity. Stored legacy
+operations remain untouched and readable through side-effect-free
+`task_read(view=operation,request_id=<original ID>)`. Do not auto-fill null or
+retry modified input with the same request ID. Exact replay of a valid new
+request retains its original saved result without duplicate effects.
+Retro shares that outcome's revision, executor, author, reported source, time and ID.
+The service guarantees submission/persistence, not reflection or content quality.
+No new notifications, review gates or dispatch follow from retro; automation
+keeps its service outcome path with retro not applicable.
 
 Terminal Tasks reject execution reports and ACK. Their definition/history remain
 readable and editable without reopening or auto-ACK. Old outcomes retain their
 revision; overview marks whether the latest outcome matches the current definition.
+Recorded retros likewise retain their revision and become `current:false` after
+a description edit, without changing historic outcomes or reopening execution.
 
 ## Lightweight automation
 
@@ -269,6 +288,14 @@ overview; Executor defaults to execution. These are information defaults, not AC
 Full current description appears in execution/definition or a selected changelog
 revision, never silently truncated into an overview.
 
+Execution/definition return an independent latest recorded `retro`; each outcomes
+history item has its own retro projection:
+`{status:'recorded',text:string|null,revision,executor,author,source:'reported',at,outcome_id,current,has_findings}`.
+`has_findings` means text is non-null, not that its contents are useful.
+Null text means explicit no findings. Missing records yield `{status:'not_recorded'}`;
+automation yields `{status:'not_applicable'}`. Overview/list omit text while
+retaining status and attribution. Owner may read on demand, without required review.
+
 | Data | Bound |
 | --- | --- |
 | Title / reason | 240 / 2,000 characters |
@@ -277,7 +304,8 @@ revision, never silently truncated into an overview.
 | Metadata | Plain JSON object, 8,000 serialized characters, depth at most 12 |
 | Description + references + metadata | 64,000 serialized characters combined, including escaping |
 | Activity text / outcome summary | 4,000 / 8,000 characters |
-| Each activity / outcome input object | 16,000 serialized characters, including outcome references |
+| Retro text | 2,000 characters; null explicitly records no findings |
+| Activity / outcome input object; combined `{outcome,retro}` when supplied | 16,000 serialized characters, including outcome references and escaping |
 | Overview activity excerpt | 320 characters with explicit `truncated` |
 | List / history item counts | Default 20 / 5; maximum 50 / 10 |
 | List/history page payload | 24,000 serialized characters, cursor for every remainder |

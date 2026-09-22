@@ -49,6 +49,7 @@ Task、依赖引擎或级联状态。引用其他 Task 只是资料关联。
 | ACK 历史 | 逐版保留 `confirmed_for`（固定 Executor）与 `author`（自报操作者） |
 | `activity` | 执行者报告的事实；每条有 revision、executor、author、时间及正文 |
 | `outcome` | 成果 summary 与可选 references，保留所属 revision 与执行归属 |
+| `retro` | Agent 完成时显式提交的独立复盘文本或 null，与同次 outcome 关联，不代替成果或阻塞 |
 | `references` | `{label,target}` 数组；资料、成果或独立 Task 引用，不形成依赖 |
 | `metadata` | 有界纯 JSON 对象，供补充工作资料；不作为凭据、不覆盖固定字段或触发工作 |
 | 取消记录 | 取消原因、作者、时间；独立于 description changelog 和 Executor activity |
@@ -117,7 +118,7 @@ activity 只能引用固定 Executor 实际确认过的精确 revision，包括�
 | `in_progress` | 正在处理当前约定 |
 | `blocked` | 存在阻碍；执行者应记录所需条件 |
 | `in_review` | 工作约定所需的评审步骤，不是默认 Owner 审批 |
-| `done` | 已交付当前约定；同次完成报告必须提交新 outcome |
+| `done` | 已交付当前约定；Agent 同次完成报告必须提交新 outcome 与显式 retro 文本或 null |
 | `cancelled` | Task 已取消，不表示 native session 或外部操作已停止 |
 
 | 操作 | 数据效果 |
@@ -126,7 +127,7 @@ activity 只能引用固定 Executor 实际确认过的精确 revision，包括�
 | 首次指派 | 只接受未分配的 todo；绑定既有能力的 Executor，仍为 todo、ACK=null |
 | ACK | 只确认当前 description，不开始执行 |
 | 报告 | 对已确认版本显式写 activity、status、outcome；未提供的部分不推断 |
-| 完成 | 对当前已确认 revision 同次提交 `status=done` 与新 outcome |
+| 完成 | 对当前已确认 revision 同次原子提交 `status=done`、新 outcome 与显式 `retro` |
 | 取消 | 对未结束 Task 保存 cancelled 与原因；不要求先 ACK 新要求，也不停止 session |
 | 终态后的操作 | 可读历史和编辑定义；拒绝执行报告、ACK、改派或恢复 |
 
@@ -136,6 +137,27 @@ activity 只能引用固定 Executor 实际确认过的精确 revision，包括�
 
 完成或取消解除“单项未结束执行”的业务占用，但不证明 session 已原生空闲；
 再次指派仍检查能力、运行、队列、待决请求和后台工作。
+
+### 完成交付后的轻量复盘
+
+Executor 先完成交付，再于 done 前回顾实际工作，只记录有证据、可行动的自动化候选、
+具体慢点/重复卡点，或 Skill/MCP 发现、契约及能力验证缺口。观察、假设与外部等待
+要分开，不编造耗时，不要求固定多段模板或凑内容；无有用发现显式提交 null。
+普通报告省略 retro，仅 done 接受；缺字段不等于 null，应拒绝。
+复盘不代替 outcome/blockers、不授权改进或扩大范围，无新增派单、通知或 Owner 强制审阅。
+服务保证显式提交和持久化，不保证实际思考或文本质量。脚本 automation 不产生 Agent 复盘。
+
+schema v4 在 outcomes 增加 `retro TEXT`（可空）和
+`retro_recorded INTEGER NOT NULL DEFAULT 0`；旧数据迁移不伪造复盘或回填 no-findings。
+复盘与同次成果共享 revision、executor、author、at 和 `source:'reported'`，
+以 outcome_id 关联，保留历史事实。后续 description 编辑不改这些归因，
+只使 `current:false`，不重开 Task。
+execution/definition 和各 outcomes 项返回独立 retro 对象：
+`{status:'recorded',text:string|null,revision,executor,author,source:'reported',at,outcome_id,current,has_findings}`；
+has_findings 仅表示文本非 null，不代表质量；
+未记录为 `{status:'not_recorded'}`，automation 为 `{status:'not_applicable'}`。
+overview/list 只返回状态及归因摘要，不含 text。文本最多 2,000 字符，
+`{outcome,retro}` 合并序列化最多 16,000 字符，历史分页预算保持不变。
 
 ## 5. 状态订阅与消息
 

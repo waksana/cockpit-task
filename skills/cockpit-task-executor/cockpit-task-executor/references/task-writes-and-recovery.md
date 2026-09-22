@@ -57,7 +57,15 @@ An old-version activity may be saved while the same request's stale status or
 outcome is rejected. Inspect `result`, `error` and `definition_check` together;
 do not resubmit already-saved activity or claim the entire request had no effect.
 Before current-version status or delivery, reconcile and ACK current requirements.
-Marking done requires a new outcome in the same report, not a previously stored draft.
+Marking done requires a new outcome and explicit `retro` string or null in the same
+report, not a previously stored draft. Ordinary reports omit retro; only done
+accepts it. Missing retro is rejected, not interpreted as no findings.
+Every incoming done request missing retro, including an old-format replay,
+returns `INVALID_INPUT` before any writes, including activity. Legacy operations
+remain untouched: read `task_read(view=operation,request_id=<original ID>)` to
+inspect the saved result without side effects. Do not auto-fill null or retry
+modified input with the same request ID. Exact replay of a valid new request
+retains its original saved result without duplicate effects.
 For example, if v2 activity was saved but its status/outcome were rejected after a
 v3 edit, retain the v2 fact, read and ACK v3, then assess the work against v3 before
 any new report. Do not re-submit the activity or simply re-label the old result.
@@ -67,6 +75,61 @@ effects, and is refreshed even on replay. A newer revision in that check does no
 undo an already-saved report. An unavailable check is not evidence of alignment.
 An ACK reminder describes the assigned Executor's responsibility, not an instruction
 for Owner or another reader to ACK on their behalf.
+
+## Completion retro
+
+Complete delivery first, then briefly reflect before done. Record only useful
+actionable observations: automation candidates, specific slow/repeated sticking
+points, or Skill/MCP discovery, contract or capability harness gaps. Cite actual
+evidence, not fabricated timings; distinguish observation from hypothesis and
+external waits. No mandatory sections or filler: no findings means explicit null.
+Retro is not an outcome, blocker report or authorization to improve/expand scope.
+It adds no notification, dispatch or Owner review gate. The service enforces
+submission and persistence, not thought or text quality. Script automation has
+no Agent retro.
+
+These are alternative complete `task_report` arguments for synthetic Tasks, not
+two calls to execute in sequence. Replace IDs, revision and returned write context
+with actual values; text must describe your own evidence.
+
+```json
+{
+  "task_id": "11111111-1111-4111-8111-111111111111",
+  "actor_session_id": "executor-session",
+  "request_id": "complete-with-finding",
+  "write_context": "returned-write-context",
+  "revision": 1,
+  "status": "done",
+  "outcome": {
+    "summary": "Delivered the agreed validation report; all agreed checks passed.",
+    "references": [{"label": "Validation evidence", "target": "reports/validation.txt"}]
+  },
+  "retro": "Observed: reports/validation.txt records the same parameter-validation command for three fixtures. A reusable fixture command is an automation candidate; time savings are unmeasured. No improvement work was performed."
+}
+```
+
+```json
+{
+  "task_id": "22222222-2222-4222-8222-222222222222",
+  "actor_session_id": "executor-session",
+  "request_id": "complete-with-no-findings",
+  "write_context": "returned-write-context",
+  "revision": 1,
+  "status": "done",
+  "outcome": {"summary": "Delivered the agreed report with its validation evidence."},
+  "retro": null
+}
+```
+
+Retro text is nonblank and at most 2,000 characters. The combined serialized
+`{outcome,retro}` is at most 16,000 characters, including references and escaping.
+The report's `retro` effect is `saved`, `rejected` or `not_requested`; completion
+status, new outcome and retro save atomically. A stale completion may preserve
+its acknowledged old-version activity while rejecting status, outcome and retro.
+Inspect each effect before any corrected request; never relabel old work.
+The retro inherits that outcome's revision, Executor, author, reported source,
+time and outcome ID. Later definition edits leave these facts intact and show
+`current:false`; neither reopens the Task nor creates a new reflection.
 
 ## Creating, preparing and assigning
 

@@ -173,7 +173,7 @@ test('skipped ACK revision never authorizes activity, even after higher ACK', t 
 test('stale mixed report saves only acknowledged activity and replay preserves partial effects', t => {
   const f = fixture(t), one = f.ack(f.bind(f.create()));
   const two = f.edit(one, { description: 'New requirements' });
-  const input = f.input(one, { actor_session_id: 'executor', activity: { text: 'Old work' }, status: 'done', outcome: { summary: 'Old result' } });
+  const input = f.input(one, { actor_session_id: 'executor', activity: { text: 'Old work' }, status: 'done', outcome: { summary: 'Old result' }, retro: null });
   let partial;
   assert.throws(() => f.store.executeLocal('task_report', input), error => {
     partial = error.result;
@@ -182,6 +182,7 @@ test('stale mixed report saves only acknowledged activity and replay preserves p
   assert.equal(partial.activity.status, 'saved');
   assert.equal(partial.task_status.status, 'rejected');
   assert.equal(partial.outcome.status, 'rejected');
+  assert.equal(partial.retro.status, 'rejected');
   assert.equal(f.store.task(one.task_id).status, 'todo');
   assert.equal(f.store.read({ view: 'outcomes', task_id: one.task_id }).items.length, 0);
   f.ack(two);
@@ -239,7 +240,7 @@ test('terminal Tasks reject execution and ACK, preserve outcomes and permit defi
   const f = fixture(t), task = f.ack(f.bind(f.create()));
   f.report(task, { outcome: { summary: 'Draft' } });
   rejects(() => f.report(task, { status: 'done', activity: { text: 'No fresh outcome' } }), 'INVALID_INPUT');
-  const done = f.report(task, { status: 'done', outcome: { summary: 'Delivered' } });
+  const done = f.report(task, { status: 'done', outcome: { summary: 'Delivered' }, retro: null });
   rejects(() => f.report(done, { activity: { text: 'Late' } }), 'TASK_STATE_CONFLICT');
   rejects(() => f.ack(done), 'TASK_STATE_CONFLICT');
   const { revision, ...cancel } = f.input(done, { reason: 'Cannot rewrite completion' });
@@ -470,4 +471,148 @@ test('combined definition and report payload bounds account for JSON escaping wi
   rejects(() => f.report(assigned, { activity: { text: '\0'.repeat(4000) } }), 'INVALID_INPUT');
   rejects(() => f.report(assigned, { outcome: { summary: '\0'.repeat(8000) } }), 'INVALID_INPUT');
   assert.equal(f.store.read({ view: 'activity', task_id: task.task_id }).items.length, 0);
+});
+
+test('completion requires fresh explicit retro and rejects invalid reports before any effects', t => {
+  const f = fixture(t), task = f.ack(f.bind(f.create()));
+  const base = { status: 'done', outcome: { summary: 'Delivered' }, activity: { text: 'Must not partially save' } };
+  for (const retro of [undefined, '', ' \n\t', 0, false, {}, [], 'r'.repeat(LIMITS.retro + 1)]) {
+    const input = f.input(task, { ...base, ...(retro === undefined ? {} : { retro }) });
+    rejects(() => parseInput('task_report', input), 'INVALID_INPUT');
+    rejects(() => f.store.executeLocal('task_report', input), 'INVALID_INPUT');
+    rejects(() => f.store.report(input), 'INVALID_INPUT');
+  }
+  for (const status of [undefined, 'in_progress', 'blocked', 'in_review']) {
+    rejects(() => f.report(task, { status, retro: null, outcome: { summary: 'Not completion' } }), 'INVALID_INPUT');
+  }
+  assert.equal(f.store.task(task.task_id).status, 'todo');
+  assert.deepEqual(f.store.task(task.task_id).retro, { status: 'not_recorded' });
+  assert.equal(f.store.read({ view: 'activity', task_id: task.task_id }).items.length, 0);
+  assert.equal(f.store.read({ view: 'outcomes', task_id: task.task_id }).items.length, 0);
+  f.report(task, { outcome: { summary: 'Prior result is not a completion' } });
+  rejects(() => f.report(task, { status: 'done', retro: null }), 'INVALID_INPUT');
+  rejects(() => f.report(task, { status: 'done', outcome: { summary: 'Fresh but missing retro' } }), 'INVALID_INPUT');
+});
+
+test('text and explicit null retro survive restart, exact replay and later definition edits', t => {
+  const f = fixture(t);
+  for (const text of ['Automate the repeated deterministic fixture setup.', null, 'r'.repeat(LIMITS.retro)]) {
+    const task = f.ack(f.bind(f.create()));
+    const request = f.input(task, { actor_session_id: 'executor', status: 'done', outcome: { summary: 'Delivered' }, retro: text });
+    const done = f.store.executeLocal('task_report', request);
+    assert.equal(done.retro.status, 'saved');
+    assert.equal(done.retro.outcome_id, done.outcome.id);
+    const expected = {
+      status: 'recorded', text, revision: 1, executor: 'executor', author: 'executor', source: 'reported',
+      outcome_id: done.outcome.id, current: true, has_findings: text !== null,
+    };
+    const retro = f.store.task(task.task_id).retro;
+    assert.ok(Number.isFinite(Date.parse(retro.at)));
+    assert.deepEqual(retro, { ...expected, at: retro.at });
+    for (const view of ['execution', 'definition']) {
+      assert.deepEqual(f.store.read({ view, task_id: task.task_id }).retro, retro);
+    }
+    assert.deepEqual(f.store.read({ view: 'outcomes', task_id: task.task_id }).items[0].retro, retro);
+    const overview = f.store.read({ view: 'overview', task_id: task.task_id }).retro;
+    assert.equal('text' in overview, false);
+    assert.equal(overview.has_findings, text !== null);
+    const listed = f.store.read({ view: 'list', status: 'done' }).items.find(item => item.id === task.task_id);
+    assert.deepEqual(listed.retro, overview);
+    f.restart();
+    assert.deepEqual(f.store.executeLocal('task_report', request), done);
+    assert.deepEqual(f.store.task(task.task_id).retro, retro);
+    rejects(() => f.store.executeLocal('task_report', { ...request, retro: 'Different retrospective' }), 'REQUEST_ID_CONFLICT');
+    rejects(() => f.report(done, { status: 'done', outcome: { summary: 'Repeat completion' }, retro: null }), 'TASK_STATE_CONFLICT');
+    rejects(() => f.report(done, { status: 'done', outcome: { summary: 'Prior retro cannot satisfy a new request' } }), 'INVALID_INPUT');
+    const updated = f.edit(done, { description: 'Later clarification' });
+    assert.equal(updated.revision, 2);
+    for (const retro of [
+      f.store.task(task.task_id).retro,
+      f.store.read({ view: 'outcomes', task_id: task.task_id }).items[0].retro,
+    ]) {
+      assert.equal(retro.current, false);
+      assert.equal(retro.revision, 1);
+      assert.equal(retro.text, text);
+    }
+    assert.deepEqual(f.store.executeLocal('task_report', request), done);
+    assert.equal(f.store.read({ view: 'outcomes', task_id: task.task_id }).items.length, 1);
+  }
+});
+
+test('completion transaction rolls back outcome, retro, activity and subscriptions on status failure', t => {
+  const f = fixture(t), task = f.ack(f.bind(f.create()));
+  const { revision, ...subscriptionInput } = f.input(task, { statuses: ['done'] });
+  f.store.executeLocal('task_subscribe', subscriptionInput);
+  f.store.db.exec(`CREATE TRIGGER fail_completion BEFORE UPDATE OF status ON tasks
+    WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT, 'synthetic completion failure'); END`);
+  const request = f.input(task, { status: 'done', outcome: { summary: 'Delivered' }, retro: 'A useful finding', activity: { text: 'Final work' } });
+  assert.throws(() => f.store.executeLocal('task_report', request), /synthetic completion failure/);
+  assert.equal(f.store.task(task.task_id).status, 'todo');
+  assert.deepEqual(f.store.task(task.task_id).retro, { status: 'not_recorded' });
+  assert.equal(f.store.read({ view: 'outcomes', task_id: task.task_id }).items.length, 0);
+  assert.equal(f.store.read({ view: 'activity', task_id: task.task_id }).items.length, 0);
+  assert.equal(f.store.read({ view: 'subscriptions', task_id: task.task_id }).items[0].state, 'waiting');
+  rejects(() => f.store.operation(request.request_id), 'OPERATION_NOT_FOUND');
+  f.store.db.exec('DROP TRIGGER fail_completion');
+  assert.equal(f.store.executeLocal('task_report', request).retro.status, 'saved');
+  assert.equal(f.store.read({ view: 'subscriptions', task_id: task.task_id }).items[0].state, 'triggered');
+});
+
+test('competing stores preserve one completion and reject changed lifecycle or unacknowledged revisions', t => {
+  const f = fixture(t), task = f.bind(f.create());
+  const fields = { status: 'done', outcome: { summary: 'Delivered' }, retro: null };
+  rejects(() => f.report(task, fields), 'ACK_REQUIRED');
+  f.ack(task);
+  const other = new TaskStore(f.directory);
+  t.after(() => other.close());
+  const input = f.input(task, { ...fields, retro: 'Winner retrospective' });
+  f.store.executeLocal('task_report', input);
+  assert.equal(other.task(task.task_id).retro.text, input.retro);
+  rejects(() => other.executeLocal('task_report', f.input(task, fields)), 'TASK_STATE_CONFLICT');
+  assert.equal(other.read({ view: 'outcomes', task_id: task.task_id }).items.length, 1);
+});
+
+test('completion payload bounds retain every full history entry including escaped retro', t => {
+  const f = fixture(t), task = f.ack(f.bind(f.create()));
+  const text = '\0'.repeat(1999) + 'r';
+  rejects(() => f.report(task, { status: 'done', outcome: { summary: 's'.repeat(8000) }, retro: text }), 'INVALID_INPUT');
+  for (let i = 0; i < 3; i++) f.report(task, { outcome: { summary: 's'.repeat(8000) } });
+  f.report(task, { status: 'done', outcome: { summary: 's'.repeat(3000) }, retro: text });
+  let cursor;
+  const outcomes = [];
+  do {
+    const page = f.store.read({ view: 'outcomes', task_id: task.task_id, ...(cursor ? { cursor } : {}) });
+    assert.ok(JSON.stringify(page).length <= LIMITS.page);
+    outcomes.push(...page.items);
+    cursor = page.next_cursor;
+  } while (cursor);
+  assert.equal(outcomes.length, 4);
+  assert.equal(outcomes[0].retro.text, text);
+  assert.ok(outcomes.slice(1).every(item => item.retro.status === 'not_recorded'));
+});
+
+test('v3 migration preserves historical rows and receipts without inventing a null retro', t => {
+  const f = fixture(t), task = f.ack(f.bind(f.create()));
+  const input = f.input(task, { status: 'done', outcome: { summary: 'Legacy delivery' } });
+  f.store.db.prepare('INSERT INTO outcomes(id,task_id,revision,executor,author,summary,refs,at) VALUES(?,?,?,?,?,?,?,?)')
+    .run('historical-outcome', task.task_id, 1, 'executor', 'executor', input.outcome.summary, '[]', new Date().toISOString());
+  f.store.db.prepare("UPDATE tasks SET status='done',lifecycle=lifecycle+1 WHERE id=?").run(task.task_id);
+  f.store.insertReceipt('task_report', input);
+  const oldResult = { status: 'applied', task_id: task.task_id };
+  f.store.saveReceipt(input.request_id, oldResult, null);
+  f.store.db.exec('ALTER TABLE outcomes DROP COLUMN retro; ALTER TABLE outcomes DROP COLUMN retro_recorded; PRAGMA user_version=3');
+  const tasks = f.store.db.prepare('SELECT * FROM tasks').all();
+  const receipts = f.store.db.prepare('SELECT * FROM operations').all();
+  f.restart();
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 4);
+  assert.deepEqual(f.store.db.prepare('SELECT * FROM tasks').all(), tasks);
+  assert.deepEqual(f.store.db.prepare('SELECT * FROM operations').all(), receipts);
+  assert.deepEqual(f.store.task(task.task_id).retro, { status: 'not_recorded' });
+  const outcome = f.store.read({ view: 'outcomes', task_id: task.task_id }).items[0];
+  assert.equal(outcome.summary, input.outcome.summary);
+  assert.deepEqual(outcome.retro, { status: 'not_recorded' });
+  rejects(() => f.store.executeLocal('task_report', input), 'INVALID_INPUT');
+  assert.deepEqual(f.store.read({ view: 'operation', request_id: input.request_id }).result, oldResult);
+  assert.equal(f.store.read({ view: 'outcomes', task_id: task.task_id }).items.length, 1);
+  assert.equal(f.store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
 });

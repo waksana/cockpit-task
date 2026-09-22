@@ -89,7 +89,7 @@ task_edit、definition_check 和 ACK 差异都不自动触发队列清理、中�
 
 Task ID 为 UUID。session/request ID 最长 200 字符，write_context 最长 1,000，cwd 最长 4,000，title 最长 240，reason 最长 2,000。description 最长 24,000 字符。references 最多 20 项，label/target 最长 200/2,000；整个 references JSON 最多 8,000 字符。metadata 为有界纯 JSON 对象，序列化最多 8,000 字符、深度最多 12。description、references、metadata 的组合序列化最多 64,000 字符，编辑也校验与现有未改字段的组合。
 
-activity.text 最长 4,000，outcome.summary 最长 8,000；每个 activity/outcome 输入对象序列化最多 16,000 字符。列表默认 20、最多 50 条；历史默认 5、最多 10 条。每个列表/历史页另受 **24,000 序列化字符**聚合预算限制，可能少于所请求条数；所有剩余条目均通过 `next_cursor` 继续读取。预算包括 JSON 转义，不包括通用响应封装/定义检查；不截断历史正文。完整当前定义和单个完整修订不套用页预算，其输入组合与作者等字段限制使结果保持约 80,000 字符以内。overview 活动摘录最多 320 字符并带 `truncated`。
+activity.text 最长 4,000，outcome.summary 最长 8,000；每个 activity/outcome 输入对象序列化最多 16,000 字符。retro 为非空白文本（最多 2,000 字符）或 null；提供时 `{outcome,retro}` 合并序列化也不得超过 16,000 字符，包含 references 和 JSON 转义。列表默认 20、最多 50 条；历史默认 5、最多 10 条。每个列表/历史页另受 **24,000 序列化字符**聚合预算限制，可能少于所请求条数；所有剩余条目均通过 `next_cursor` 继续读取。预算包括 JSON 转义，不包括通用响应封装/定义检查；不截断历史正文。完整当前定义和单个完整修订不套用页预算，其输入组合与作者等字段限制使结果保持约 80,000 字符以内。overview 活动摘录最多 320 字符并带 `truncated`。
 
 ## 3. 工具输入与效果
 
@@ -118,6 +118,15 @@ activity.text 最长 4,000，outcome.summary 最长 8,000；每个 activity/outc
 列表 `status` 可为业务状态、`unfinished`（默认）或 `all`；`query` 只匹配标题。overview/execution/definition 返回扁平字段，不包在 `task` 中；列表为 `{items,next_cursor}`，历史为 `{task_id,items,next_cursor}`。overview 的 `activity` 为可空摘录，`outcome` 为 `{available:false}` 或带 `id,revision,at,current` 的可用性记录，不附成果全文。execution/definition 返回当前 `description,references,metadata`，不附 activity/outcome。changelog 摘要带 `description_available,description_length`；选择单版返回 `task_id,revision,description,reason,author,at,source`。
 
 operation 视图返回 `{request_id,tool,status,task_id?,result,error,created_at,updated_at}`；这里 status 是回执的 `pending|final`，与其内部 `result.operation.status` 及 Task 业务 status 不同。已有 Task 的操作从持久输入提供 `task_id`，失败且 `result:null` 时也保留关联，不返回整份输入。外部步骤保存在内部 operation，本地操作保存其原 effects/错误；definition_check 每次响应重新读取，不保存在回执里，也不能因原操作失败而漏掉相关 Task。
+
+execution/definition 另含独立 `retro`，outcomes 每项含其对应 retro，原成果正文不变。
+完整形状为 `{status:'recorded',text:string|null,revision,executor,author,source:'reported',at,outcome_id,current,has_findings}`；
+has_findings 只区分非 null 文本和显式无发现，不评价质量；
+同次完成 outcome 提供全部归因。null 是显式无发现，区别于未记录的
+`{status:'not_recorded'}`；automation 为 `{status:'not_applicable'}`。
+overview/list 返回相同状态、归因和 current，但不含 text。终态 description 编辑
+保留原记录 revision，显示 `current:false`，不伪造新复盘；迁移不回填历史无发现。
+Owner 可按需读取，不要求审阅，不从 recorded/current 推断文本质量或完整交付。
 
 Task 返回 `kind=agent|automation`；automation 的 overview/list 含运行事实，
 execution/definition 的 `automation` 另含完整 `script` 和 `parameters` 快照。
@@ -434,15 +443,24 @@ Task 未结束且正文实际改变时，同时确认新 revision；不改变 st
 
 仅适用于 Agent Task；automation 状态与成果由服务维护，返回 `AUTOMATION_MANAGED`。
 
-输入：共用变更字段，加 `revision, activity?, status?, outcome?`，至少有一项。
+输入：共用变更字段，加 `revision, activity?, status?, outcome?, retro?`。
+activity/status/outcome 至少有一项；retro 仅可随 done 提交且此时必填。
 
 | 可选部分 | 输入形状 | 意义 |
 | --- | --- | --- |
 | `activity` | `{text}` | Executor 对所依据版本的执行活动，作者与保存时间由服务记录 |
 | `status` | `in_progress`、`blocked`、`in_review`、`done` | 明确状态变化；不靠 activity 文本推断 |
 | `outcome` | `{summary, references?}` | 提交的成果；保留其 description revision 和执行归属 |
+| `retro` | 非空白 string 或 null | done 必须显式提交；null 表示复盘后无有用发现，普通报告省略 |
 
-各部分都是显式输入：只写 activity 不改状态；只改状态不凭空生成一条 activity；提交 outcome 本身不隐式进入 done。完成时可一次明确提交 `status=done` 与 outcome，两者一起保存。进入 done 必须有本次完成对应的成果，不借旧版或前次执行的 outcome 代替。
+各部分都是显式输入：只写 activity 不改状态；只改状态不凭空生成一条 activity；提交 outcome 本身不隐式进入 done。Agent 完成时同次明确提交 `status=done`、新 outcome 与 `retro`，三者原子保存。不借旧版或前次 outcome 代替；省略 retro 明确拒绝，不默认成 null；非 done 即使传 null 也拒绝。
+所有传入 done 请求缺少 retro 时，均在任何写入前返回 `INVALID_INPUT`，包括同次
+activity 和旧格式历史请求的重放。旧 operations 保持原样，可用无副作用的
+`task_read(view=operation,request_id=原ID)` 读取已保存结果；不自动补 null，
+不以相同 request_id 改输入重试。符合当前契约的新请求精确重放保留原保存结果，
+不重复副作用；请求 ID 和完整输入均须保持不变。
+Executor 先交付再轻量复盘，内容为有证据的可行动观察，不代替 outcome 或 blockers。
+服务只保证提交和持久化，不验证思考/质量；不新增通知、派单、Owner 审阅或改进授权。
 
 在当前 revision 且已 ACK 的前提下，合法状态和成果作为一个执行更新一起提交。无合法 lifecycle 转换、无成果却请求 done、格式错误等输入应在写入前明确拒绝，不随意部分执行。
 
@@ -453,12 +471,14 @@ activity 只能引用固定 Executor 精确 ACK 过的版本，合规自动 ACK 
 在其他生命周期和并发条件下仍可合法追加：
 
 - activity 保存原 revision。
-- 同次请求的 status / outcome 不保存，返回 DESCRIPTION_UPDATED。
+- 同次请求的 status / outcome / retro 不保存，返回 DESCRIPTION_UPDATED。
 - 没有提交 activity 时，没有这部分应用；只有 activity 时可成功并附提醒。
 - 不因为允许旧版 activity 而放松归属、取消和未知版本等保护。
 - 所引用版本尚未 ACK 时，activity、状态和成果均不保存，返回 ACK_REQUIRED。不存在的版本同样拒绝，不能伪造旧版补记。
 
-报告结果逐项区分 `saved | rejected | not_requested`；部分应用的 MCP 响应保留完整结构并标记失败，不能引导 agent 整单重放。
+报告结果对 activity/status/outcome/retro 逐项区分 `saved | rejected | not_requested`；
+retro 保存效果附 outcome_id 与 revision，仅与同次完成一起保存。部分应用的 MCP 响应
+保留完整结构并标记失败，不能引导 agent 整单重放。
 
 ### task_cancel
 
@@ -591,7 +611,7 @@ Executor:
               activity={text: ...}, ...)         → 仅记录活动
   task_read(view=execution, task_id)              → 交付前核对
   task_report(task_id, revision=1,
-              status=done, outcome={...}, ...)    → 完整交付；匹配显式订阅时系统通知 Owner
+              status=done, outcome={...}, retro=null, ...) → 完整交付并显式无复盘发现；匹配既有订阅时系统通知 Owner
 ```
 
 每次写入都带 actor_session_id 和新的明确 request_id；已有 Task 写入还带读取返回的 write_context，create/session_create/session_prepare/unsubscribe 不带。相同操作重试保留相同输入和 request_id。Skill 读取也提交自己的 actor_session_id；每次响应都处理 definition_check。仅登记 backlog 不创建/准备 Executor 或派单。

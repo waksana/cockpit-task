@@ -22,6 +22,7 @@ The single-Task overview contains:
 | `activity` | Latest activity or null, including its ID, revision, Executor, author, time and reported source |
 | `activity.text`, `activity.truncated` | Up to 320 characters of that actual activity, not a generated summary; expand activity if truncated and relevant |
 | `outcome` | `{available:false}` or latest outcome ID, revision, time, `available:true` and `current` |
+| `retro` | Completion reflection status and attribution, without text; independent of outcome availability |
 | `created_at`, `updated_at` | Task record timestamps, not proof of live session activity |
 | `write_context` | Opaque concurrency context for later writes, not business progress |
 | `cancellation` | Reason, author and time when cancelled; single overview only |
@@ -52,6 +53,23 @@ combine its actual text with Task status and requirements before claiming delive
 `definition` and `execution` currently return the same complete Task projection:
 identity, responsibility, status, revisions, timestamps, write context, description,
 references and metadata. They do not bundle activity, outcomes or history.
+
+They also include an independent `retro` object. Each `outcomes` history item
+includes its own retro, without changing the saved outcome content:
+
+- `{status:"recorded",text:string|null,revision,executor,author,source:"reported",at,outcome_id,current,has_findings}`
+  means an explicit completion submission. Null text means no useful findings,
+  not missing reflection. Attribution comes from the same completion outcome.
+- `{status:"not_recorded"}` means no recorded submission, including legacy data
+  and ordinary non-completion outcomes; migration never invents old reflections.
+- `{status:"not_applicable"}` is the script-automation path, with no Agent retro.
+
+`has_findings` distinguishes non-null text from explicit no findings, not quality.
+Overview/list return the same status and attribution without `text`. A later
+description edit preserves the recorded revision and sets `current:false`.
+Recorded/current is not proof of thought, quality or delivery. Owner may read
+text on demand, with no required review or new notification; retro does not
+replace outcome/blockers or authorize improvements or scope expansion.
 
 For automation, `definition` / `execution` also include immutable `automation.script`
 and `automation.parameters`; overview/list contain runtime facts only. Inspect run
