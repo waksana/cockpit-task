@@ -1,6 +1,6 @@
 ---
 name: github-coding
-description: "Use for authorized Git/GitHub coding work with Task: Owner prepares an isolated repository environment and Issue, Executor implements through the authorized PR/merge boundary, and Owner safely cleans up. Also applies the Git isolation and delivery principles without GitHub. Not needed for non-coding Tasks or discussion alone; reuse guidance already in context."
+description: "Use when authorized work requires changing version-controlled repository files: Owner prepares isolation and any GitHub Issue, Executor delivers through the authorized review/merge boundary, and Owner safely cleans up. Not triggered by GitHub mentions or deployment using existing artifacts alone. Keep Git isolation without GitHub; reuse guidance already in context."
 ---
 
 # GitHub coding
@@ -12,6 +12,16 @@ Here, "main" means the repository's agreed target mainline, not a required branc
 
 ## Agree on the result before creating work
 
+Apply this Skill to changes intended for commit to version-controlled repository
+files, not mentions of GitHub, main, Releases or deployment. Installing existing
+verified artifacts, configuring the runtime and safely restarting use Task without
+this Skill requiring an Issue, PR, branch or worktree. Existing project policies
+and reliability requirements, including immutable installation directories, still apply.
+Runtime configuration is distinct from repository changes: version bumps, build
+configuration, code and repository documentation intended for commit follow this flow.
+Mixed delivery stays one complete Task; Issue/PR scope covers only necessary repository
+changes, not an extra umbrella deployment Issue or separate stage Tasks.
+
 Distinguish discussion, investigation and authorized implementation. Questions and
 idea exploration do not require an Issue, Task or worktree. For coding delivery,
 confirm the repository, intended result and completion boundary. A full delivery
@@ -22,7 +32,9 @@ Use an existing suitable Issue or work environment rather than duplicating it.
 For Git repositories not hosted on GitHub, keep the isolation, delivery and cleanup
 principles, skipping inapplicable Issue/PR steps. Non-coding work is unaffected.
 Release/tag creation, installation, deployment, restart and data migration are not
-default coding stages and require separate authorization.
+default coding stages and require separate authorization. That authorization and
+this Skill's applicability are separate questions; neither changes Owner's default
+delegation responsibility.
 
 ## Owner: prepare, then delegate
 
@@ -38,8 +50,14 @@ If a suitable environment already exists, verify its ownership, base and readine
 and reuse it. Record the actual paths; a new session alone does not isolate files.
 Executor performs code operations in this worktree, not a shared mutable checkout.
 
-For GitHub work, find and reuse the corresponding Issue or create one describing
-the goal, scope and completion conditions **before creating and assigning Task**.
+For initially known GitHub repository changes, find and reuse the corresponding
+Issue or create one describing their goal, scope and completion conditions, and
+prepare the isolated environment **before creating and assigning Task**.
+Do not speculate about repository changes just to create a deployment Task.
+If changes emerge during execution, keep the existing Task's requirements current
+and obtain Owner-coordinated Issue/environment preparation before editing repository
+files. Use Task coordination and direct user questions when needed, not Executor-to-Owner
+messages or changes in a shared checkout.
 Issue maintenance and preparing/cleaning this work environment are Owner coordination,
 not permission to implement the code personally or through Owner's subagents.
 
@@ -89,7 +107,8 @@ using the worktree, any outstanding users and artifacts to preserve. Do not clai
 release while you or subagents still use it; Executor must not delete its own cwd.
 Report done against the latest acknowledged agreement with that new outcome.
 Do not manually message Owner, directly or through subagents, even if notification
-delivery fails. Task done means Executor's agreed code result, not resource cleanup
+delivery fails. Task done means the complete agreed result, including separately
+authorized non-coding work in mixed delivery, not code merge alone, resource cleanup
 or an idle native session.
 
 ## Owner: finish the environment cleanup

@@ -118,7 +118,7 @@ test('each current Skill has an independent relative reference closure without r
   assertSkillClosure(coding, ['SKILL.md']);
   const source = readFileSync(join(coding, 'SKILL.md'), 'utf8');
   assert.equal(skillMetadata(source).name, 'github-coding');
-  assert.ok(source.split('\n').length < 130, 'Coding guidance stays a short flow, not a command catalogue');
+  assert.ok(source.split('\n').length < 150, 'Coding guidance stays a short flow, not a command catalogue');
   assert.doesNotMatch(source, /```(?:sh|bash)|git (?:checkout|reset|stash|push|clean)\b/);
 });
 
@@ -127,7 +127,7 @@ test('coding guidance composes with roles without widening implementation or sub
     const source = readFileSync(join(root, skillDirectory(role), 'SKILL.md'), 'utf8');
     const section = source.match(/## Coding work\n([\s\S]*?)(?=\n## )/)?.[1];
     assert.ok(section?.includes('`github-coding`'), `${role} must independently discover the work Skill`);
-    assert.ok(section.trim().split('\n').length <= 6, 'Do not duplicate the work flow in role Skills');
+    assert.ok(section.trim().split('\n').length <= 8, 'Do not duplicate the work flow in role Skills');
   }
   const prompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
   assert.match(prompt, /Issue\/environment preparation and safe post-merge cleanup are coordination, not permission to implement code/);
@@ -162,7 +162,8 @@ test('coding guidance composes with roles without widening implementation or sub
     /exact latest PR head, not an earlier green run/,
     /Merge normally only within the authorized boundary and repository protections; never bypass them/,
     /Do not manually message Owner, directly or through subagents/,
-    /Task done means Executor's agreed code result, not resource cleanup or an idle native session/,
+    /Task done means the complete agreed result/,
+    /not code merge alone, resource cleanup or an idle native session/,
     /PR\/branch\/worktree path/,
     /explicit release evidence: which workers have stopped using the worktree, any outstanding users and artifacts to preserve/,
     /Do not claim release while you or subagents still use it/,
@@ -183,6 +184,37 @@ test('coding guidance composes with roles without widening implementation or sub
     /not another Task, new status or mandatory acceptance gate/,
   ];
   for (const requirement of requirements) assert.match(coding, requirement);
+});
+
+test('coding scope distinguishes repository changes from deployment and keeps mixed delivery together', () => {
+  const source = readFileSync(join(root, codingDirectory, 'SKILL.md'), 'utf8');
+  assert.match(skillMetadata(source).description, /version-controlled repository files/);
+  const scope = prose(source.split('## Agree on the result before creating work')[1]
+    .split('## Owner: prepare, then delegate')[0]);
+  for (const requirement of [
+    /changes intended for commit/,
+    /existing verified artifacts/,
+    /without this Skill requiring an Issue, PR, branch or worktree/,
+    /immutable installation directories/,
+    /Runtime configuration is distinct from repository changes/,
+    /Mixed delivery stays one complete Task/,
+    /Issue\/PR scope covers only necessary repository changes/,
+    /require separate authorization/,
+  ]) assert.match(scope, requirement);
+  assert.match(prose(source), /including separately authorized non-coding work in mixed delivery/);
+  const preparation = prose(source.split('## Owner: prepare, then delegate')[1]
+    .split('## Executor: deliver through the authorized boundary')[0]);
+  assert.match(preparation, /initially known GitHub repository changes/);
+  assert.match(preparation, /If changes emerge during execution/);
+  assert.match(preparation, /Owner-coordinated Issue\/environment preparation before editing/);
+  assert.doesNotMatch(preparation, /For GitHub work,/);
+  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8')
+    .split('## Coding work')[1].split('## Coordinate through Task')[0]);
+  assert.match(owner, /version-controlled repository files/);
+  assert.match(owner, /pure deployment using existing verified artifacts/);
+  assert.match(owner, /changes discovered later/);
+  assert.match(owner, /Mixed delivery stays one Task/);
+  assert.match(owner, /default delegation responsibility/);
 });
 
 test('role prompts stay short while the Skills preserve delegation, communication and synchronization boundaries', () => {

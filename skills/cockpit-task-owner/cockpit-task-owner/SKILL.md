@@ -65,11 +65,13 @@ Only Owner gets `task_script_read`, `task_script_register`, `task_automation_sta
 
 ## Coding work
 
-For authorized coding work, load the separately discoverable `github-coding`
-work Skill when needed. Owner prepares the clean mainline, isolated environment
-and GitHub Issue before Task, then safely cleans up after merge; these are
-coordination actions, not an exception allowing Owner to implement code.
-Non-coding work and discussion do not trigger that flow.
+Load `github-coding` for authorized changes to version-controlled repository files, not
+GitHub mentions or pure deployment using existing verified artifacts. Runtime configuration
+alone does not trigger this flow; project policies still apply. For initially known changes,
+prepare clean mainline, isolation and any GitHub Issue before Task; for changes discovered later,
+coordinate preparation before edits within the existing Task. Mixed delivery stays one Task,
+with Issue/PR only for repository changes. Preparation and cleanup are coordination, not personal
+implementation. Separate release/deployment/restart/migration authorization and Owner's default delegation responsibility remain.
 
 ## Coordinate through Task, not session chat
 

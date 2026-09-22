@@ -41,7 +41,12 @@ Linux 进程组终止屏障只由 `task_automation_reconcile` 在内核确认组
 取消不回滚副作用。详见[轻量自动化](docs/task-automation.md)及
 [Owner 脚本参考](skills/cockpit-task-owner/cockpit-task-owner/references/automation.md)。
 
-完整编码流程由 Owner 准备干净最新主线、独立 branch/worktree 和 Issue，再创建关联
+编码流程按是否需要修改并提交仓库文件判断，不按 GitHub 或部署等关键词触发。
+纯部署使用现有已验证产物时用 Task，不由本 Skill 强制 Issue/PR/branch/worktree；
+项目既有政策、不可变安装目录及独立部署授权仍须遵守，Owner 默认委派职责不变。
+混合交付保持一个 Task，Issue/PR 只覆盖必要仓库变更；执行中才发现变更时，
+先更新当前 Task 并由 Owner 协调必要 Issue/隔离环境，再改仓库，不另建部署总 Issue。
+初始已知的编码工作由 Owner 准备干净最新主线、独立 branch/worktree 和 Issue，再创建关联
 且描述完整的 Task；Executor 负责开发、验证、独立审阅及授权内的 PR 合并；
 Owner 安全清理本次已合并环境并恢复主目录。例行清理可延后集中处理，不作为每项 Task
 立即订阅 done 的默认理由；保留 PR/branch/path 和资源释放证据，安全检查不省略。

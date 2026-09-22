@@ -64,12 +64,20 @@ does not replace fresh Task reads.
 Both roles also discover the same self-contained
 [github-coding](../skills/github-coding/github-coding/SKILL.md) work Skill through
 their declared discovery roots; selecting both deduplicates that resource.
-It is loaded for authorized coding work, not non-coding work or discussion alone.
-Owner prepares clean current mainline, a dedicated branch/worktree and environment,
+Applicability depends on changes intended for commit to version-controlled repository
+files, not GitHub mentions. Deployment of existing verified artifacts and runtime
+configuration use Task without this Skill requiring Issue/PR/branch/worktree;
+project policies, immutable installation requirements and separate deployment
+authorization still apply. Owner's default delegation responsibility is unchanged.
+Mixed delivery stays one Task with Issue/PR only for necessary repository changes.
+If changes emerge later, update that Task and obtain Owner-coordinated Issue/environment
+preparation before editing, not a new deployment Issue or stage Task.
+For initially known changes, Owner prepares clean current mainline, a dedicated branch/worktree and environment,
 then reuses or creates an Issue before Task. Executor owns implementation, checks,
 independent review and authorized PR merge. Owner safely removes only this work's
 merged temporary resources once no longer in use and restores clean current mainline.
-Task done is code delivery, not proof cleanup is complete or the session idle.
+Task done means the complete agreed delivery, including separately authorized
+non-coding work in a mixed Task, not code merge alone or proof of cleanup/session idle.
 Routine cleanup can be deferred and batched; it does not by itself justify waking
 Owner for each Task. Record PR/branch/path and explicit resource-release evidence.
 Subscribe only if the future status unlocks necessary authorized Owner action.
