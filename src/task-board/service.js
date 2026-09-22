@@ -1,6 +1,7 @@
 import { TaskError, parseInput } from './contracts.js';
 import { assignExecutor, createExecutor, prepareExecutor } from './operations.js';
 import { deliverNotification } from './notifications.js';
+import { AutomationRunner } from './automation-runner.js';
 
 export class TaskService {
   constructor(store, host, { invalidate = () => {}, report = () => {} } = {}) {
@@ -12,6 +13,7 @@ export class TaskService {
     this.closing = false;
     this.closed = false;
     this.sessionOperations = new Set();
+    this.automation = new AutomationRunner(this);
   }
 
   async execute(name, rawInput, { signal } = {}) {
@@ -34,6 +36,9 @@ export class TaskService {
     try {
       input = parseInput(name, rawInput);
       if (signal?.aborted) throw new TaskError('REQUEST_CANCELLED', 'Task request was cancelled before execution', 409);
+      if (name === 'task_assign' && this.store.row(input.task_id).kind === 'automation') {
+        throw new TaskError('AUTOMATION_MANAGED', 'Automation Tasks cannot be assigned to an Agent');
+      }
       if (['task_session_create', 'task_session_prepare', 'task_assign'].includes(name)) {
         const receipt = this.store.reserveOperation(name, input);
         if (receipt.replay) outcome = { result: receipt.result, error: receipt.error };
@@ -74,6 +79,8 @@ export class TaskService {
         }
       } else {
         outcome = { result: this.store.executeLocal(name, input), error: null };
+        if (name === 'task_cancel') this.automation.cancel(input.task_id);
+        if (['task_automation_start', 'task_automation_reconcile'].includes(name)) this.automation.kick();
       }
     } catch (error) {
       if (error instanceof TaskError) {
@@ -122,7 +129,7 @@ export class TaskService {
         ?? (typeof rawInput?.actor_session_id === 'string' ? rawInput.actor_session_id : undefined),
     };
     const definition_check = this.store.definitionCheck(context);
-    if (name !== 'task_read' && outcome.result !== null) this.invalidate();
+    if (!['task_read', 'task_script_read'].includes(name) && outcome.result !== null) this.invalidate();
     return {
       ...outcome, definition_check,
       ...(notifications ? { notifications, notification_error: notification_error ?? null } : {}),
@@ -177,6 +184,7 @@ export class TaskService {
 
   close() {
     this.closing = true;
+    this.automation.close();
     this.finishClose();
   }
 

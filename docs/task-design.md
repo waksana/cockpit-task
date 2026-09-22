@@ -13,9 +13,15 @@ Task 是 Cockpit 内的独立任务协作模块。模块 ID 与 MCP key 为 `coc
 用户可以先与 Owner 讨论想法、澄清范围，再明确登记或授权执行。讨论、调查、
 记录想法和启动交付是不同决定；不为闲聊自动建 Task，也不把登记等同于派单。
 
-Owner 管理多个独立 Task，每个 Task 交给一个 Executor 完整负责，包括调查、
+Owner 管理多个独立 Task，默认 Agent Task 交给一个 Executor 完整负责，包括调查、
 实施、修正和交付。独立成果可分别建 Task；紧密关联的步骤、资源和专业分工
 由同一 Executor 内部组织，可使用 subagent，不转移整体责任。
+
+对于已授权、可信、可重复的已知脚本，Owner 可显式选择 automation Task；
+服务持久单队列执行，没有 Executor、ACK 或 session 占用。登记和创建不执行，
+可选必要订阅之后才显式 start；不是把任意工作脚本化或增加工作流引擎。
+成功 done+outcome，失败/中断 blocked+outcome，不自动重跑；详见
+[轻量自动化](task-automation.md)。以下指派、ACK 和 Agent 协作规则不套用于 automation。
 
 - Task 之间只有普通引用，没有父子关系、任务树、依赖引擎或级联调度。
 - 一个 session 同时最多执行一项未结束 Task，完成或取消后可承接其他 Task。
@@ -27,7 +33,8 @@ Owner 管理多个独立 Task，每个 Task 交给一个 Executor 完整负责�
 Owner 可以只读调查、回答问题和比较方案。实施及改变外部状态的交付默认委派，
 不亲自实施或用自己的 subagent 代替独立 Executor。用户要求一个结果不等于要求
 Owner 本人执行；明确要求本人执行，或实际以具备能力的 Executor 身份承接 Task，
-才是例外。无法委派应说明阻塞，不静默接管。
+才是个人执行例外。上述 automation 是另一条显式服务执行路径，不允许静默接管任意工作。
+无法委派且不符合可信脚本边界时应说明阻塞。
 编码工作的 Issue 维护、独立工作环境准备和安全的合并后清理属于 Owner 协调，
 不属于代码实施；独立 [github-coding Skill](../skills/github-coding/github-coding/SKILL.md)
 定义这条工作流程，不改变角色分工或为非编码 Task 增加步骤。

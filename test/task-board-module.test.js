@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -73,11 +73,36 @@ test('module roles retain tool subsets and share one coding Skill alongside the 
     { id: 'executor', name: 'Executor' },
   ]);
   for (const role of manifest.roles) assert.deepEqual(Object.keys(role.mcpServers), ['cockpit-task']);
-  assert.deepEqual(owner.mcpServers['cockpit-task'].tools, ['task_read', 'task_create', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe']);
+  assert.deepEqual(owner.mcpServers['cockpit-task'].tools, ['task_read', 'task_create', 'task_script_register', 'task_script_read', 'task_automation_start', 'task_automation_reconcile', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe']);
   assert.deepEqual(executor.mcpServers['cockpit-task'].tools, ['task_read', 'task_edit', 'task_ack', 'task_report', 'task_cancel']);
   assert.deepEqual([...new Set([...owner.mcpServers['cockpit-task'].tools, ...executor.mcpServers['cockpit-task'].tools])].sort(), [...TOOL_NAMES].sort());
   assert.deepEqual(owner.skillDirectories, ['skills/cockpit-task-owner', 'skills/github-coding']);
   assert.deepEqual(executor.skillDirectories, ['skills/cockpit-task-executor', 'skills/github-coding']);
+});
+
+test('automation HTTP views never fabricate or inspect a native Executor session', async () => {
+  const f = fixture();
+  try {
+    const path = join(f.root, 'automation.mjs');
+    writeFileSync(path, 'console.log("synthetic");');
+    const registered = await f.write('task_script_register', {
+      script_id: 'native-free', title: 'No native session', description: 'Synthetic only',
+      executable: process.execPath, script_path: path, parameters: [],
+    });
+    assert.equal(registered.body.error, null);
+    const created = await f.write('task_create', {
+      owner: 'owner', title: 'Automated', description: 'Synthetic only',
+      automation: { script_id: 'native-free', parameters: {} },
+    });
+    assert.equal(created.body.error, null);
+    const id = created.body.result.task_id;
+    const native = await f.native(id);
+    assert.equal(native.body.available, false);
+    assert.equal(native.body.session_id, null);
+    assert.equal(native.body.error.code, 'NO_NATIVE_EXECUTOR');
+    assert.equal((await f.read(id)).body.result.automation.state, 'created');
+    assert.equal(f.calls.length, 0);
+  } finally { f.close(); }
 });
 
 test('old module identity is rejected before opening storage instead of silently aliasing it', () => {

@@ -426,3 +426,321 @@ test('native resource is lazy, abort-safe, and refreshes only while its detail v
   f.host({ connected: true });
   assert.equal(f.requests.length, 2);
 });
+
+const automation = {
+  run_id: '5a674d65-213e-46c2-9bf9-52c84398bf26', script_id: 'synthetic-check',
+  state: 'running', queued_at: '2026-09-20T01:02:03Z', started_at: '2026-09-20T01:02:04Z',
+  finished_at: null, exit_code: null, signal: null, error: null, cancel_requested: false,
+  process_group: 123, pid: 123, barrier: true, revision: 1,
+};
+const automatedOverview = { ...result, kind: 'automation', automation };
+const automatedExecution = {
+  ...automatedOverview, description: 'Run a synthetic check', references: [], metadata: {},
+  automation: {
+    ...automation,
+    script: {
+      script_id: automation.script_id, title: 'Synthetic check', description: 'Read-only synthetic script.',
+      executable: '/usr/bin/node', script_path: '/synthetic/check.js', argv: ['--no-warnings'],
+      sha256: 'a'.repeat(64),
+      parameters: [{ name: 'count', type: 'integer', description: 'Number of checks' }],
+    },
+    parameters: { count: 2, enabled: false, label: '<script>literal</script>' },
+  },
+};
+const automatedOutcome = {
+  revision: 1, at: '2026-09-20T01:02:05Z', author: `automation:${automation.run_id}`,
+  source: 'automation', run_id: automation.run_id, executor: null, summary: 'Script exited with code 0.', references: [],
+};
+const automationLog = {
+  task_id: taskId, run_id: automation.run_id, offset: 0, text: '<script>literal output</script>',
+  next_offset: 4096, retained_characters: 5000, omitted_characters: 12, complete: false,
+};
+
+test('automation reads preserve snapshots and runner-authored outcomes without a fake Executor or ACK', async () => {
+  const { source, run_id, ...ordinaryOutcome } = automatedOutcome;
+  for (const [view, data] of [
+    ['overview', automatedOverview], ['overview', { ...automatedOverview, automation: null }],
+    ['execution', automatedExecution], ['outcomes', { items: [automatedOutcome], next_cursor: null }],
+    ['outcomes', { items: [{ ...ordinaryOutcome, author: 'worker', executor: 'worker' }], next_cursor: null }],
+  ]) {
+    assert.deepEqual(await readTask({ request: async () => response(data) }, { view, task_id: taskId }), data);
+  }
+  for (const data of [
+    { ...automatedOverview, executor: 'fake-native-session' },
+    { ...automatedOverview, acknowledged_revision: 1 },
+    { ...automatedOverview, automation: {} },
+    { ...automatedOverview, kind: 'unknown' },
+  ]) await assert.rejects(readTask({ request: async () => response(data) }, input), /invalid result/);
+  await assert.rejects(readTask({ request: async () => response({
+    ...automatedExecution, automation: { ...automatedExecution.automation, script: null },
+  }) }, { view: 'execution', task_id: taskId }), /invalid result/);
+  await assert.rejects(readTask({ request: async () => response({
+    items: [{ ...automatedOutcome, author: 'not-the-runner' }], next_cursor: null,
+  }) }, { view: 'outcomes', task_id: taskId }), /invalid result/);
+});
+
+test('automation logs use bounded offset reads and reject malformed or oversized results', async () => {
+  const f = fixture();
+  const logInput = { view: 'automation_log', task_id: taskId, offset: 0, limit: 4096 };
+  const resource = createReadResource(f.context, logInput);
+  resource.start();
+  assert.equal(f.requests[0].path, '/read');
+  assert.deepEqual(JSON.parse(f.requests[0].init.body), logInput);
+  f.requests[0].resolve(response(automationLog));
+  await settle();
+  assert.deepEqual(resource.getSnapshot().data, automationLog);
+  await settle();
+  assert.equal(f.requests.length, 1, 'log reads do not poll');
+  resource.stop();
+  for (const data of [
+    { ...automationLog, task_id: 'another-task' }, { ...automationLog, offset: 1 },
+    { ...automationLog, next_offset: 0 }, { ...automationLog, text: 'x'.repeat(4097) },
+    { ...automationLog, omitted_characters: -1 }, { ...automationLog, complete: null },
+  ]) await assert.rejects(readTask({ request: async () => response(data) }, logInput), /invalid result/);
+});
+
+// Exercise mounted components with the existing read resources, without adding a DOM/React dependency.
+function componentHarness(context) {
+  const instances = new Map();
+  let current;
+  let hookIndex;
+  let effects;
+  let mounted;
+  const hook = (create) => {
+    const index = hookIndex++;
+    if (!current.hooks[index]) current.hooks[index] = create();
+    return current.hooks[index];
+  };
+  const memo = (callback, dependencies) => {
+    const slot = hook(() => ({}));
+    if (!slot.dependencies || dependencies.some((value, index) => value !== slot.dependencies[index])) {
+      slot.value = callback();
+      slot.dependencies = dependencies;
+    }
+    return slot.value;
+  };
+  const react = {
+    Fragment: 'fragment',
+    createElement: (type, props, ...children) => ({ type, props: { ...props, children: children.length === 1 ? children[0] : children } }),
+    useMemo: memo,
+    useRef: () => hook(() => ({ current: { focus() {} } })),
+    useState(initial) {
+      const slot = hook(() => ({ value: initial }));
+      return [slot.value, value => { slot.value = typeof value === 'function' ? value(slot.value) : value; }];
+    },
+    useEffect(callback, dependencies) {
+      const slot = hook(() => ({}));
+      if (!slot.dependencies || dependencies.some((value, index) => value !== slot.dependencies[index])) {
+        effects.push(() => { slot.cleanup?.(); slot.cleanup = callback(); slot.dependencies = dependencies; });
+      }
+    },
+    useLayoutEffect() {},
+    useSyncExternalStore: (_subscribe, snapshot) => snapshot(),
+    useId: () => 'synthetic-dialog-title',
+  };
+  const renderer = activate({ ...context, apiVersion: 2, uiVersion: 1, uiSurfaceVersion: 1, react, createPortal: node => node }).markdown[0];
+  const resolve = (node, path) => {
+    if (Array.isArray(node)) return node.map((child, index) => resolve(child, `${path}.${index}`));
+    if (!node || typeof node !== 'object') return node;
+    if (typeof node.type === 'function') {
+      const key = `${path}:${node.type.name}:${node.props.key ?? ''}`;
+      mounted.add(key);
+      if (!instances.has(key)) instances.set(key, { hooks: [] });
+      current = instances.get(key);
+      hookIndex = 0;
+      return resolve(node.type(node.props), `${key}.render`);
+    }
+    return { ...node, children: resolve(node.props.children, `${path}.children`) };
+  };
+  return {
+    render() {
+      effects = [];
+      mounted = new Set();
+      const tree = resolve(renderer.component({ node: { kind: 'link', target: `task:${taskId}` } }), 'root');
+      for (const [key, instance] of instances) if (!mounted.has(key)) {
+        for (const slot of instance.hooks) slot.cleanup?.();
+        instances.delete(key);
+      }
+      for (const effect of effects) effect();
+      return tree;
+    },
+    stop() {
+      for (const instance of instances.values()) for (const slot of instance.hooks) slot.cleanup?.();
+    },
+  };
+}
+
+function elements(tree) {
+  if (Array.isArray(tree)) return tree.flatMap(elements);
+  return tree && typeof tree === 'object' ? [tree, ...elements(tree.children)] : [];
+}
+function textContent(tree) {
+  if (Array.isArray(tree)) return tree.map(textContent).join(' ');
+  return tree && typeof tree === 'object' ? textContent(tree.children) : String(tree ?? '');
+}
+const button = (tree, label) => elements(tree).find(node => node.type === 'button' && textContent(node) === label);
+
+test('mounted automation UI shows immutable facts and logs, paginates on demand, and never requests native observation', async () => {
+  const f = fixture();
+  const harness = componentHarness(f.context);
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  try {
+    let tree = harness.render();
+    f.requests[0].resolve(response(automatedOverview));
+    await settle();
+    tree = harness.render();
+    assert.match(textContent(tree), /Automation/);
+    assert.match(textContent(tree), /synthetic-check/);
+    assert.doesNotMatch(textContent(tree), /ACK|Unassigned|No reported activity/);
+    elements(tree).find(node => node.props.className === 'ck-button tb-card').props.onClick();
+    tree = harness.render();
+    assert.equal(f.requests.length, 2);
+    assert.deepEqual(JSON.parse(f.requests[1].init.body), { view: 'execution', task_id: taskId });
+    f.requests[1].resolve(response(automatedExecution));
+    await settle();
+    tree = harness.render();
+    assert.match(textContent(tree), /Immutable script snapshot/);
+    assert.match(textContent(tree), /Immutable parameter snapshot/);
+    assert.match(textContent(tree), /"enabled": false/);
+    assert.match(textContent(tree), /<script>literal<\/script>/);
+    assert.match(textContent(tree), /Launch barrier Set/);
+    assert.equal(button(tree, 'Native session'), undefined);
+    assert.equal(button(tree, 'Reported activity'), undefined);
+    assert.equal(elements(tree).some(node => node.type === 'script'), false);
+    button(tree, 'Logs').props.onClick();
+    harness.render();
+    assert.deepEqual(JSON.parse(f.requests[2].init.body), { view: 'automation_log', task_id: taskId, offset: 0, limit: 4096 });
+    f.requests[2].resolve(response(automationLog));
+    await settle();
+    tree = harness.render();
+    assert.match(textContent(tree), /12 omitted characters/);
+    assert.match(textContent(tree), /Incomplete/);
+    assert.equal(elements(tree).some(node => node.type === 'script'), false);
+    button(tree, 'Next page').props.onClick();
+    harness.render();
+    assert.equal(JSON.parse(f.requests[3].init.body).offset, 4096);
+    f.requests[3].resolve(response({ ...automationLog, offset: 4096, text: 'Final output', next_offset: null, complete: true }));
+    await settle();
+    tree = harness.render();
+    assert.equal(button(tree, 'Next page').props.disabled, true);
+    assert.match(textContent(tree), /Complete/);
+    button(tree, 'Previous page').props.onClick();
+    harness.render();
+    assert.equal(JSON.parse(f.requests[4].init.body).offset, 0);
+    f.requests[4].resolve(response(automationLog));
+    await settle();
+    tree = harness.render();
+    button(tree, 'Refresh log').props.onClick();
+    assert.equal(f.requests.length, 6);
+    f.requests[5].resolve(response(automationLog));
+    await settle();
+    tree = harness.render();
+    button(tree, 'Outcomes').props.onClick();
+    harness.render();
+    f.requests[6].resolve(response({ items: [automatedOutcome], next_cursor: null }));
+    await settle();
+    tree = harness.render();
+    assert.match(textContent(tree), /Source: Automation/);
+    assert.match(textContent(tree), new RegExp(`Reported author: automation:${automation.run_id}`));
+    assert.doesNotMatch(textContent(tree), /Executor: null/);
+    assert.equal(f.requests.every(request => request.path === '/read'), true);
+    assert.equal(f.requests.length, 7);
+  } finally {
+    harness.stop();
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+  }
+});
+
+test('legacy agent details retain ACK, activity and lazy native session observation', async () => {
+  const f = fixture();
+  const harness = componentHarness(f.context);
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  try {
+    harness.render();
+    f.requests[0].resolve(response(result));
+    await settle();
+    let tree = harness.render();
+    assert.match(textContent(tree), /not ACKed/);
+    elements(tree).find(node => node.props.className === 'ck-button tb-card').props.onClick();
+    harness.render();
+    f.requests[1].resolve(response({ ...result, description: 'Agent definition', references: [], metadata: {} }));
+    await settle();
+    tree = harness.render();
+    assert.ok(button(tree, 'Reported activity'));
+    assert.equal(button(tree, 'Logs'), undefined);
+    assert.equal(f.requests.length, 2);
+    button(tree, 'Native session').props.onClick();
+    harness.render();
+    assert.equal(f.requests[2].path, `/tasks/${taskId}/native`);
+    f.requests[2].resolve(nativeResponse());
+    await settle();
+    tree = harness.render();
+    assert.match(textContent(tree), /Native session observation/);
+    assert.match(textContent(tree), /Native state idle/);
+  } finally {
+    harness.stop();
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+  }
+});
+
+test('detail refresh preserves Agent history cursors and automation log offsets', async () => {
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  try {
+    for (const automated of [false, true]) {
+      const f = fixture(), harness = componentHarness(f.context);
+      const overview = automated ? automatedOverview : result;
+      const execution = automated ? automatedExecution : { ...result, description: 'Agent definition', references: [], metadata: {} };
+      const firstPage = automated ? automationLog : {
+        items: [{ revision: 1, author: 'executor', executor: 'executor', at: '2026-09-20T01:02:05Z', summary: 'First', references: [] }],
+        next_cursor: 'history-page-two',
+      };
+      const secondPage = automated ? { ...automationLog, offset: 4096, text: 'Second page', next_offset: null }
+        : { ...firstPage, next_cursor: null };
+      try {
+        harness.render();
+        f.requests[0].resolve(response(overview));
+        await settle();
+        let tree = harness.render();
+        elements(tree).find(node => node.props.className === 'ck-button tb-card').props.onClick();
+        harness.render();
+        f.requests[1].resolve(response(execution));
+        await settle();
+        tree = harness.render();
+        button(tree, automated ? 'Logs' : 'Outcomes').props.onClick();
+        harness.render();
+        f.requests[2].resolve(response(firstPage));
+        await settle();
+        tree = harness.render();
+        button(tree, 'Next page').props.onClick();
+        harness.render();
+        f.requests[3].resolve(response(secondPage));
+        await settle();
+        tree = harness.render();
+        assert.match(textContent(tree), /Page 2/);
+        const before = f.requests.length;
+        f.event({ type: 'task/changed', task_id: taskId });
+        harness.render();
+        const refreshes = f.requests.slice(before);
+        assert.equal(refreshes.length, 3);
+        const pageRead = refreshes.find(request => ['outcomes', 'automation_log'].includes(JSON.parse(request.init.body).view));
+        assert.equal(JSON.parse(pageRead.init.body)[automated ? 'offset' : 'cursor'], automated ? 4096 : 'history-page-two');
+        for (const request of refreshes) {
+          const { view } = JSON.parse(request.init.body);
+          request.resolve(response(view === 'overview' ? overview : view === 'execution' ? execution : secondPage));
+        }
+        await settle();
+        tree = harness.render();
+        assert.match(textContent(tree), /Page 2/);
+        assert.equal(f.requests.length, before + 3, 'Refreshing execution must not remount the active detail section');
+      } finally { harness.stop(); }
+    }
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+  }
+});

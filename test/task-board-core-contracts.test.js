@@ -33,15 +33,15 @@ test('official MCP tools/list publishes all Task read selectors and a required v
   assert.equal(schema.additionalProperties, false);
   assert.deepEqual(schema.required, ['view']);
   assert.deepEqual(Object.keys(schema.properties).sort(), [
-    'actor_session_id', 'cursor', 'executor', 'limit', 'owner', 'query',
+    'actor_session_id', 'cursor', 'executor', 'limit', 'offset', 'owner', 'query',
     'request_id', 'revision', 'status', 'task_id', 'view',
   ].sort());
   assert.deepEqual(schema.properties.view.enum, [
-    'list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'subscriptions', 'operation',
+    'list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'subscriptions', 'automation_log', 'operation',
   ]);
   assert.equal(schema.properties.task_id.type, 'string');
   assert.equal(schema.properties.task_id.format, 'uuid');
-  assert.equal(schema.properties.limit.maximum, 50);
+  assert.equal(schema.properties.limit.maximum, 8192);
   assert.equal(schema.properties.revision.minimum, 1);
   for (const tool of listed.tools) assert.ok(Object.keys(tool.inputSchema.properties).length > 0, tool.name);
 });

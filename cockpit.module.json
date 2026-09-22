@@ -20,7 +20,7 @@
         "cockpit-task": {
           "type": "http",
           "path": "/mcp",
-          "tools": ["task_read", "task_create", "task_session_create", "task_session_prepare", "task_assign", "task_edit", "task_cancel", "task_subscribe", "task_unsubscribe"]
+          "tools": ["task_read", "task_create", "task_script_register", "task_script_read", "task_automation_start", "task_automation_reconcile", "task_session_create", "task_session_prepare", "task_assign", "task_edit", "task_cancel", "task_subscribe", "task_unsubscribe"]
         }
       }
     },

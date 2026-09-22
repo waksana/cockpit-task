@@ -18,12 +18,13 @@ Its HTTP API and HTTP MCP share one application service and set of business rule
 
 SQLite transactions protect local mutations. Separate tables hold Tasks,
 description snapshots, exact revision acknowledgements, activities, outcomes,
-operation receipts and subscriptions. A partial unique index limits each
+operation receipts, subscriptions, script registrations and automation runs. A partial unique index limits each
 Executor to one unfinished Task. Subscription uniqueness permits one waiting
 subscription per Task Owner; Owner is fixed for the Task.
 
-Schema version 2 includes subscriptions and notification evidence. Opening a v1
-Task database upgrades it transactionally, preserving Task and receipt rows;
+Schema version 3 adds Task kind, immutable scripts and automation run/log facts to
+the v2 subscription and notification evidence. Opening a supported older Task
+database upgrades it transactionally, preserving Agent Tasks and receipt rows;
 unsupported newer schema versions fail with `SCHEMA_TOO_NEW`. Service-assigned
 timestamps and retained histories are not caller-authenticated evidence.
 
@@ -95,6 +96,50 @@ activity. Results distinguish saved, rejected and not_requested fields.
 Terminal Tasks reject execution reports and ACK. Their definition/history remain
 readable and editable without reopening or auto-ACK. Old outcomes retain their
 revision; overview marks whether the latest outcome matches the current definition.
+
+## Lightweight automation
+
+Agent remains the default; only known trusted repeatable scripts use the explicit
+automation path. Immutable registrations resolve absolute executable/script paths,
+fingerprint script bytes with SHA256, and declare fixed-prefix argv plus ordered
+required string/integer/boolean parameters. Creation snapshots configuration and
+typed inputs without executing. Start checks revision/write_context and durably
+queues once; a persistent single service queue executes
+`executable [...argv, script_path, ...typedStrings]`, never a shell template.
+No Agent Executor, ACK or session slot is invented; assign/ack/report reject this kind.
+
+Definitions/materials freeze in queued/starting/running; script and input snapshots
+are never mutable. Claim records starting/in_progress and a barrier. The worker
+launch handshake follows durable PID/process-group storage. Success atomically
+stores done plus a service outcome; failure/interruption stores blocked plus an
+outcome, preserving cancellation. Automatic subscription transitions have
+`event.source='automation'`, `event.run_id` and `actor_session_id:null`.
+Outcomes have `executor:null`, `source:'automation'` and `author:'automation:<run_id>'`:
+the author is a service label, never a native session or fabricated Executor.
+Combined stdout/stderr retains at most 65536 characters,
+counts omitted characters explicitly, and is read separately in offset pages up to
+8192 characters. Definition/execution reads include snapshots; overview/list carry
+runtime facts. See [MCP shapes](task-mcp-contract.md).
+
+Cancellation before launch prevents execution; during execution it requests group
+termination, never rollback or proof of exit. Recovery never reruns starting/running
+work: it records interruption/outcome and a persistent barrier. Prelaunch queued
+work may resume only without a barrier. For a recorded group, explicit reconciliation
+probes the Linux process group with `kill(-pgid,0)`; only kernel `ESRCH` proves absence
+and clears the barrier. If no durable PID/group exists, the launch handshake could
+not have been sent: explicit reconciliation clears this pre-handshake barrier without
+a probe or replay. Any existing group, including unreaped zombies, `EPERM` or observation
+uncertainty keeps the barrier. Unreaped zombie groups can block until the host reaps
+them; do not edit the database or bypass this guard. Shutdown cannot always prove
+exit, so blocked plus a barrier is a correct conservative result.
+Reconciliation never kills recovered processes, reruns work or changes
+blocked to done. Repeating requires new authorization and a new Task.
+
+Scripts must not daemonize/detach/escape the process group. This is same-user trusted
+execution, not a sandbox or authentication. Immutable registration and script hash
+do not freeze interpreters, runtime, imports or dependencies. Optional subscriptions
+precede start only for concrete Owner follow-up; no automatic subscription, Agent
+monitoring loop, dependency workflow or production installation is introduced.
 
 ## External operation receipts
 

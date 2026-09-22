@@ -36,6 +36,11 @@ add capabilities during assignment.
 | Owner | Clarify, register, explicitly assign and follow independent Tasks |
 | Executor | Deliver one entire assigned outcome, organizing internal steps/subagents |
 
+Agent Tasks remain the default. Owner may explicitly choose a trusted repeatable
+known script instead, using a service-managed automation Task—not arbitrary work,
+a fake Executor or a child-Task workflow. See
+[lightweight automation](https://github.com/waksana/cockpit-task/blob/main/docs/task-automation.md).
+
 Owner may investigate read-only and answer questions, but delegates implementation
 and state-changing delivery by default. An outcome request is not a request for
 personal execution. Explicit personal-execution instruction or a real assignment
@@ -86,22 +91,33 @@ Task auto-ACKs the new revision. Terminal definitions can be edited without reop
 | Tool | Use |
 | --- | --- |
 | `task_read` | Fixed bounded views; complete requirements and histories read separately |
-| `task_create` | Register an unassigned todo |
+| `task_create` | Register an Agent todo or immutable automation snapshot; never execute |
+| `task_script_read` | Discover/read immutable trusted local script registrations |
+| `task_script_register` | Register an existing script, fixed argv and ordered typed parameters |
+| `task_automation_start` | Explicitly enqueue automation once with revision/write_context |
+| `task_automation_reconcile` | Clear a proven-safe process-group barrier; never rerun or mark done |
 | `task_session_create` | Create an Executor, optionally preparing explicitly selected native resources |
 | `task_session_prepare` | Prepare a loaded idle Executor with no unfinished Task; no creation or dispatch |
 | `task_assign` | Check an existing Executor, bind once and send one assigned reference |
 | `task_edit` | Replace the complete description or edit title/materials |
 | `task_ack` | Confirm the current definition separately from status |
 | `task_report` | Explicit activity, status and/or outcome; done requires a new outcome |
-| `task_cancel` | Cancel the Task without stopping its native session |
+| `task_cancel` | Cancel Agent without stopping its session; request automation termination, never rollback |
 | `task_subscribe` | Optional one-shot Owner wait for explicit target statuses |
 | `task_unsubscribe` | Cancel a still-waiting subscription |
 
-Owner receives read/create/session_create/session_prepare/assign/edit/cancel/subscribe/unsubscribe;
+Owner receives read/create/session_create/session_prepare/assign/edit/cancel/subscribe/unsubscribe
+plus script_read/script_register/automation_start/automation_reconcile;
 Executor receives read/edit/ack/report/cancel (all `task_` prefixed). Both roles
 take the union. Having a tool permits cross-Task operations: responsibility
 fields are not per-record authorization. `actor_session_id` is reported provenance,
 not verified identity.
+
+The following is the default Agent flow. Automation uses discover/register → create
+snapshot → optional necessary subscription → explicit start. No assign/ACK/report,
+session slot or auto-subscription; a persistent single service queue executes it.
+Read the latest Task/outcome on a notice, not a monitoring loop. Queued/starting/running
+definitions freeze; script/inputs never change. Started work never reruns after recovery.
 
 1. Owner chooses authorized work resources/environment and registers the complete
    Task. Backlog registration alone does not dispatch.

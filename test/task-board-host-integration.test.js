@@ -8,8 +8,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const hostWorktree = process.env.TASK_BOARD_HOST_WORKTREE;
-const ownerTools = ['task_read', 'task_create', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe'];
+const ownerTools = ['task_read', 'task_create', 'task_script_register', 'task_script_read', 'task_automation_start', 'task_automation_reconcile', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe'];
 const executorTools = ['task_read', 'task_edit', 'task_ack', 'task_report', 'task_cancel'];
+const ownerOnlyTools = ownerTools.filter(name => !executorTools.includes(name));
 const allTools = [...new Set([...ownerTools, ...executorTools])].sort();
 
 async function removeIsolatedTree(root) {
@@ -569,7 +570,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     for (const request of dispatched) {
       const offered = JSON.stringify(request.tools);
       for (const name of executorTools) assert.ok(offered.includes(name), `Missing Executor tool ${name}`);
-      for (const name of ['task_create', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_subscribe', 'task_unsubscribe']) assert.ok(!offered.includes(name), `Unexpected Executor tool ${name}`);
+      for (const name of ownerOnlyTools) assert.ok(!offered.includes(name), `Unexpected Executor tool ${name}`);
     }
     const reference = `[Task assigned to you](task:${taskId}?event=assigned)`;
     assert.deepEqual(nativeMessages.filter(message => message.sessionId === executorId), [{ sessionId: executorId, content: reference }]);
@@ -669,7 +670,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(requests.length, afterNoticeModels, 'Cold resume must not send a startup prompt');
     await verifyAssembly(executorId, [executor], executorTools, ['cockpit-task-executor']);
     await promptAndInspect(executorId, 'Synthetic cold-resumed Executor capability check; acknowledge without tools.',
-      executorTools, ['task_create', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_subscribe', 'task_unsubscribe']);
+      executorTools, ownerOnlyTools);
 
     stage = 'explicitly subscribing and delivering one status-change card only to the isolated Owner';
     const beforeSubscriptionMessages = nativeMessages.length;

@@ -13,7 +13,7 @@ Project instructions and work skills define execution methods.
 
 Your default responsibility is clarification, delegation and follow-through.
 Bounded read-only investigation, answers and option comparisons are yours to provide.
-Delegate implementation and state-changing delivery through Task to an independent
+For default Agent Tasks, delegate implementation and state-changing delivery through Task to an independent
 Executor, not your own tools or subagents: this keeps delivery responsibility clear.
 A result request is not permission for personal implementation, even for small work.
 
@@ -30,15 +30,13 @@ steps or a second start command for already-authorized work.
 
 ## Delegate one complete outcome
 
-One coherent outcome belongs to one Task and one accountable Executor, including
-investigation, implementation, correction and delivery. Split independent outcomes,
+One coherent Agent outcome belongs to one Task and one accountable Executor, including investigation, implementation, correction and delivery. Split independent outcomes,
 not tightly coupled stages, resources or specialties. Tasks are flat: use references,
 not child Tasks, dependency engines, helper-request workflows or standing role pools.
 Executor manages internal steps/subagents without stage-by-stage redispatch or a
 mandatory Owner acceptance gate.
 
-When creating or revising description, preserve the complete current task-specific
-agreement: goal, scope, key decisions, authorization boundaries, special constraints
+When creating or revising description, preserve the complete current task-specific agreement: goal, scope, key decisions, authorization boundaries, special constraints
 and completion conditions. Complete agreement is not complete prior context.
 Reference general Skills, repository instructions and environment documentation as
 needed instead of repeating them; keep execution-critical task-specific facts explicit.
@@ -50,7 +48,6 @@ or resume safely; do not copy chat or impose a mandatory project form.
 Exclude every Executor bound to an unfinished Task, even if native idle; one unfinished
 Task at a time, not one lifetime goal. Choose a capable session without competing work.
 New/forked sessions neither isolate shared resources nor inherit authorization.
-
 Choose authorized resources/environment and existing discoverable Skill/MCP names, not guesses from Task text.
 Use `task_create`, then `task_session_create` with selections or `task_session_prepare` for a loaded idle Executor
 with its role applied and no pending role reload. Neither new nor reuse is mandatory; backlog does not dispatch.
@@ -58,6 +55,13 @@ Inspect the receipt, then `task_assign` once: it checks, never repairs. Unknown 
 Preparation does not install/authenticate, reload, change global defaults or prompt; readiness is not authorization, acceptance, ACK or execution.
 Skill enabled is not body loaded; Executor loads relevant bodies when first needed, without inheriting your context.
 `task_assign` sends the first assigned reference itself; do not send a duplicate.
+
+## Known scripts, not arbitrary automation
+
+Agent remains the default. Owner may choose an automation Task only for an authorized, trusted repeatable known script, not to bypass delegation for arbitrary work.
+Read [automation](references/automation.md) when choosing this path: discover/register, snapshot typed inputs, optionally subscribe for concrete follow-up, then explicitly start.
+No Executor, ACK, session slot, child Tasks or workflow engine; no automatic rerun.
+Only Owner gets `task_script_read`, `task_script_register`, `task_automation_start` and `task_automation_reconcile`; reconciliation clears a proven-safe barrier, never delivers work.
 
 ## Coding work
 
@@ -69,8 +73,7 @@ Non-coding work and discussion do not trigger that flow.
 
 ## Coordinate through Task, not session chat
 
-Keep approved scope, constraints and delivery expectations in Task's current
-definition so requirements and results share one record. Distinguish decisions
+Keep approved scope, constraints and delivery expectations in Task's current definition so requirements and results share one record. Distinguish decisions
 from proposals/quotations; record change reasons, sources and superseded decisions.
 Executors ask users directly and update requirements in their own sessions.
 Do not become their relay or ACK on their behalf.
@@ -103,27 +106,24 @@ ends the subscription; already matching at registration means failure, not an
 immediate notice.
 On `[Task status updated](task:<uuid>?event=status_changed)`, read the latest Task
 and reassess the planned follow-up; act only if it is still needed and authorized.
-The card is not proof of complete delivery or an Executor definition-ACK instruction.
-Do not automatically resubscribe, poll or hold this turn open waiting.
+The card is not proof of complete delivery or an Executor definition-ACK instruction. Do not automatically resubscribe, poll or hold this turn open waiting.
 See [subscription handling](references/task-writes-and-recovery.md#one-shot-status-subscriptions)
 for registration, withdrawal and uncertain delivery.
 
 ## Follow bounded evidence
 
 Start your portfolio with `task_read(view=list, owner=<your session ID>)`; for one
-Task use `view=overview`. Include your own `actor_session_id`: it is attribution,
-not authentication, an owner filter or a role-based read restriction. Focus on:
+Task use `view=overview`. Include your own `actor_session_id`: it is attribution, not authentication, an owner filter or a role-based read restriction. Focus on:
 
 | Information | What it tells you |
 | --- | --- |
-| `id`, `title`, `executor`, `status` | Which outcome, who delivers it, and the recorded state |
+| `id`, `title`, `kind`, `executor`, `status`, `automation` | Agent assignment or automation runtime facts and the recorded state |
 | Latest `activity` and its `at` time | A reported fact, not live observation |
 | `revision`, `acknowledged_revision` | Whether the Executor confirmed the current definition |
 | `outcome.available`, `outcome.current` | Whether a result exists and matches the revision, not whether delivery is complete |
 
 These views omit the full definition, materials, histories and outcome text.
-Read `definition` before editing requirements and `outcomes` when judging delivery;
-expand `activity` or `changelog` for a concrete question. Use the
+Read `definition` before editing requirements and `outcomes` when judging delivery; expand `activity` or `changelog` for a concrete question. Use the
 [Task views and fields](references/reading-tasks.md) for fields, truncation and pagination.
 Trust complete delivery unless the Task requires review; preserve partial results
 and unexecuted boundaries. When asked, summarize active, waiting, complete or unknown
@@ -135,8 +135,8 @@ scan chats routinely or schedule monitoring.
 Use actual Task/session IDs, stable mutation request IDs and fresh returned
 `write_context` where required; inspect errors and `definition_check` as well as the result.
 Unknown effects do not justify a blind retry or replacement Task/session; preserve
-request identity and known effects. Cancel only on an explicit decision: record
-changes neither stop native work nor undo external effects. Do not reassign a bound
+request identity and known effects. Cancel only on an explicit decision: record changes
+do not stop Agent native work or undo external effects; automation cancellation requests termination, not rollback. Do not reassign a bound
 Task or reopen done/cancelled; authorized follow-up after termination needs a new Task.
 
 Reuse this Skill while it remains in context; reload for missing/changed guidance

@@ -9,6 +9,11 @@ Use the `cockpit-task` MCP for the shared Task record.
 Executor is a collaboration responsibility, not a business identity or extra authority.
 Use project instructions and work skills for execution methods.
 
+Automation Tasks are service-managed, not Executor assignments. You may read their
+`kind`, `automation` facts, outcomes and bounded `automation_log`; do not ACK or report
+them. Existing read/edit/cancel tools do not grant create/start or script registration.
+Do not create child Tasks or add Owner capabilities to route your assigned work through automation.
+
 ## Own the whole authorized result
 
 Start with `task_read(view=execution)` for the complete current description,
@@ -108,7 +113,8 @@ not a blanket success/failure. If reporting is unavailable, say so and preserve
 evidence, without redoing external work or replacing a Task/session to bypass uncertainty.
 
 Respect cancellation or invalid state before further consequential work. Record
-changes do not stop native work or undo external effects. Bound Tasks cannot change
+changes do not stop Agent native work or undo external effects; automation cancellation
+requests process-group termination, not rollback or proof of exit. Bound Agent Tasks cannot change
 Executor; done/cancelled cannot reopen. Authorized follow-up needs a new Task,
 not revival from old instructions or edits.
 

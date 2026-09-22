@@ -16,6 +16,7 @@ The single-Task overview contains:
 | Fields | Meaning |
 | --- | --- |
 | `id`, `task_id`, `title` | Identity and human-readable work title |
+| `kind`, `automation` | `agent` by default; automation runtime facts without an Executor or ACK obligation |
 | `owner`, `executor`, `status` | Coordination responsibility, assigned session or null, and declared lifecycle state |
 | `revision`, `acknowledged_revision` | Current definition versus actual Executor confirmation; null means no ACK |
 | `activity` | Latest activity or null, including its ID, revision, Executor, author, time and reported source |
@@ -51,6 +52,25 @@ combine its actual text with Task status and requirements before claiming delive
 `definition` and `execution` currently return the same complete Task projection:
 identity, responsibility, status, revisions, timestamps, write context, description,
 references and metadata. They do not bundle activity, outcomes or history.
+
+For automation, `definition` / `execution` also include immutable `automation.script`
+and `automation.parameters`; overview/list contain runtime facts only. Inspect run
+state, exit code/signal/error, cancellation request and barrier independently of Task
+status. Service-generated outcomes have automation provenance and a run ID, not a
+fabricated Executor: `executor:null`, `source:'automation'`,
+`author:'automation:<run_id>'` (a service label, not a native session).
+Automatic subscription transitions carry `event.source='automation'`, `event.run_id`
+and `actor_session_id:null`, not a fabricated session identity.
+Automation rejects assign/ack/report; existing read/edit/cancel
+access does not grant create/start or child-Task authority.
+
+`automation_log` requires `task_id` and accepts `offset` (default 0), `limit`
+(default 4096, maximum 8192 characters), not a cursor. It returns retained combined
+stdout/stderr as `text`, with `next_offset`, `retained_characters`,
+`omitted_characters` and `complete`. The retention cap is 65536 characters; omitted
+counts explicitly disclose truncation. Escaping may shorten pages. Read further
+offsets only for a concrete question, never as a monitoring loop; a null next offset
+does not prove execution finished, and complete does not mean success.
 
 `changelog` pages contain revision, reason, author, time and
 `description_available` / `description_length`, not generated change summaries

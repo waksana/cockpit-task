@@ -16,6 +16,8 @@ export function activate(context) {
   const controller = new AbortController();
   const signal = AbortSignal.any([context.signal, controller.signal]);
   const service = new TaskService(store, host, { invalidate: context.invalidate, report: context.report });
+  signal.addEventListener('abort', () => service.close(), { once: true });
+  if (signal.aborted) service.close();
   const execute = (name, input, options) => service.execute(name, input, options);
   const mcp = createMcpRoutes({ execute, schemas: toolSchemas, signal, report: context.report });
   const json = async (name, request) => {
@@ -25,7 +27,10 @@ export function activate(context) {
     return { status: body.error?.status ?? (body.error ? 409 : body.notification_error ? 502 : 200), body };
   };
   return {
-    onReady: () => service.recoverNotifications({ signal }),
+    onReady: () => {
+      if (!signal.aborted) service.automation.recover();
+      return service.recoverNotifications({ signal });
+    },
     routes: [
       { method: 'POST', path: '/read', body: 'json', bodyLimit: 262144, handler: request => json('task_read', request) },
       { method: 'POST', path: '/tools/:name', body: 'json', bodyLimit: 262144, handler: request => json(request.params.name, request) },
@@ -40,6 +45,9 @@ export function activate(context) {
             observed_at: new Date().toISOString(), error,
           });
           if (task.error) return { status: task.error.status ?? 400, body: unavailable(null, task.error) };
+          if (task.result.kind === 'automation') return {
+            body: unavailable(null, { code: 'NO_NATIVE_EXECUTOR', message: 'Automation is service-managed and has no native Executor session' }),
+          };
           const executor = task.result.executor;
           if (!executor) return {
             body: unavailable(null, { code: 'NO_EXECUTOR', message: 'This Task has no assigned Executor' }),
