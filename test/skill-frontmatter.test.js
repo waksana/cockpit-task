@@ -363,7 +363,42 @@ test('explicit one-shot subscriptions preserve silent defaults, role boundaries 
   }
   const handoff = prose(readFileSync(join(root, skillDirectory('owner'), 'references/important-updates.md'), 'utf8'));
   assert.match(handoff, /`status_changed` subscription notice to Owner is separate/);
-  assert.match(handoff, /does not trigger this Executor-directed `updated` handoff or queue intervention/);
+  assert.match(handoff, /does not trigger this Executor-directed `updated` handoff/);
+});
+
+test('important updates use one immediate notice without queue intervention or interruption', () => {
+  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  assert.match(owner, /one `immediate` notice/);
+  assert.doesNotMatch(owner, /before handling pending messages or interrupting/);
+  const source = readFileSync(join(root, skillDirectory('owner'), 'references/important-updates.md'), 'utf8');
+  const handoff = prose(source);
+  for (const requirement of [
+    /cannot wait.*normal checkpoints/,
+    /Ordinary edits, delayed ACKs and routine progress do not trigger/,
+    /Save the complete updated requirements in Task first/,
+    /Freshly read Task context/,
+    /unfinished, still assigned to the same Executor/,
+    /latest revision is not already ACKed/,
+    /already aligned, do not send/,
+    /pending ask, plan or elicitation requires its native response/,
+    /`cockpit_send_prompt` once/,
+    /interjects into the current turn/,
+    /Task remains the agreement authority/,
+    /`task_edit` remains silent/,
+    /Leave queued user and subagent messages intact: do not copy, remove or replay/,
+    /Do not stop or interrupt the main turn or background work merely to notify/,
+    /explicit user stop\/cancel or other authorized interruption is separate/,
+    /Acceptance is not consumption or ACK/,
+    /bounded inspection/,
+    /No blind retry, duplicate prompt, replacement session, subscription, polling or automatic escalation to interruption/,
+  ]) assert.match(handoff, requirement);
+  assert.doesNotMatch(handoff, /Remove only the saved|preserved-context summary|interrupt the main turn once|remove-queued|cockpit_cancel_turn/);
+  const example = JSON.parse(source.match(/```json\n([\s\S]*?)\n```/)[1]);
+  assert.equal(example.session_id, '<executor-session-id>');
+  assert.equal(example.mode, 'immediate');
+  assert.ok(example.text.includes('[Task updated](task:<uuid>?event=updated)'));
+  assert.match(example.text, /full current Task execution view/);
+  assert.match(example.text, /ACK its exact latest revision before continuing affected work/);
 });
 
 test('subscription guidance requires necessary Owner follow-up without gating Executor work', () => {

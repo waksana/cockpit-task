@@ -101,8 +101,8 @@ Ordinary edits/reports are silent without an explicit status subscription;
 `task_edit` does not send an updated notice. Subscriptions do not restore default
 progress/final notifications or permit Executor-to-Owner messages.
 For the exceptional handoff, read [important updates](references/important-updates.md)
-before handling pending messages or interrupting; preserve context rather than
-starting a monitoring or conversation loop.
+before sending one `immediate` notice; leave queued messages and ongoing work intact,
+without starting a monitoring or conversation loop.
 
 Default to no subscription. Before registering, identify the concrete, necessary
 authorized Owner action that a future Task state enables, such as making a decision from the

@@ -168,10 +168,10 @@ activity 不自动改状态，outcome 不自动 done。完成最新已确认约�
 
 普通要求更新只改 Task，不排队发送 cue。Owner 仅在重要变更不能等待正常检查点时，
 按[重要更新参考](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)
-先保留 pending 全部可得内容，再按已保存 ID 清理；必要时单次保留队列地中断主轮次。
-未知内容、附件、并发新消息和未停止后台工作不能盲删或忽略。重新核对 Task 和
-原生可接续状态后，一次发送上下文摘要与 updated 引用，不复制 description，
-不逐条重发，不反复中断；queued/unknown 不能盲重发。接受不等于当前 revision 的 ACK。
+先保存完整要求并核对同一未结束指派及未 ACK 的最新 revision，再通过已有
+`cockpit_send_prompt` 的 `mode:"immediate"` 单次发送 updated 引用和读取/ACK 要求。
+不复制 description、不整理或重放队列、不为通知中断工作；未知效果只作有界核对，
+不盲重发。接受不等于消费或当前 revision 的 ACK。
 
 **默认不订阅。** Owner 只有在未来状态会使自己采取具体、必要的后续行动时，
 才用 task_subscribe；无需等用户明确要求订阅，但不能为此虚构工作、拆分成果或
@@ -227,7 +227,7 @@ definition_check 检查本次定向 Task 及 actor 承接的未结束 Task，不
 | 视图、字段、截断和分页 | [Task 读取](../skills/cockpit-task-owner/cockpit-task-owner/references/reading-tasks.md) | [Task 读取](../skills/cockpit-task-executor/cockpit-task-executor/references/reading-tasks.md) |
 | 写入、冲突、部分结果与恢复 | [写入与恢复](../skills/cockpit-task-owner/cockpit-task-owner/references/task-writes-and-recovery.md) | [写入与恢复](../skills/cockpit-task-executor/cockpit-task-executor/references/task-writes-and-recovery.md) |
 | Task 引用和通知原因 | [Task 链接](../skills/cockpit-task-owner/cockpit-task-owner/references/task-links.md) | [Task 链接](../skills/cockpit-task-executor/cockpit-task-executor/references/task-links.md) |
-| 重要变更不能等正常检查点 | [重要更新](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md) | 不把队列接管交给 Executor |
+| 重要变更不能等正常检查点 | [重要更新](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md) | 读取完整 execution 并 ACK 最新 revision |
 
 只读当前需要的参考，不每轮加载全套。Skill 指导真实行为，工具保护数据一致性；
 两者都不保证自然语言遵从性、验证用户授权或扩大任务范围。
