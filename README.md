@@ -53,18 +53,18 @@ Linux 进程组终止屏障只由 `task_automation_reconcile` 在内核确认组
 编码流程按是否需要修改并提交仓库文件判断，不按 GitHub 或部署等关键词触发。
 纯部署使用现有已验证产物时用 Task，不由本 Skill 强制 Issue/PR/branch/worktree；
 项目既有政策、不可变安装目录及独立部署授权仍须遵守，Owner 默认委派职责不变。
-混合交付保持一个 Task，Issue/PR 只覆盖必要仓库变更；执行中才发现变更时，
-先更新当前 Task 并由 Owner 协调必要 Issue/隔离环境，再改仓库，不另建部署总 Issue。
-初始已知的编码工作由 Owner 准备干净最新主线、独立 branch/worktree 和 Issue，再创建关联
-且描述完整的 Task；Executor 负责开发、验证、独立审阅及授权内的 PR 合并；
-Owner 安全清理本次已合并环境并恢复主目录。例行清理可延后集中处理，不作为每项 Task
-立即订阅 done 的默认理由；保留 PR/branch/path 和资源释放证据，安全检查不省略。
+混合交付保持一个 Task，Issue/PR 只覆盖必要仓库变更，不另建部署总 Issue。
+Owner 说明要求并引用现有 Issue，以目标仓库共享主 checkout 为 cwd 创建 Executor，
+不准备或清理 branch/worktree。Executor 视该 checkout 为只读，自行复用或创建 Issue、
+从最新主线建立专用 branch/worktree 并记录到 Task，负责开发、验证、独立审阅及授权内的
+PR 合并，合并后确认无人使用再清理自己的 worktree/分支并记录结果；不确定时保留并说明。
+执行中发现超出范围的变更先问用户，获授权后同样自建环境。
 仅未来状态解锁必要且已授权的行动时订阅，不恢复默认通知或轮询。
 仅讨论、仅 PR 和非 GitHub 工作保留各自边界；合并不等于部署。
-已授权返工默认复用实际保留的 worktree/branch，即使先前 PR 已合并；
+已授权返工默认复用实际保留的 worktree/branch，即使先前 PR 已合并，已删除则新建；
 核实项目、分支、归属及无冲突使用者，metadata 不是归属证明，也不扫描无关聊天。
 安全 fetch/正常 merge 主线，按需新建后续 PR、独立审阅并在授权内正常合并；
-不 force/reset/amend 或丢工作。环境已删除/改作他用时明确解决阻塞，不随重开自动新建。
+不 force/reset/amend 或丢工作。环境改作他用或有冲突使用者时明确解决阻塞，不接管。
 原 Executor 符合条件可继续时 Owner 不建替代 Task；否则按新授权安排适当 Task。
 
 单项 `task_read(view=overview,include=[...])` 可一次选择当前需要的完整内容：

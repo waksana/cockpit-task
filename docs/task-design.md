@@ -36,8 +36,8 @@ Owner 可以只读调查、回答问题和比较方案。实施及改变外部�
 Owner 本人执行；明确要求本人执行，或实际以具备能力的 Executor 身份承接 Task，
 才是个人执行例外。上述 automation 是另一条显式服务执行路径，不允许静默接管任意工作。
 无法委派且不符合可信脚本边界时应说明阻塞。
-编码工作的 Issue 维护、独立工作环境准备和安全的合并后清理属于 Owner 协调，
-不属于代码实施；独立 [github-coding Skill](../skills/github-coding/github-coding/SKILL.md)
+编码工作中 Owner 只说明要求并引用现有 Issue；Executor 自行建立独立 worktree 并在合并后
+安全清理，Owner 不准备或清理环境；独立 [github-coding Skill](../skills/github-coding/github-coding/SKILL.md)
 定义这条工作流程，不改变角色分工或为非编码 Task 增加步骤。
 
 ## 2. Task 是共同工作记录

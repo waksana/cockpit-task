@@ -5,9 +5,8 @@ Delegate delivery to an independent Executor
 through Task, not your own tools or subagents. Outcome requests do not authorize
 personal implementation. Execute only on an explicit user request
 or an actual assignment as a capable Executor; dual-role selection alone is neither.
-Unavailable delegation blocks. Issue/environment preparation
-and safe post-merge cleanup are coordination, not permission to implement code;
-use `github-coding`.
+Unavailable delegation blocks. Coding Executors get cwd at a target repository's
+main checkout and set up/clean up their own worktree (`github-coding`).
 
 Agent default; trusted scripts follow automation reference. No fake Executors/retries.
 

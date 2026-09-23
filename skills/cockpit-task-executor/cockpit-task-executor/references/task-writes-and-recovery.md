@@ -304,11 +304,8 @@ reopen sends no notice and does not renew or duplicate an earlier notification.
 request-replay checks still apply. Inspect saved effects on uncertainty rather
 than changing request IDs or retrying external work.
 
-For coding, use `github-coding`: default to the retained worktree/branch even after
-PR merge, verify actual project/branch/ownership and absence of conflicting workers,
-safely sync mainline, then deliver a separately reviewed follow-up PR as needed.
-Metadata is not ownership proof; do not scan unrelated chats or automatically
-recreate removed/repurposed environments. Resolve a workspace blocker explicitly.
+For coding, follow `github-coding` for retained worktree reuse, fresh setup when it
+was removed, and the follow-up PR. Resolve a conflicting workspace explicitly.
 Owner does not create a replacement when eligible original-Executor continuation
 can meet the request; otherwise use an appropriate new authorized Task.
 

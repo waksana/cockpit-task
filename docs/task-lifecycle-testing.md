@@ -104,10 +104,11 @@ no production migration, installation, session mutation or deployment is implied
   reopen button is introduced. Dispatch recovery remains initial-send recovery.
 - Model guidance defaults to actual retained worktree/branch reuse after prior PR
   merge, verifies project/branch/ownership and no conflicting worker, and does not
-  treat metadata as proof or scan unrelated transcripts. Removed/repurposed
-  workspaces cause explicit resolution, not automatic replacement. Safe fetch/normal
-  merge preserves work; follow-up PR gets independent review and normal authorized
-  merge. Source-only boundaries, Owner cleanup and no Owner messages remain.
+  treat metadata as proof or scan unrelated transcripts. A removed worktree is
+  recreated fresh by Executor; repurposed/conflicting workspaces cause explicit
+  resolution, not takeover. Safe fetch/normal merge preserves work; follow-up PR
+  gets independent review and normal authorized merge. Source-only boundaries,
+  Executor self-cleanup and no Owner messages remain.
 - Owner avoids a replacement Task when eligible original-Executor continuation is
   possible; otherwise an appropriate new authorized Task is required. Preserve
   immediate important-update handoff and independent pending-user-request guidance.
@@ -135,9 +136,10 @@ Use only synthetic stores/hosts and the existing store, MCP, module and Skill te
   Executor still reads full execution requirements and ACKs the exact revision.
   Default no subscription applies to Agent and automation. Only necessary authorized
   future Owner action justifies a wait; direct Executor questions need no Owner relay.
-- Routine merged-worktree cleanup may be deferred/batched. Record PR/branch/path
-  and release evidence, retain Owner safety checks, and never imply new cleanup
-  scripts/timers or deletion of Executor's cwd.
+- Executor cleans up its own merged worktree/branches after verifying merge and
+  non-use, recording PR/branch/path and the cleanup result; uncertainty keeps them.
+  Owner has no routine cleanup duty. Never imply new cleanup scripts/timers or
+  deletion of any session's cwd.
 
 These scripted assertions do not establish autonomous model behavior. A new model
 exercise must separately observe selective reading and subscription judgment;

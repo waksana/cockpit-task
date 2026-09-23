@@ -37,36 +37,38 @@ Task 不提供给已有 session 追加角色的工具，指派也不补能力。
 运行配置或安全重启不由此流程强制 Issue/PR/branch/worktree，项目政策与不可变安装要求仍有效。
 运行配置不等于仓库内版本号、构建配置、源码或文档变更；后者才走仓库变更流程。
 混合交付保持一个 Task，Issue/PR 只覆盖必要仓库变更，不额外建部署总 Issue。
-执行中才发现变更时，在当前 Task 更新要求并先由 Owner 协调 Issue/隔离环境，再改仓库；
-不预先猜测所有变更，不通过 Executor-to-Owner 聊天或共享 checkout 绕过准备。
+执行中发现超出约定范围的变更时，Executor 先直接问用户（范围由用户决定），
+获授权后更新当前 Task 并按同样方式建立该仓库的 Issue/worktree；不通过 Executor-to-Owner 聊天。
 部署等独立授权与此流程适用性分开，Owner 默认委派职责不变。
 
-初始已知需要仓库变更时，Owner 确认授权与仓库状态，将自己的主目录保持为干净最新主线，准备专用
-branch/worktree 和环境；先复用或创建 Issue，再创建描述完整且关联资料的 Task。
-这些准备、Issue 维护及合并后清理属于协调职责，不允许 Owner 亲自实施代码。
-已有合适 Issue/环境继续使用，不能为“干净”丢弃、stash 或删除用户改动。
+Owner 说明要求（改什么、涉及哪些仓库、交付边界），有现成 Issue 时引用，并创建描述完整的 Task；
+不准备也不清理 branch/worktree，也不亲自实施代码。Owner 创建 Executor session 时把 cwd
+设为目标仓库的共享主 checkout（跨仓库时任选其一），以加载仓库指令和 Skill。
 
-Executor 使用指定 worktree，完整负责实现、必要验证、独立只读 review、修复、
+该 checkout 对 Executor 只读。编码的第一步是复用或创建 Issue，从新 fetch 的主线建立专用
+branch 和独立 worktree，并在 Task 记录 Issue、branch 与路径；之后只在 worktree 操作。
+工具默认使用 cwd，编辑、构建、测试须明确指向 worktree 路径。多仓库各自如此。
+已有合适 Issue/环境在核实归属后继续使用，不能为“干净”丢弃、stash 或删除他人改动。
+
+Executor 完整负责实现、必要验证、独立只读 review、修复、
 关联 PR 和授权内正常合并；PR 创建后及时补 Task 链接，确认最新 head 的 CI，
 不绕过仓库保护。Task 用现有 references/metadata/outcome.references 表达关联，
 不增加 GitHub 字段、MCP 或评论镜像。仅 PR、补丁、调查授权不擅自扩成合并。
 
-Task done 是 Executor 的约定结果，不等于 session 空闲或环境已清理。Owner 确认合并、
-无其他工作仍使用且无未保存/需保留产物后，仅清理本次已合并临时分支和 worktree，
-让主目录回到干净最新主线。清理受阻时直接向本 session 的用户提问，说明具体阻碍与
-继续所需的决定或条件，不只说“等待”，也不承诺自动醒来。用户答复或明确要求继续后，
-重读 Task/PR 并重新确认占用和文件状态；答复本身不是可以安全删除的证明。
-已经触发的 done 订阅不会在环境解除占用后再次通知，不另建 Task、不重新订阅或轮询。
-例行清理可延后集中处理，不构成每项 Task 立即唤醒 Owner 的默认理由。
-记录 PR、branch、path 与资源已释放的证据，延后不省略安全检查，不让 Executor 删除自己的 cwd。
+合并后由 Executor 自行清理：核实已按 PR 合入目标分支（含 squash/rebase），确认自己、
+subagent 及其他工作都不再使用且无未保存/需保留产物后，仅删除本次的 worktree 和本地/远端
+分支（仓库政策保留的除外），不删除任何 session 的 cwd。合并或占用不确定时保留并在
+outcome 记录原因。outcome 记录 PR、branch、path 及清理结果。Owner 无例行清理职责，
+仅可按同样安全检查一次性清理本流程之前由 Owner 准备的旧 worktree。
+Task done 是约定结果，不等于 session 空闲。
 仅当未来状态确实解锁必要且已授权的 Owner 行动时才订阅；不自动新增清理脚本或定时器，
 不轮询或自动续订，也不新建清理 Task/审批门。发布、部署、重启不是默认阶段。
 讨论、非编码和非 GitHub 工作不被强加不适用的步骤。
-用户授权返工时，默认复用仍保留的 worktree/branch，即使旧 PR 已合并。
+用户授权返工时，默认复用仍保留的 worktree/branch，即使旧 PR 已合并；已删除则新建。
 核实实际项目、分支、归属及无冲突使用者；metadata 不是归属证明，也不扫描无关聊天。
 安全 fetch/正常 merge 主线，不 force/reset/amend 或丢弃工作；按需建立新的后续 PR，
-独立审阅并按授权正常合并。环境删除/改作他用时明确解决阻塞，不随 reopen 自动新建。
-源码交付不扩为发布/安装/部署/重启/迁移，Owner 保持清理责任。
+独立审阅并按授权正常合并。环境改作他用或有冲突使用者时明确解决阻塞，不接管。
+源码交付不扩为发布/安装/部署/重启/迁移，合并后 Executor 再次清理。
 
 ## 2. Owner：澄清、委派、跟进
 

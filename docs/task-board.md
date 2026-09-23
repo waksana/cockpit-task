@@ -58,8 +58,8 @@ and state-changing delivery by default. An outcome request is not a request for
 personal execution. Explicit personal-execution instruction or a real assignment
 as a capable Executor is an exception; dual-role selection alone is not.
 Unavailable delegation is a blocker, not permission to take over.
-For coding, Issue maintenance, preparing the isolated environment and safe
-post-merge cleanup are Owner coordination, not permission to implement code.
+For coding, Owner states requirements and references any existing Issue; it does
+not prepare or clean up branches/worktrees and does not implement code.
 
 One session can execute at most one unfinished Task, then be reused after
 completion/cancellation. Tasks are flat references: no child Tasks, dependency
@@ -95,30 +95,31 @@ configuration use Task without this Skill requiring Issue/PR/branch/worktree;
 project policies, immutable installation requirements and separate deployment
 authorization still apply. Owner's default delegation responsibility is unchanged.
 Mixed delivery stays one Task with Issue/PR only for necessary repository changes.
-If same-result changes emerge later, Executor asks the user; once authorized it prepares
-their Issue and isolated worktree within that Task, not a new deployment Issue or stage Task.
-For initially known changes, Owner prepares clean current mainline, a dedicated branch/worktree and environment,
-then reuses or creates an Issue before Task. Executor owns implementation, checks,
-independent review and authorized PR merge. Owner safely removes only this work's
-merged temporary resources once no longer in use and restores clean current mainline.
-Task done means the complete agreed delivery, including separately authorized
-non-coding work in a mixed Task, not code merge alone or proof of cleanup/session idle.
-Routine cleanup can be deferred and batched; it does not by itself justify waking
-Owner for each Task. Record PR/branch/path and explicit resource-release evidence.
+Owner creates the Executor session with cwd at a target repository's shared main
+checkout (any involved one for cross-repository work) so repository instructions load.
+That checkout is read-only for the Executor. Its first coding step is to reuse or create
+the Issue and create its own branch and isolated worktree from freshly fetched mainline,
+recording them in Task; afterwards it works only there, targeting worktree paths
+explicitly because tools default to cwd. This applies to every involved repository.
+If changes outside the agreed scope emerge, Executor asks the user first; once authorized
+it sets up that Issue and worktree within the same Task, not a new deployment Issue or
+stage Task. Executor owns implementation, checks, independent review and authorized PR merge.
+After merge it verifies delivery and that nobody still uses the worktree, then removes
+only its own worktree and local/remote branches (except those kept by repository policy),
+recording the result; uncertain use or merge keeps them with the reason recorded.
+Owner has no routine cleanup duty; it may safely clean up legacy Owner-prepared
+worktrees once. Task done means the complete agreed delivery, including separately authorized
+non-coding work in a mixed Task, not code merge alone or session idle.
 Subscribe only if the future status unlocks necessary authorized Owner action.
-If cleanup is blocked, ask the user directly about the blocker and what is needed
-to continue. The consumed done subscription will not wake Owner again when it clears.
-After the user's answer, reread current evidence before cleanup; do not create a
-new Task, resubscribe or poll.
 Reuse existing environments, preserve others' changes, respect PR-only boundaries,
 and skip GitHub-specific steps for non-GitHub repositories. No release or deployment
 is implied. Issue/PR/environment evidence uses existing Task references and metadata.
-Authorized rework defaults to retaining the worktree/branch even after its previous
-PR merged. Verify actual project, branch, ownership and no conflicting worker;
+Authorized rework defaults to reusing the retained worktree/branch when it still exists,
+even after its previous PR merged; if already removed, Executor creates a fresh one. Verify actual project, branch, ownership and no conflicting worker;
 metadata is only a locator, not ownership proof, and unrelated chats are not scanned.
 Fetch and normally merge mainline safely, with no force/reset/amend or lost work;
 create a newly reviewed follow-up PR as needed and normally merge within scope.
-Removed/repurposed worktrees require explicit resolution, not automatic recreation.
+Repurposed or conflicting worktrees require explicit resolution, not takeover.
 Owner should not replace a Task whose eligible original Executor can continue.
 
 Description contains the full current agreement. Revision/changelog version only

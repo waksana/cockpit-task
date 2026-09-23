@@ -130,7 +130,11 @@ test('coding guidance composes with roles without widening implementation or sub
     assert.ok(section.trim().split('\n').length <= 8, 'Do not duplicate the work flow in role Skills');
   }
   const prompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
-  assert.match(prompt, /Issue\/environment preparation and safe post-merge cleanup are coordination, not permission to implement code/);
+  assert.match(prompt, /Coding Executors get cwd at a target repository.s main checkout and set up\/clean up their own worktree/);
+  assert.match(prompt, /cwd at a target repository's main checkout/);
+  assert.doesNotMatch(prompt, /Issue\/environment preparation/);
+  const executorPrompt = prose(readFileSync(join(root, 'roles/task-executor.md'), 'utf8'));
+  assert.match(executorPrompt, /coding: create\/clean up your own worktree; cwd checkout stays read-only/);
   const coding = prose(readFileSync(join(root, codingDirectory, 'SKILL.md'), 'utf8'));
   const requirements = [
     /"main" means the repository's agreed target mainline/,
@@ -139,17 +143,22 @@ test('coding guidance composes with roles without widening implementation or sub
     /existing suitable Issue or work environment rather than duplicating it/,
     /not hosted on GitHub.*skipping inapplicable Issue\/PR steps/,
     /Release\/tag creation, installation, deployment, restart and data migration are not default coding stages/,
-    /clean, freshly fetched main without discarding anyone's work/,
-    /not to reset, stash or delete it to look clean/,
-    /Do not switch or update another worker's checkout/,
-    /dedicated branch and worktree/,
-    /before creating and assigning Task/,
+    /Owner states what should change, which repository or repositories are involved and the delivery boundary/,
+    /references an existing suitable Issue when there is one/,
+    /Owner does not prepare or clean up branches or worktrees/,
+    /setting up and releasing the work environment is always the Executor's job/,
     /not permission to implement the code personally or through Owner's subagents/,
+    /Treat it as read-only: fetching is fine, but never edit, switch, pull into, reset or stash it, and never touch another worker's worktree/,
+    /Tools default to the session cwd, so after creating your worktree direct every edit, build, test and Git command at worktree paths explicitly/,
+    /reuse or create the Issue describing goal, scope and completion conditions, then create a dedicated branch and isolated worktree from freshly fetched remote mainline/,
+    /Reuse an existing environment only after verifying it is yours/,
+    /record the Issue in Task `references` and the branch and worktree path in `metadata`/,
+    /For several repositories, do the same for each and record every Issue, branch and path/,
     /one Task for the complete result/,
     /`references`.*`metadata`.*`outcome.references`/,
     /Link them rather than mirroring every comment or log/,
-    /Routine post-merge worktree cleanup may be deferred or batched/,
-    /does not automatically require an immediate per-Task Owner wakeup/,
+    /Environment cleanup is not a reason to wait for or wake Owner/,
+    /Worktrees Owner prepared before this workflow may be cleaned up by Owner once, using the same safety checks as Executor cleanup below; this is not a routine duty/,
     /Default to no subscription/,
     /future status unlocks specific necessary authorized Owner work/,
     /smallest one-shot subscription before assignment/,
@@ -164,26 +173,37 @@ test('coding guidance composes with roles without widening implementation or sub
     /Do not manually message Owner, directly or through subagents/,
     /Task done means the complete agreed result/,
     /not code merge alone, resource cleanup or an idle native session/,
-    /every PR\/branch\/worktree path/,
-    /explicit release evidence: which workers have stopped using each worktree, any outstanding users and artifacts to preserve/,
-    /Do not claim release while you or subagents still use it/,
-    /Executor must not delete its own cwd/,
-    /worktree is no longer used by Executor, subagents or other work/,
-    /If cleanup is blocked, ask the user directly in this session about the specific blocker and the decision or condition needed to continue, using `ask_user` when available/,
-    /Ask one focused question at a time/,
-    /Do not merely say you are waiting or imply you will wake automatically/,
-    /consumed done subscription does not notify again when the environment clears/,
-    /On the user's answer or explicit continuation, reread Task\/PR and recheck workspace use and files before resuming cleanup/,
-    /an answer alone does not prove it is safe/,
-    /Do not create another Task, resubscribe to done or start polling/,
-    /uncommitted, untracked, ignored or otherwise needed artifacts and unmerged work/,
+    /every PR\/branch\/worktree path and the cleanup result: what was removed, and anything kept with its reason, outstanding users and artifacts to preserve/,
+    /After merge, clean up your own environment before reporting done/,
     /including squash or rebase merges/,
-    /only this work's merged temporary worktree and local\/remote branches/,
-    /except those retained by repository policy/,
-    /Only then call the complete coding flow finished/,
-    /not another Task, new status or mandatory acceptance gate/,
+    /Confirm nobody still uses the worktree: you, your subagents or other work; an idle label alone does not establish that/,
+    /uncommitted, untracked, ignored or otherwise needed artifacts and unmerged work/,
+    /remove only this work's worktree and local\/remote branches, except those retained by repository policy/,
+    /Never remove a session's cwd, including the shared checkout/,
+    /If merge or use is uncertain, keep the resources and record why/,
+    /ask it directly, one focused question at a time/,
+    /an answer alone does not prove safety/,
+    /Limited delivery without merge keeps the branch and worktree/,
   ];
   for (const requirement of requirements) assert.match(coding, requirement);
+  for (const retired of [
+    /Owner: prepare, then delegate/,
+    /Owner: finish the environment cleanup/,
+    /Owner still cleans up/,
+    /Owner retains safe cleanup responsibility/,
+    /prepare the isolated environment/,
+    /designated \(or authorized self-prepared\) worktree/,
+    /Return your main working directory to clean/,
+  ]) assert.doesNotMatch(coding, retired);
+  const description = skillMetadata(readFileSync(join(root, codingDirectory, 'SKILL.md'), 'utf8')).description;
+  assert.match(description, /Owner states requirements and any existing Issue; Executor reuses or creates the Issue, creates its own branch and worktree from fresh mainline/);
+  assert.match(description, /safely cleans up after merge/);
+  assert.doesNotMatch(description, /Owner prepares|Owner safely cleans/);
+  for (const role of ['owner', 'executor']) {
+    const roleSkill = prose(readFileSync(join(root, skillDirectory(role), 'SKILL.md'), 'utf8'));
+    assert.doesNotMatch(roleSkill, /prepared worktree|Owner handles safe post-merge|prepare clean mainline|freshly fetched|local\/remote branches/,
+      `${role} Skill must leave Git mechanics to github-coding`);
+  }
 });
 
 test('rework guidance keeps self-reopen narrow and defaults to safe retained worktree continuation', () => {
@@ -203,12 +223,12 @@ test('rework guidance keeps self-reopen narrow and defaults to safe retained wor
   assert.match(owner, /Prefer eligible original-Executor `task_reopen`.*not replacement\/redispatch/);
   const coding = prose(readFileSync(join(root, codingDirectory, 'SKILL.md'), 'utf8'));
   for (const requirement of [
-    /default to reusing the retained worktree and branch, even after its previous PR merged/,
+    /default to reusing the retained worktree and branch when they still exist, even after its previous PR merged/,
     /ownership\/no conflicting worker; metadata is not ownership proof/,
     /unrelated transcripts must not be scanned/,
-    /Removed, repurposed or conflicting worktrees require explicit resolution/,
-    /not automatic workspace recreation/,
-    /normally merge current mainline into the retained branch/,
+    /If your worktree was already removed after merge, create a fresh branch and worktree from freshly fetched mainline/,
+    /Repurposed or conflicting worktrees require explicit resolution with the user, never taking over/,
+    /normally merge current mainline into a retained branch/,
     /never force-push, reset, amend prior delivered commits or discard work/,
     /create a new follow-up PR linking prior results/,
     /explicit retro text or null, including on every reopened delivery/,
@@ -219,7 +239,7 @@ test('coding scope distinguishes repository changes from deployment and keeps mi
   const source = readFileSync(join(root, codingDirectory, 'SKILL.md'), 'utf8');
   assert.match(skillMetadata(source).description, /version-controlled repository files/);
   const scope = prose(source.split('## Agree on the result before creating work')[1]
-    .split('## Owner: prepare, then delegate')[0]);
+    .split('## Owner: state the requirements, then delegate')[0]);
   for (const requirement of [
     /changes intended for commit/,
     /existing verified artifacts/,
@@ -231,27 +251,28 @@ test('coding scope distinguishes repository changes from deployment and keeps mi
     /require separate authorization/,
   ]) assert.match(scope, requirement);
   assert.match(prose(source), /including separately authorized non-coding work in mixed delivery/);
-  const preparation = prose(source.split('## Owner: prepare, then delegate')[1]
+  const setup = prose(source.split('## Executor: create your own isolated worktree')[1]
     .split('## Executor: deliver through the authorized boundary')[0]);
-  assert.match(preparation, /initially known GitHub repository changes/);
-  assert.match(preparation, /If changes emerge during execution that the same result needs/);
-  assert.match(preparation, /Executor asks the user directly before editing, not Owner/);
-  assert.match(preparation, /After the user authorizes, Executor may reuse or create the corresponding Issue and a dedicated branch and worktree from freshly fetched mainline/);
-  assert.match(preparation, /Never edit a shared checkout or another worker's worktree, or switch someone else's checkout; Owner still cleans up/);
-  assert.match(preparation, /Unrelated changes need a separate Task, not a drive-by fix/);
+  assert.match(setup, /If the same result needs changes not covered by the agreed scope, including in other code or repositories, ask the user directly before editing, not Owner; scope is the user's decision/);
+  assert.match(setup, /Once authorized, keep the Task description current and set up that repository's Issue, branch and worktree the same way/);
+  assert.match(setup, /Unrelated changes need a separate Task, not a drive-by fix/);
   assert.doesNotMatch(prose(source), /Owner-coordinated Issue\/environment preparation/);
-  assert.match(prose(source), /verify the designated \(or authorized self-prepared\) worktree/);
-  assert.doesNotMatch(preparation, /For GitHub work,/);
+  assert.match(prose(source), /verify your own worktree before editing/);
+  assert.doesNotMatch(setup, /For GitHub work,/);
   const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8')
     .split('## Coding work')[1].split('## Coordinate through Task')[0]);
   assert.match(owner, /version-controlled repository files/);
   assert.match(owner, /pure deployment using existing verified artifacts/);
-  assert.match(owner, /changes discovered later/);
-  assert.match(owner, /user may authorize the Executor to prepare them within the existing Task/);
+  assert.match(owner, /State the requirements and reference any existing Issue; Executor sets up and cleans up its own environment, so you do not prepare or clean branches\/worktrees/);
+  assert.match(owner, /Create the Executor session with cwd at a target repository's shared main checkout \(any involved one for cross-repository work\)/);
   const executorCoding = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8')
     .split('## Coding work')[1].split('\n## ')[0]);
-  assert.match(executorCoding, /same result needs other repository changes, ask the user; once authorized/);
-  assert.match(prose(readFileSync(join(root, 'docs/task-board.md'), 'utf8')), /Executor asks the user; once authorized it prepares their Issue and isolated worktree/);
+  assert.match(executorCoding, /set up your own isolated environment, deliver through the authorized review\/PR\/merge boundary and clean up after merge; nobody prepares or cleans it for you/);
+  assert.match(executorCoding, /Ask the user, not Owner, before scope changes/);
+  const board = prose(readFileSync(join(root, 'docs/task-board.md'), 'utf8'));
+  assert.match(board, /If changes outside the agreed scope emerge, Executor asks the user first; once authorized it sets up that Issue and worktree within the same Task/);
+  assert.match(board, /Owner has no routine cleanup duty/);
+  assert.doesNotMatch(board, /Owner prepares clean current mainline|preparing the isolated environment and safe post-merge cleanup are Owner coordination/);
   assert.match(owner, /Mixed delivery stays one Task/);
   assert.match(owner, /default delegation responsibility/);
 });
