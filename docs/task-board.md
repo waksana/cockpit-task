@@ -51,9 +51,22 @@ post-merge cleanup are Owner coordination, not permission to implement code.
 
 One session can execute at most one unfinished Task, then be reused after
 completion/cancellation. Tasks are flat references: no child Tasks, dependency
-engine, reassignment or terminal reopening. Review is optional unless the Task's
+engine or reassignment. Only the original Executor may self-reopen an eligible
+done Agent Task for explicitly user-authorized rework; cancelled and automation
+Tasks never reopen. Review is optional unless the Task's
 requirements demand it; Executor can complete without a default Owner approval gate.
 Work methods remain separate from role collaboration.
+
+Reopen requires a tracked assignment after schema v5 upgrade, no later Task
+assignment to that Executor (even one now done/cancelled), and no other unfinished
+Task. Pre-upgrade assignments are all ineligible: no timestamp inference/backfill.
+It atomically writes a new full definition revision even for identical text,
+self-ACKs, advances lifecycle context and enters in_progress with the same
+Task/Owner/Executor. Old outcome/retro and all history remain, but current:false
+does not deliver the new agreement. Done again requires a new outcome and explicit
+retro. Busy original-session execution is allowed; current capability readiness
+is still checked. No dispatch/self-prompt, subscription renewal, duplicate notice,
+mandatory activity log, round state machine or UI reopen button is added.
 
 The active Skills are [cockpit-task-owner](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md)
 and [cockpit-task-executor](../skills/cockpit-task-executor/cockpit-task-executor/SKILL.md).
@@ -88,6 +101,13 @@ new Task, resubscribe or poll.
 Reuse existing environments, preserve others' changes, respect PR-only boundaries,
 and skip GitHub-specific steps for non-GitHub repositories. No release or deployment
 is implied. Issue/PR/environment evidence uses existing Task references and metadata.
+Authorized rework defaults to retaining the worktree/branch even after its previous
+PR merged. Verify actual project, branch, ownership and no conflicting worker;
+metadata is only a locator, not ownership proof, and unrelated chats are not scanned.
+Fetch and normally merge mainline safely, with no force/reset/amend or lost work;
+create a newly reviewed follow-up PR as needed and normally merge within scope.
+Removed/repurposed worktrees require explicit resolution, not automatic recreation.
+Owner should not replace a Task whose eligible original Executor can continue.
 
 Description contains the full current agreement. Revision/changelog version only
 that description. Activity records reported execution against an actually ACKed
@@ -111,13 +131,14 @@ Task auto-ACKs the new revision. Terminal definitions can be edited without reop
 | `task_edit` | Replace the complete description or edit title/materials |
 | `task_ack` | Confirm the current definition separately from status |
 | `task_report` | Explicit activity, status and/or outcome; Agent done requires a new outcome and explicit retro text or null |
+| `task_reopen` | Original Executor's explicitly authorized eligible done Agent rework; new revision/self-ACK, no dispatch |
 | `task_cancel` | Cancel Agent without stopping its session; request automation termination, never rollback |
 | `task_subscribe` | Optional one-shot Owner wait for explicit target statuses |
 | `task_unsubscribe` | Cancel a still-waiting subscription |
 
 Owner receives read/create/session_create/session_prepare/assign/edit/cancel/subscribe/unsubscribe
 plus script_read/script_register/automation_start/automation_reconcile;
-Executor receives read/edit/ack/report/cancel (all `task_` prefixed). Both roles
+Executor receives read/edit/ack/report/reopen/cancel (all `task_` prefixed). Both roles
 take the union. Having a tool permits cross-Task operations: responsibility
 fields are not per-record authorization. `actor_session_id` is reported provenance,
 not verified identity.

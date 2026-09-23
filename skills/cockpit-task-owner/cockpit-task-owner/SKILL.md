@@ -161,7 +161,8 @@ Use actual Task/session IDs, stable mutation request IDs and fresh returned
 Unknown effects do not justify a blind retry or replacement Task/session; preserve
 request identity and known effects. Cancel only on an explicit decision: record changes
 do not stop Agent native work or undo external effects; automation cancellation requests termination, not rollback. Do not reassign a bound
-Task or reopen done/cancelled; authorized follow-up after termination needs a new Task.
+Task or impersonate Executor. Prefer eligible original-Executor `task_reopen` for user-authorized done Agent rework, not replacement/redispatch;
+see [rework eligibility](references/task-writes-and-recovery.md#original-executor-rework-after-done). Cancelled/automation/ineligible work needs a new authorized Task.
 
 Reuse this Skill while it remains in context; reload for missing/changed guidance
 or an unclear rule, not a new message. This never replaces fresh Task state or ACK.

@@ -15,9 +15,9 @@ Task 提供 [Owner Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.
 | 角色 | 常驻指令 | 注入的 Task 工具 |
 | --- | --- | --- |
 | Owner | [task-owner.md](../roles/task-owner.md) | `task_read`、`task_create`、`task_session_create`、`task_session_prepare`、`task_assign`、`task_edit`、`task_cancel`、`task_subscribe`、`task_unsubscribe`、`task_script_read`、`task_script_register`、`task_automation_start`、`task_automation_reconcile` |
-| Executor | [task-executor.md](../roles/task-executor.md) | `task_read`、`task_edit`、`task_ack`、`task_report`、`task_cancel` |
+| Executor | [task-executor.md](../roles/task-executor.md) | `task_read`、`task_edit`、`task_ack`、`task_report`、`task_reopen`、`task_cancel` |
 
-共十五个工具。宿主可组合两种角色，工具取并集、相同资源去重；角色管理由宿主负责。
+共十六个工具。宿主可组合两种角色，工具取并集、相同资源去重；角色管理由宿主负责。
 Task 不提供给已有 session 追加角色的工具，指派也不补能力。角色是协作能力，
 不是项目身份、实际承接或逐 Task ACL；自报 actor 只是归因。
 
@@ -62,6 +62,11 @@ Task done 是 Executor 的约定结果，不等于 session 空闲或环境已清
 仅当未来状态确实解锁必要且已授权的 Owner 行动时才订阅；不自动新增清理脚本或定时器，
 不轮询或自动续订，也不新建清理 Task/审批门。发布、部署、重启不是默认阶段。
 讨论、非编码和非 GitHub 工作不被强加不适用的步骤。
+用户授权返工时，默认复用仍保留的 worktree/branch，即使旧 PR 已合并。
+核实实际项目、分支、归属及无冲突使用者；metadata 不是归属证明，也不扫描无关聊天。
+安全 fetch/正常 merge 主线，不 force/reset/amend 或丢弃工作；按需建立新的后续 PR，
+独立审阅并按授权正常合并。环境删除/改作他用时明确解决阻塞，不随 reopen 自动新建。
+源码交付不扩为发布/安装/部署/重启/迁移，Owner 保持清理责任。
 
 ## 2. Owner：澄清、委派、跟进
 
@@ -104,6 +109,11 @@ Owner 查找任务用 `task_read(view=list, owner=<自己的 session ID>)`，act
 所选记录完整保留版本、来源和时间；无 outcome 明确为 null，不先猜 outcomes 再补读 activity。
 编辑前读完整 definition，历史有具体疑问才分页，省略 include 保持旧 overview。
 
+用户明确授权 done Agent 返工且原 Executor 符合重开条件时，Owner 不创建替代
+Task/session、不重新派单或代 Executor 重开。保留原责任和环境，由原 Executor
+自助继续。cancelled、automation、升级前指派或已发生后续指派等不符合条件的工作，
+才按新的明确授权安排适当 Task，不换人接管原 Task。
+
 ### 轻量 automation 路径
 
 Agent 仍是默认；Owner 仅为可信、可重复的已知脚本选择服务执行，不把任意工作
@@ -137,6 +147,16 @@ Executor 先读 execution 确认真实指派、完整 description、资料、版
 
 当前 Executor 成功修改未结束 Task 的实际正文时自动 ACK 新版；
 相同正文、仅资料修改、终态编辑不适用。检查是否又有后续变化，不把通知当成新授权。
+
+原 Executor 收到明确返工授权后读完整 execution，用独立 `task_reopen`
+提交当前 revision/write_context、完整 description 和 reason。仅适用于 done Agent，
+actor 必须等于原 Executor（归因而非认证）。资格要求 schema v5 后的持久单调指派序号、
+自原指派后没有其他 Task 指派（后来 done/cancelled 仍不例外），且无其他未结束 Task。
+升级前已指派的全部不可重开，不回填或猜时间顺序。只查能力就绪，不要求当前执行 session
+空闲；不自发 prompt、prepare 或 dispatch。
+原子进入 in_progress、创建新版并 self-ACK，即使正文相同；历史及引用不变，
+旧成果/复盘 current:false，旧 ACK/成果不能交付新版。完成仍须新 outcome/retro。
+已结束订阅不续订、不补发通知，不新增强制 activity 日志或轮次状态机。
 
 activity 先写本次有意义的变化、发现、决定、阻碍和必要剩余工作，说明解除阻碍
 需要什么，不重述任务、不固定间隔更新、不编造百分比或倾倒工具日志。
@@ -218,7 +238,8 @@ definition_check 检查本次定向 Task 及 actor 承接的未结束 Task，不
 - `resume_request_id` 仅适用于未被消费的 final 指派回执证明
   `assignment=applied`、`message=not_sent`；新操作用同 Task/Executor 和最新上下文。
   unknown/queued/accepted/pending 不符合条件，不允许重开终态或换人。
-- 取消 Task 不停止原生工作或撤销外部效果。终态不能恢复，授权的新工作需独立 Task。
+- 取消 Task 不停止原生工作或撤销外部效果。仅上述 `task_reopen` 可恢复符合条件的
+  done Agent；cancelled/automation 不恢复，不符合资格的后续工作需适当的新授权 Task。
 
 ## 6. 按问题加载参考
 

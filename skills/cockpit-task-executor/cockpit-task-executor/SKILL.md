@@ -45,6 +45,30 @@ worktree and own implementation through the authorized review/PR/merge boundary.
 Owner handles safe post-merge environment cleanup; do not wait for stage handoffs.
 Non-coding work keeps its own methods.
 
+## Explicitly authorized rework after done
+
+When the user explicitly authorizes rework of your completed Agent Task, read full
+current `execution` and use `task_reopen` yourself only if eligible. Keep the same
+Task, Owner and original Executor; do not ask for redispatch or self-prompt.
+The service requires a tracked assignment made after schema v5 upgrade, no other
+Task assigned to you since that assignment (even one now done/cancelled), and no
+other unfinished Task. Pre-upgrade assignments are ineligible; timestamps, old
+chat and metadata cannot establish eligibility. Busy execution of your own current
+session is not an idle-gate failure, but current Executor capability must be ready.
+
+Submit the complete new agreement and reason recording the user's decision, with
+fresh revision/write_context and a stable request ID. Reopen atomically enters
+`in_progress`, creates and self-ACKs a new revision even if the text is identical,
+and preserves all history. Old ACKs/outcomes do not deliver the new agreement;
+complete again with a new outcome and explicit retro text or null.
+Ended subscriptions remain ended; do not renew them or message Owner.
+For coding, default to the retained worktree and branch under `github-coding`,
+including after a prior PR merge; verify actual ownership and safe reuse first.
+If eligibility or workspace reuse fails, explain the specific blocker to the user;
+do not take over, reassign, recreate a workspace automatically or bypass the checks.
+Cancelled Tasks and automation never use this path; a new authorized Task is needed
+when the original Task cannot validly continue.
+
 ## Refresh the agreement, not the Skill
 
 Requirements can change silently. At start, on resumption, between stages, before
@@ -134,8 +158,9 @@ evidence, without redoing external work or replacing a Task/session to bypass un
 Respect cancellation or invalid state before further consequential work. Record
 changes do not stop Agent native work or undo external effects; automation cancellation
 requests process-group termination, not rollback or proof of exit. Bound Agent Tasks cannot change
-Executor; done/cancelled cannot reopen. Authorized follow-up needs a new Task,
-not revival from old instructions or edits.
+Executor. Cancelled Tasks cannot reopen; done Agent Tasks have only the explicit
+original-Executor rework path above, never revival from old instructions, notices,
+definition edits or an ordinary backwards status report.
 
 Use tool schemas for arguments. Consult [Task views and fields](references/reading-tasks.md)
 for unclear fields/views, [Task writes and recovery](references/task-writes-and-recovery.md)

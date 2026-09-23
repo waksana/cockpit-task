@@ -21,7 +21,14 @@ event 只说明这条消息的原因，不是 Task 状态；卡片仍读取当�
 
 默认 Agent Task 由一个 Executor 完整负责，可在内部使用 subagents。要求直接修改 Task，
 Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的版本。没有子任务树、
-改派或续办。角色协作与工作方法分开：随包提供独立的
+改派或任意终态回退。用户明确授权返工时，符合条件的原 Executor 可自行
+`task_reopen` 同一 done Agent Task；不重新派单、不自发消息、不更换责任人。
+必须为 schema v5 升级后有持久序号的指派，且自该次指派后未承接其他 Task
+（后来已完成/取消也不例外）、没有其他未结束 Task。升级前已指派的全部不符合条件，
+不以时间戳推断或回填；cancelled 和 automation 不可重开。
+重开原子创建并自 ACK 新 revision（正文相同也创建）、进入 in_progress；
+历史成果/复盘保留但不代表新要求已交付，完成仍须新 outcome 与显式 retro。
+已结束订阅不恢复，不增加通知、UI 重开按钮或轮次状态机。角色协作与工作方法分开：随包提供独立的
 [github-coding](skills/github-coding/github-coding/SKILL.md)，指导 Git/GitHub 编码协作；
 非编码工作仍使用其自身方法。
 
@@ -52,6 +59,11 @@ Owner 安全清理本次已合并环境并恢复主目录。例行清理可延�
 立即订阅 done 的默认理由；保留 PR/branch/path 和资源释放证据，安全检查不省略。
 仅未来状态解锁必要且已授权的行动时订阅，不恢复默认通知或轮询。
 仅讨论、仅 PR 和非 GitHub 工作保留各自边界；合并不等于部署。
+已授权返工默认复用实际保留的 worktree/branch，即使先前 PR 已合并；
+核实项目、分支、归属及无冲突使用者，metadata 不是归属证明，也不扫描无关聊天。
+安全 fetch/正常 merge 主线，按需新建后续 PR、独立审阅并在授权内正常合并；
+不 force/reset/amend 或丢工作。环境已删除/改作他用时明确解决阻塞，不随重开自动新建。
+原 Executor 符合条件可继续时 Owner 不建替代 Task；否则按新授权安排适当 Task。
 
 单项 `task_read(view=overview,include=[...])` 可一次选择当前需要的完整内容：
 只看状态用 `["context"]`，需判断阻塞/交付时可组合 `["activity","outcome"]`；

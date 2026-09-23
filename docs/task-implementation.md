@@ -18,11 +18,20 @@ Its HTTP API and HTTP MCP share one application service and set of business rule
 
 SQLite transactions protect local mutations. Separate tables hold Tasks,
 description snapshots, exact revision acknowledgements, activities, outcomes,
-operation receipts, subscriptions, script registrations and automation runs. A partial unique index limits each
+operation receipts, subscriptions, assignment order, script registrations and automation runs. A partial unique index limits each
 Executor to one unfinished Task. Subscription uniqueness permits one waiting
 subscription per Task Owner; Owner is fixed for the Task.
 
-Schema version 4 adds nullable `outcomes.retro TEXT` and
+Schema version 5 adds `task_assignments`: `seq INTEGER PRIMARY KEY AUTOINCREMENT`,
+unique `task_id` referencing Tasks, and non-null `executor,author,at`, indexed by
+executor/seq. Each new first binding records its assignment in the same transaction.
+All Tasks assigned before upgrade are ineligible for reopen: migration leaves them
+without assignment records, with no backfill or timestamp-based inference.
+Previously created but still unassigned Tasks acquire a sequence on first binding
+after upgrade. Retain assignment order after completion/cancellation and across
+restart; reopening never records a new assignment or resets this history.
+
+Schema version 4 added nullable `outcomes.retro TEXT` and
 `outcomes.retro_recorded INTEGER NOT NULL DEFAULT 0` (restricted to 0/1).
 Version 3 added Task kind, immutable scripts and automation run/log facts to
 the v2 subscription and notification evidence. Opening a supported older Task
@@ -75,7 +84,7 @@ description version. Return it unchanged:
 
 | Generation | Changes that advance it | Checks |
 | --- | --- | --- |
-| Description `revision` | Actual description changes only | Definition edits, current ACK, assignment and reports as applicable |
+| Description `revision` | Actual description changes or explicit reopen, including identical text | Definition edits, current ACK, assignment, reopen and reports as applicable |
 | Lifecycle | First assignment or actual status transition | Existing-Task writes except subscription cancellation |
 | Editable materials | Actual title/references/metadata changes | Definition edits |
 
@@ -115,6 +124,33 @@ readable and editable without reopening or auto-ACK. Old outcomes retain their
 revision; overview marks whether the latest outcome matches the current definition.
 Recorded retros likewise retain their revision and become `current:false` after
 a description edit, without changing historic outcomes or reopening execution.
+
+### Guarded original-Executor reopen
+
+Only `task_reopen` can move a done Agent Task to in_progress for explicitly
+user-authorized rework. It preserves Task/Owner/Executor and requires reported
+actor equality with the original Executor; this is not authentication.
+Cancelled and automation Tasks remain excluded; report/edit/assign do not reopen.
+Eligibility requires a tracked post-v5 assignment, no later assignment to that
+Executor (including other Tasks now done/cancelled), and no other unfinished Task.
+Use durable sequence ordering, not timestamps or only current occupancy.
+
+The service checks current Executor capability readiness through the public host
+adapter, without requiring idle: the calling original session can be executing.
+No dispatch, self-prompt, preparation, resource repair or workspace creation occurs.
+Revalidate revision, lifecycle/material context, identity and assignment eligibility
+inside the local mutation transaction, including after the host observation, so a
+concurrent assignment or definition change cannot slip past an earlier check.
+
+Atomically increment revision even for identical description, record the full
+definition/reason/author/time, invoke the existing ACK helper for self-confirmation,
+set in_progress and advance lifecycle context with the receipt. Histories and
+references remain; old outcome/retro becomes current:false, and old ACK/outcome
+cannot deliver the new revision. Subsequent done again needs a new outcome and
+explicit retro text or null. No mandatory activity log or round state machine.
+Ended subscriptions stay ended; do not renew or create duplicate notifications.
+Exact replay returns original effects without reopening again; refresh
+definition_check independently. No UI reopen control is added.
 
 ## Lightweight automation
 

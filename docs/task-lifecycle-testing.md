@@ -25,6 +25,7 @@ included in the 40/40 result and use the narrower setup documented below.
 - [Coding workflow cases G1-G4](#coding-workflow-cases-g1-g4)
 - [Executor preparation: rationale and acceptance](#executor-preparation-rationale-and-acceptance)
 - [Completion retro acceptance](#completion-retro-acceptance)
+- [Original-Executor rework acceptance](#original-executor-rework-acceptance)
 - [Selective reading and follow-up acceptance](#selective-reading-and-follow-up-acceptance)
 - [Coverage and grading](#coverage-and-grading)
 - [Artifacts, review and shutdown](#artifacts-review-and-shutdown)
@@ -74,6 +75,42 @@ no-findings work uses null. Verify retro does not replace outcome or blockers.
 Passing schema/storage tests proves submission and persistence, not that an
 Agent actually reflected or produced useful text. Do not report a model-behavior
 pass without a separate observed run.
+
+## Original-Executor rework acceptance
+
+These are current-source requirements for Issue #48, not claimed historical
+model-run results. Use isolated synthetic stores/hosts and the existing tests;
+no production migration, installation, session mutation or deployment is implied.
+
+- Discover Executor-only `task_reopen` with full description/reason and existing
+  request/revision/context inputs. Reject cancelled/automation, actor mismatch,
+  missing tracked assignment, any later assignment (including later done/cancelled)
+  and another unfinished Task. Actor equality is attribution, not authentication.
+- Migrate older schemas transactionally to v5 without backfilling any old
+  assignment. All pre-upgrade assigned Tasks remain ineligible. Newly assigned
+  Tasks receive durable monotonic order, including Tasks created before upgrade
+  but first assigned after it. Restart and identical timestamps do not change order.
+- A busy, capable original Executor can reopen without an idle gate, dispatch,
+  self-prompt, preparation or workspace creation. Missing capability still fails.
+  Concurrent assignment/definition/lifecycle changes are rechecked transactionally;
+  errors and exact replay do not duplicate revisions or effects.
+- Successful reopen preserves identity/references/history, enters in_progress,
+  advances lifecycle context, creates a revision even with identical text and
+  self-ACKs through the existing helper. Definition audit keeps reason/author/time.
+  Old outcome/retro is current:false; old ACK/outcome cannot deliver the new revision.
+  New completion requires a new outcome and explicit retro text or null.
+- Consumed/cancelled/expired subscriptions stay ended, with no renewal or duplicate
+  notice. No mandatory status activity log, separate round state machine or UI
+  reopen button is introduced. Dispatch recovery remains initial-send recovery.
+- Model guidance defaults to actual retained worktree/branch reuse after prior PR
+  merge, verifies project/branch/ownership and no conflicting worker, and does not
+  treat metadata as proof or scan unrelated transcripts. Removed/repurposed
+  workspaces cause explicit resolution, not automatic replacement. Safe fetch/normal
+  merge preserves work; follow-up PR gets independent review and normal authorized
+  merge. Source-only boundaries, Owner cleanup and no Owner messages remain.
+- Owner avoids a replacement Task when eligible original-Executor continuation is
+  possible; otherwise an appropriate new authorized Task is required. Preserve
+  immediate important-update handoff and independent pending-user-request guidance.
 
 ## Selective reading and follow-up acceptance
 

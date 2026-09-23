@@ -79,6 +79,11 @@ subscription guidance without polling, automatic renewal or a new script/timer.
 
 ## Executor: deliver through the authorized boundary
 
+For explicitly authorized original-Executor `task_reopen`, default to reusing the retained worktree and branch, even after its previous PR merged. Verify actual path, repository/project, branch, retained work and ownership/no conflicting worker; metadata is not ownership proof, and unrelated transcripts must not be scanned.
+Removed, repurposed or conflicting worktrees require explicit resolution with the user, not automatic workspace recreation or switching another worker's checkout. Reopen creates no workspace. Preserve the same eligible Task and responsibility, without replacement, redispatch, self-prompt, Owner messages or subscription renewal.
+Safely fetch and normally merge current mainline into the retained branch as needed, preserving work and resolving conflicts; never force-push, reset, amend prior delivered commits or discard work. After a merged PR, create a new follow-up PR linking prior results and the suitable Issue.
+Independently review the complete follow-up and normally merge only within authorization. Source-only stays source-only: no release, install, deployment, restart or data migration is implied. Owner retains safe cleanup responsibility.
+
 Read the latest Task, linked Issue and repository instructions; confirm and ACK
 the current agreement and verify the designated worktree before editing. Do not
 assume you inherited Owner's Skill context. Read this Skill when first needed,
@@ -105,7 +110,7 @@ merge or limited-delivery result, useful evidence, PR/branch/worktree path and
 any remaining cleanup. Record explicit release evidence: which workers have stopped
 using the worktree, any outstanding users and artifacts to preserve. Do not claim
 release while you or subagents still use it; Executor must not delete its own cwd.
-Report done against the latest acknowledged agreement with that new outcome.
+Report done against the latest acknowledged agreement with that new outcome and explicit retro text or null, including on every reopened delivery.
 Do not manually message Owner, directly or through subagents, even if notification
 delivery fails. Task done means the complete agreed result, including separately
 authorized non-coding work in mixed delivery, not code merge alone, resource cleanup

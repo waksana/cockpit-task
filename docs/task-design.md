@@ -25,7 +25,8 @@ Owner 管理多个独立 Task，默认 Agent Task 交给一个 Executor 完整�
 
 - Task 之间只有普通引用，没有父子关系、任务树、依赖引擎或级联调度。
 - 一个 session 同时最多执行一项未结束 Task，完成或取消后可承接其他 Task。
-- 首次绑定后不能替换 Executor；`done` / `cancelled` 不能重新开始执行。
+- 首次绑定后不能替换 Executor；仅符合条件的原 Executor 可在用户明确授权返工时
+  用 `task_reopen` 将 done Agent Task 重开，cancelled / automation 不适用。
 - Owner 信任 Executor 完整交付，不增加默认上游审批或逐阶段重新派单。
   `in_review` 仅在工作约定本身需要评审时使用。
 - 新建或 fork session 不自动隔离共享资源，也不继承额外授权。
@@ -61,6 +62,17 @@ Executor 亲自成功修改未结束 Task 的正文时，同时确认新 revisio
 
 状态、归属、动态和 ACK 不推进 description revision。旧成果保留原版本；
 定义改变后，旧成果不能冒充新要求已交付的证明。终态定义可以编辑，但不会重开执行。
+独立的 `task_reopen` 是窄例外：同一 Task/Owner/Executor 原子进入 in_progress，
+强制新建定义版本（正文相同也递增）并自 ACK；保留旧成果、复盘、资料及所有历史。
+新交付仍需新 outcome 和显式 retro，不把旧 ACK/成果当作新版交付。
+
+资格由 schema v5 后的持久单调指派序号判定：自原指派后未承接其他 Task，
+后来已 done/cancelled 也会永久使该旧 Task 不符合条件；同时不得占用其他未结束 Task。
+升级前已经指派的全部不符合资格，无时间戳推断或历史回填。
+原 Executor 在当前执行轮次可自助重开，只查能力就绪、不套首次派单 idle 门槛；
+不自发 prompt、不派单、不恢复已结束订阅或补发通知。
+Owner 不为可合法继续的原 Executor 建替代 Task；不符合条件则采用适当的新授权 Task。
+不新增通用状态日志、强制 activity 或轮次状态机。
 
 Executor 完成交付后、done 前简短回顾：保留有证据、可行动的自动化候选、具体慢点或
 重复卡点、Skill/MCP 发现/契约/能力验证缺口；区分观察、假设、外部等待，不编造耗时。

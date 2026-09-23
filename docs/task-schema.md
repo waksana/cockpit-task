@@ -16,7 +16,8 @@ Task、依赖引擎或级联状态。引用其他 Task 只是资料关联。
 [自动化边界](task-automation.md)。
 
 同一 session 同时最多承担一项未结束 Task，完成或取消后可以复用。
-首次绑定后不能替换 Executor；终态不能恢复执行。Owner / Executor 字段记录
+首次绑定后不能替换 Executor；仅原 Executor 可按下述窄条件重开 done Agent Task，
+cancelled / automation 不恢复执行。Owner / Executor 字段记录
 责任而非访问权限；具备工具即可操作其他 Task，但所有数据不变量仍受保护。
 
 角色由宿主装配和管理，包括已有 session 的角色变化。Task 的创建工具只为
@@ -43,7 +44,7 @@ Task、依赖引擎或级联状态。引用其他 Task 只是资料关联。
 | `owner` | 登记时明确的委派 session；也是状态订阅的固定接收者 |
 | `executor` | Agent 的固定执行 session，未指派或 automation 为 `null`；无共享执行归属 |
 | `status` | 工作状态，与 native running/idle/unloaded 无关 |
-| `revision` | description 版本，从 1 开始，仅实际正文变化时递增 |
+| `revision` | description 版本，从 1 开始；正文变化或显式 task_reopen 时递增，后者即使正文相同也创建新版 |
 | `changelog` | 每版 description 的正文、作者、服务时间与原因，包括初始定义 |
 | `acknowledged_revision` | 固定 Executor 已记录确认的版本，初始为 `null` |
 | ACK 历史 | 逐版保留 `confirmed_for`（固定 Executor）与 `author`（自报操作者） |
@@ -53,6 +54,7 @@ Task、依赖引擎或级联状态。引用其他 Task 只是资料关联。
 | `references` | `{label,target}` 数组；资料、成果或独立 Task 引用，不形成依赖 |
 | `metadata` | 有界纯 JSON 对象，供补充工作资料；不作为凭据、不覆盖固定字段或触发工作 |
 | 取消记录 | 取消原因、作者、时间；独立于 description changelog 和 Executor activity |
+| `task_assignments` | schema v5 后首次指派的持久单调序号与 Task/Executor/作者/时间；不从时间戳推断顺序，不回填升级前指派 |
 
 automation 创建为 todo/created，显式 start 后 todo/queued，服务 claim 后 in_progress。
 queued/starting/running 禁止编辑定义和资料；脚本选择及输入永不可变。
@@ -129,7 +131,8 @@ activity 只能引用固定 Executor 实际确认过的精确 revision，包括�
 | 报告 | 对已确认版本显式写 activity、status、outcome；未提供的部分不推断 |
 | 完成 | 对当前已确认 revision 同次原子提交 `status=done`、新 outcome 与显式 `retro` |
 | 取消 | 对未结束 Task 保存 cancelled 与原因；不要求先 ACK 新要求，也不停止 session |
-| 终态后的操作 | 可读历史和编辑定义；拒绝执行报告、ACK、改派或恢复 |
+| 终态后的操作 | 可读历史和编辑定义；拒绝普通执行报告、ACK、改派；只有下述 task_reopen 可重开 done Agent |
+| 显式返工重开 | 原 Executor 对符合条件的 done Agent 原子创建新定义/ACK、进入 in_progress，保留身份及历史 |
 
 状态报告可在未结束工作中按事实进入 `in_progress`、`blocked`、`in_review`，
 不强制先后审批。outcome 本身不隐式进入 done，activity 本身不隐式改变状态。
@@ -137,6 +140,30 @@ activity 只能引用固定 Executor 实际确认过的精确 revision，包括�
 
 完成或取消解除“单项未结束执行”的业务占用，但不证明 session 已原生空闲；
 再次指派仍检查能力、运行、队列、待决请求和后台工作。
+
+### 原 Executor 自助返工与 schema v5
+
+`task_reopen` 只用于用户明确授权的返工；自报 actor 必须等于记录的原 Executor，
+这是数据不变量而非身份认证，服务不通过聊天验证用户决定。
+必须同时满足 Agent、done、无其他未结束 Task，以及自原指派后从未承接其他 Task。
+后来已完成或取消的其他 Task 同样使旧 Task 不再符合资格，不能只看当前占用。
+
+schema v5 新增 `task_assignments`，每次升级后的首次指派在绑定事务中写入
+`seq INTEGER PRIMARY KEY AUTOINCREMENT`、唯一 `task_id`、`executor`、`author`、`at`，
+按 executor/seq 索引。所有升级前已指派 Task 均无追踪记录、均不可重开；
+迁移保留旧记录但不回填序号，不用 created_at/updated_at/指派时间或结果时间重建顺序。
+升级前创建但升级后才首次指派的 Task 正常取得序号。重开不是新指派，不另分配序号。
+单调记录与单项未结束唯一约束在事务中重新验证，重启不能重置资格。
+
+重开同事务写完整 description、新 revision、带 author/reason/服务时间的定义历史，
+通过既有确认机制 self-ACK，并将状态改为 in_progress、推进 lifecycle context；
+即使正文逐字相同也创建新版。Task/Owner/Executor、资料引用、活动、所有旧 ACK、
+outcome/retro 与订阅/通知历史保持不变，不新增强制 activity 或轮次状态机。
+旧 outcome/retro `current:false`，直至对应的新报告；旧 ACK/成果不能完成新版。
+再次 done 仍同次要求新 outcome 与显式 retro 文本或 null。
+已 triggered/cancelled/expired 的订阅不会恢复或重复通知。
+宿主只检查当前 Executor 能力就绪，允许正在处理该用户请求的 session，
+不要求 idle、不自发 prompt、不 prepare/dispatch，也不创建工作环境或 UI 重开按钮。
 
 ### 完成交付后的轻量复盘
 

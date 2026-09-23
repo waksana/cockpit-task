@@ -791,7 +791,7 @@ test('v3 migration preserves historical rows and receipts without inventing a nu
   const tasks = f.store.db.prepare('SELECT * FROM tasks').all();
   const receipts = f.store.db.prepare('SELECT * FROM operations').all();
   f.restart();
-  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 4);
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 5);
   assert.deepEqual(f.store.db.prepare('SELECT * FROM tasks').all(), tasks);
   assert.deepEqual(f.store.db.prepare('SELECT * FROM operations').all(), receipts);
   assert.deepEqual(f.store.task(task.task_id).retro, { status: 'not_recorded' });

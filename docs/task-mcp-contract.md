@@ -7,7 +7,7 @@
 
 ## 1. 工具集合与角色
 
-Task 提供十五个工具，模块 ID 与 MCP key 为 `cockpit-task`。
+Task 提供十六个工具，模块 ID 与 MCP key 为 `cockpit-task`。
 登记、创建/准备执行 session 和首次指派是独立操作；状态订阅是可选的一次性等待，
 不是默认最终通知、监工或依赖调度。模块只维护 Owner / Executor 两份角色技能，
 另随包提供独立的 `github-coding` 工作 Skill，不改变 Task 工具或引入业务类型。
@@ -26,6 +26,7 @@ Task 提供十五个工具，模块 ID 与 MCP key 为 `cockpit-task`。
 | `task_edit` | 是 | 是 | 修改完整 description 或补充资料，不改变执行状态 |
 | `task_ack` | 否 | 是 | 只确认 description 版本 |
 | `task_report` | 否 | 是 | 记录 activity、明确更新状态或提交 outcome，不隐式 ACK |
+| `task_reopen` | 否 | 是 | 用户明确授权返工时，原 Executor 重开符合条件的 done Agent Task；新定义/self-ACK，不派单 |
 | `task_cancel` | 是 | 是 | Agent 不停止 session；automation 请求终止进程组，不回滚；仅匹配订阅时通知 |
 | `task_subscribe` | 是 | 否 | 显式登记未来状态的一次性 Owner 通知，当前已匹配则失败 |
 | `task_unsubscribe` | 是 | 否 | 取消仍在等待的订阅，不撤回已触发或发送的通知 |
@@ -39,7 +40,8 @@ Executor 子集没有创建 Task、脚本登记、start/reconcile 或订阅工�
 ACK 或 session 占用。Owner 只为可信可重复已知脚本选择 automation，不把任意工作脚本化。
 宿主负责已有 session 的角色管理；
 Task 自身不暴露角色变更，指派不追加角色、Skill 或 MCP。
-已绑定 Executor 不可替换，done / cancelled 不可恢复执行。
+已绑定 Executor 不可替换；done Agent 仅有 `task_reopen` 窄例外，
+cancelled / automation 不恢复执行。
 
 同一模块可以选择多个角色。仅选 Executor 时使用上表 Executor 列；
 同时选 Owner / Executor 时工具取并集，共享工具只注册一次，两份 Skill 按委派和执行场景配合。
@@ -523,6 +525,64 @@ activity 只能引用固定 Executor 精确 ACK 过的版本，合规自动 ACK 
 retro 保存效果附 outcome_id 与 revision，仅与同次完成一起保存。部分应用的 MCP 响应
 保留完整结构并标记失败，不能引导 agent 整单重放。
 
+### task_reopen
+
+仅为用户明确授权返工提供原 Executor 自助入口，不是 Owner 代办、任意状态回退、
+重新指派、自动重试或 automation 重跑。Skill 负责如实记录用户决定；
+`actor_session_id` 相等检查是固定执行归属不变量，不是身份或授权认证。
+
+输入严格为共用变更字段加 `revision,description,reason`：
+
+```json
+{
+  "task_id": "11111111-1111-4111-8111-111111111111",
+  "actor_session_id": "original-executor-session",
+  "request_id": "authorized-rework-1",
+  "write_context": "returned-current-write-context",
+  "revision": 2,
+  "description": "完整的新返工约定、范围、授权边界和完成条件。",
+  "reason": "用户明确要求原 Executor 在既有 Task 上完成本次返工。"
+}
+```
+
+`description` 必填完整正文，适用既有 24,000 字符和保留资料组合预算；
+`reason` 必填且至多 2,000 字符。不接收 status、executor、owner、
+references/metadata 或工作环境字段。先读完整 execution 并核对当前 revision/context；
+缺少 ACK 不要求先对 done Task 调用 ACK。
+
+必须满足全部条件：
+
+- `kind=agent` 且当前 `status=done`；自报 actor 等于记录的原 Executor。
+- 此 Task 的指派存在 schema v5 后的持久单调序号记录。**升级前已指派的全部
+  不符合资格**；无时间戳比较、迁移回填或从历史成果推断。
+- 自原指派以后，该 Executor 未被指派任何其他 Task；即使那项后来 done/cancelled
+  仍不符合资格。不得只检查当前未结束数量。
+- 没有其他未结束 Task；并发首次指派与重开的本地最终检查在写事务中串行化。
+- 原 Executor 当前宿主能力存在且就绪。允许当前 session 正在执行用户请求，
+  不套首次派单的 idle/空队列门槛；不 prepare、load/reload、repair 或发 prompt。
+
+原子效果：保留 Task/Owner/Executor，进入 in_progress，写完整 description，
+revision 增一，即使正文相同；保存带 reason/author/服务时间的定义历史，
+通过既有 helper self-ACK 新版，并推进 lifecycle context。返回当前效果、
+revision/ack 和新 write_context，不重复全文。
+资料/成果引用、活动、旧定义、ACK、outcome、完成 retro 及通知历史保留。
+旧成果/复盘仍有原版归因且 `current:false`；旧 ACK/成果不能交付新版，
+再次 done 仍同次要求新 outcome 与显式 retro 文本或 null。
+不制造必填 activity、通用状态日志或轮次状态机。
+
+不重新派单、不自发消息或要求 Owner 消息。triggered/cancelled/expired
+订阅保持结束，不自动续订、补发或重复通知。无 UI 重开按钮。
+编码默认复用经核实的既有 worktree/branch，即使旧 PR 已合并；缺失/改作他用
+需明确解决，不由 reopen 自动建环境。具体安全同步、独立 review 和后续 PR
+按 `github-coding` 执行，不扩大源码交付为发布/部署授权。
+
+主要失败为 `REOPEN_NOT_ELIGIBLE`（缺追踪或存在后续指派）、
+`EXECUTOR_MISMATCH`（非原 Executor）、`EXECUTOR_OCCUPIED`（其他未结束工作）、
+`TASK_STATE_CONFLICT`（非 done）及 `AUTOMATION_MANAGED`。并发上下文、
+revision、能力和幂等检查继续适用；不要依赖多个失败条件的检测顺序。
+同 request_id/完整输入重放只返回原效果，不再重开；换输入须新意图，
+先确认原请求效果。`definition_check` 在重放及失败时仍独立刷新。
+
 ### task_cancel
 
 automation 未启动时阻止 launch；运行时请求终止进程组，不证明已退出或回滚。
@@ -597,6 +657,8 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 | `ASSIGNMENT_CONFLICT` | 已有绑定与本次首次指派冲突，不能换人覆盖；不是按调用者归属拒绝 |
 | `TASK_STATE_CONFLICT` | 读取当前生命周期状态，不用普通报告恢复已结束任务 |
 | `EXECUTOR_OCCUPIED` | 由 Owner 选择其他安排，不抢占或自动新建 |
+| `REOPEN_NOT_ELIGIBLE` | 无 schema v5 后的指派追踪或已发生后续指派；不能回填历史或自动建替代环境绕过 |
+| `EXECUTOR_MISMATCH` | 重开自报 actor 不等于原 Executor；不能冒用其 ID，这不是身份认证 |
 | `CAPABILITY_UNAVAILABLE` | 能力未就绪，不宣称指派完成 |
 | `PREPARATION_UNSUPPORTED` | 宿主没有 resource-preparation v1；资源感知创建/准备未执行副作用，不降级 |
 | `EXECUTOR_ROLE_REQUIRED` | 准备要求已应用 Executor 且无待重载角色；不自动补角色/重载 |
@@ -668,7 +730,7 @@ Executor:
 
 模块 HTTP MCP 与普通 HTTP API 挂载于宿主，共用业务服务和独立
 `task-board.sqlite`，不启动额外 daemon。宿主按角色装配配置，
-不为十五个业务工具另建注册表。
+不为十六个业务工具另建注册表。
 
 官方 stateful Streamable HTTP transport 让后续 POST 的取消通知关联原调用；
 取消在下一次 Task 到宿主调用前检查，不回滚已完成动作，也不保证中断已提交

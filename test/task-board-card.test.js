@@ -755,6 +755,34 @@ test('mounted retro detail and outcomes distinguish findings, null, historical m
   }
 });
 
+test('reopen invalidation replaces cached done card and marks prior delivery retro as historical', async () => {
+  const f = fixture();
+  const resource = createReadResource(f.context, input);
+  const retro = {
+    status: 'recorded', has_findings: false, revision: 1, executor: 'executor', author: 'executor',
+    source: 'reported', outcome_id: 'prior-outcome', at: '2026-09-20T01:02:05Z', current: true,
+  };
+  resource.start();
+  f.requests[0].resolve(response({
+    ...result, executor: 'executor', status: 'done', acknowledged_revision: 1,
+    outcome: { available: true, revision: 1, current: true }, retro,
+  }));
+  await settle();
+  assert.equal(resource.getSnapshot().data.status, 'done');
+  f.invalidate();
+  f.requests[1].resolve(response({
+    ...result, executor: 'executor', status: 'in_progress', revision: 2, acknowledged_revision: 2,
+    outcome: { available: true, revision: 1, current: false }, retro: { ...retro, current: false },
+  }));
+  await settle();
+  const reopened = resource.getSnapshot().data;
+  assert.equal(reopened.status, 'in_progress');
+  assert.equal(reopened.revision, 2);
+  assert.equal(reopened.outcome.current, false);
+  assert.equal(reopened.retro.current, false);
+  resource.stop();
+});
+
 test('detail refresh preserves Agent history cursors and automation log offsets', async () => {
   const oldDocument = globalThis.document;
   globalThis.document = { body: {} };

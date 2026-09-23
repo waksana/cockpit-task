@@ -130,6 +130,9 @@ export const schemas = {
     description: text(LIMITS.description).optional(), references: references.optional(), metadata: metadata.optional(),
   }).refine(x => ['title', 'description', 'references', 'metadata'].some(key => x[key] !== undefined), 'An editable field is required'),
   task_ack: z.strictObject({ ...existing, revision }),
+  task_reopen: z.strictObject({
+    ...existing, revision, description: text(LIMITS.description), reason: text(2000),
+  }),
   task_report: z.strictObject({
     ...existing, revision, activity: z.strictObject({ text: text(LIMITS.activity) })
       .refine(value => JSON.stringify(value).length <= LIMITS.reportPayload, 'Serialized activity exceeds 16000 characters').optional(),

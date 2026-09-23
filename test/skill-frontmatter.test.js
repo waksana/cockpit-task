@@ -186,6 +186,35 @@ test('coding guidance composes with roles without widening implementation or sub
   for (const requirement of requirements) assert.match(coding, requirement);
 });
 
+test('rework guidance keeps self-reopen narrow and defaults to safe retained worktree continuation', () => {
+  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  for (const requirement of [
+    /user explicitly authorizes rework/,
+    /read full current `execution` and use `task_reopen` yourself only if eligible/,
+    /same Task, Owner and original Executor/,
+    /no other Task assigned to you since that assignment \(even one now done\/cancelled\)/,
+    /Pre-upgrade assignments are ineligible/,
+    /new revision even if the text is identical/,
+    /Ended subscriptions remain ended/,
+    /Cancelled Tasks and automation never use this path/,
+  ]) assert.match(executor, requirement);
+  assert.doesNotMatch(executor, /done\/cancelled cannot reopen/);
+  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  assert.match(owner, /Prefer eligible original-Executor `task_reopen`.*not replacement\/redispatch/);
+  const coding = prose(readFileSync(join(root, codingDirectory, 'SKILL.md'), 'utf8'));
+  for (const requirement of [
+    /default to reusing the retained worktree and branch, even after its previous PR merged/,
+    /ownership\/no conflicting worker; metadata is not ownership proof/,
+    /unrelated transcripts must not be scanned/,
+    /Removed, repurposed or conflicting worktrees require explicit resolution/,
+    /not automatic workspace recreation/,
+    /normally merge current mainline into the retained branch/,
+    /never force-push, reset, amend prior delivered commits or discard work/,
+    /create a new follow-up PR linking prior results/,
+    /explicit retro text or null, including on every reopened delivery/,
+  ]) assert.match(coding, requirement);
+});
+
 test('coding scope distinguishes repository changes from deployment and keeps mixed delivery together', () => {
   const source = readFileSync(join(root, codingDirectory, 'SKILL.md'), 'utf8');
   assert.match(skillMetadata(source).description, /version-controlled repository files/);
