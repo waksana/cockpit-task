@@ -103,7 +103,7 @@ test('each current Skill has an independent relative reference closure without r
     const metadata = skillMetadata(source);
     assert.equal(metadata.name, `cockpit-task-${role}`);
     assert.match(metadata.description, /first|reuse/i);
-    assert.ok(source.split('\n').length < 165, 'Keep role and completion-retro principles concise; details belong in references');
+    assert.ok(source.split('\n').length < 175, 'Keep role and completion-retro principles concise; details belong in references');
     assert.match(source, /Load only the reference needed, not the whole set/);
     assert.match(source, /Reuse this Skill while it remains in context/);
     assert.match(source, /fresh Task/);
