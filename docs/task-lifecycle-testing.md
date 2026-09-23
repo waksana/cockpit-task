@@ -877,8 +877,8 @@ Do not substitute scripted GitHub success for model judgment or native Skill loa
 
 ### Recorded G1-G4 decision run
 
-The recorded runs below graded the earlier Owner-prepares/Owner-cleans table,
-not the current expectations above; they are historical evidence only.
+This run graded the earlier Owner-prepares/Owner-cleans fixtures and expectations,
+not the current table above; it is historical evidence only.
 
 On 2026-09-21, four fresh model contexts read actual roles/manifest/Skills in the
 issue-17 worktree and returned proposals for the fixtures above. Controller review
@@ -904,6 +904,9 @@ these evaluation fixtures.
 
 ### Recorded GitHub effects run
 
+This run exercised the earlier workflow in which Owner prepared environments and
+cleaned up after a done notice; it is historical evidence, not current guidance.
+
 On 2026-09-21, source `3efe8d7184dd5bade2f81775806d767d80f07a37` (Task 0.1.2)
 was exercised by six separate model contexts over thirteen sequential turns.
 Unlike the decision run, actors used real isolated Task HTTP MCP/SQLite and
@@ -923,8 +926,9 @@ For deferred cleanup, Owner preserved an occupied worktree and untracked notes,
 then stopped with cleanup outstanding. Clearing the synthetic usage and safely
 moving notes outside the worktree produced no new Task notice. Cleanup completed
 only after a separately labelled user continuation, not automatic recovery.
-This observation motivates the current guidance to ask the user directly about
-the blocker, then recheck facts after the answer instead of merely saying "waiting."
+This observation motivated asking the user directly about a cleanup blocker, then
+rechecking facts after the answer instead of merely saying "waiting"; current
+guidance applies that to the Executor's own post-merge cleanup.
 
 An independent observer checked the effects, references and preserved-file hashes:
 30 persisted Task mutations applied without recorded API errors. Evidence is
