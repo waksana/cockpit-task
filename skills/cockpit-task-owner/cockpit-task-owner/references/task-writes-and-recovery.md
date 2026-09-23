@@ -209,6 +209,20 @@ or read a notice.
 An Executor's direct user question, even when blocked, stays in that session;
 Owner does not subscribe to relay it or turn it into an acceptance step.
 
+Sequenced follow-up is a typical necessary case. When the user has authorized
+"do B after A completes", subscribe to A's `done` after creating A and before
+`task_assign` or `task_automation_start`, not afterwards, so a fast completion cannot
+pass unnoticed; if A is already running when B is authorized, subscribe right away.
+When B depends on several prerequisites, subscribe to `done` on each unfinished
+prerequisite; one already done needs no subscription, and a registration rejected
+because A already reached `done` means A is complete. At most one subscription may
+wait per Task: if one is already waiting, withdraw it and register one covering both
+needs. If that ends on an earlier state while B is still needed, registering `done`
+is part of acting on that notice's planned follow-up, not automatic resubscription.
+On each notice, check the remaining prerequisites and dispatch B only when the
+last one completes. Private Owner notes, todos and plans trigger no reminder:
+without a subscription, a status-dependent follow-up waits until the user prompts it.
+
 Owner can explicitly register with `task_subscribe`, withdraw with `task_unsubscribe`,
 and inspect records with `task_read(view=subscriptions)`. Use current tool schemas
 for inputs, not inferred fields. At most one subscription may be waiting per Task.

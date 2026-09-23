@@ -113,9 +113,9 @@ split a complete outcome or add an approval gate to justify a wait.
 
 Owner may explicitly subscribe to specified Task states only for that necessary
 follow-up. Choose the fewest target states that enable it; withdraw a still-waiting
-subscription if the follow-up is no longer needed. The first real matching transition
-ends the subscription; already matching at registration means failure, not an
-immediate notice.
+subscription if the follow-up is no longer needed. For authorized sequenced work, subscribe
+to each unfinished prerequisite's `done` before assigning or starting it; private notes never wake you.
+The first real matching transition ends the subscription; already matching at registration means failure, not an immediate notice.
 On `[Task status updated](task:<uuid>?event=status_changed)`, read only necessary
 latest content in one bounded call where possible and reassess the planned follow-up;
 act only if it is still needed and authorized.
