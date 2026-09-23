@@ -440,6 +440,7 @@ test('subscription guidance requires necessary Owner follow-up without gating Ex
   assert.match(owner, /Do not invent follow-up work, split a complete outcome or add an approval gate/);
   assert.match(owner, /Choose the fewest target states that enable it/);
   assert.match(owner, /withdraw a still-waiting subscription if the follow-up is no longer needed/);
+  assert.match(owner, /subscribe to each unfinished prerequisite's `done` when assigning it; private notes never wake you/);
   assert.match(owner, /act only if it is still needed and authorized/);
   const ownerPrompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
   assert.match(ownerPrompt, /Default to no subscription; register only when a future status unlocks necessary authorized Owner work/);
@@ -458,6 +459,11 @@ test('subscription guidance requires necessary Owner follow-up without gating Ex
     assert.match(writes, /Owner judges this need without asking the user to name or approve the subscription/);
     assert.match(writes, /If that action is no longer needed, withdraw the still-waiting subscription/);
     assert.match(writes, /Executor's authorized work never waits for Owner to subscribe or read a notice/);
+    assert.match(writes, /subscribe to A's `done` when assigning A, or before, not afterwards/);
+    assert.match(writes, /subscribe to `done` on each unfinished prerequisite; one already done needs no subscription/);
+    assert.match(writes, /include `done` in that Task's single subscription rather than adding another/);
+    assert.match(writes, /check the remaining prerequisites and dispatch B only when the last one completes/);
+    assert.match(writes, /Private Owner notes, todos and plans trigger no reminder: without a subscription, a status-dependent follow-up waits until the user prompts it/);
   }
 });
 
