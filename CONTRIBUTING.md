@@ -18,10 +18,13 @@ Synchronize `package.json`, `cockpit.module.json`, both root version entries in
 `package-lock.json`, the embedded MCP server version, tests and current-source
 documentation. Preserve historical release facts. If fresh main already prepares
 the appropriate undelivered version, reuse it rather than repeating its bump:
-the current 0.1.10 preparation includes Owner request follow-through (#45),
-immediate important-update notices (#47) and Agent reopen (#49), superseding
-installed 0.1.9; that installation remains immutable. Version 0.1.9 introduced the
-coding/deployment Skill boundary clarification.
+the current 0.1.11 preparation includes Owner sequential subscription follow-up
+(#53) and Executor session titles (#55), superseding installed 0.1.10; that
+installation remains immutable. Version 0.1.10 introduced Owner request
+follow-through (#45), immediate important-update notices (#47) and Agent reopen
+(#49). Version 0.1.9 introduced the coding/deployment Skill boundary clarification.
+Session-title results use the existing operations JSON; 0.1.11 adds no schema
+migration. Hosts without native name provenance safely skip the title step.
 
 This preparation opens older supported databases with a forward migration to
 schema v5. It deliberately does not backfill assignment records: all pre-upgrade

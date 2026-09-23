@@ -990,9 +990,11 @@ deployment. Do not mutate real sessions or reinstall immutable Task 0.1.5 to rer
 these cases; that preparation used 0.1.6. Version 0.1.7 added completion retro.
 Version 0.1.8 added selective Task reads and updated Skill guidance.
 Version 0.1.9 added the coding/deployment Skill boundary clarification.
-Current source prepares 0.1.10 with Owner request follow-through (#45),
-immediate important-update notices (#47) and Agent reopen (#49), without changing
-those historical observations. Schema v5 migrates forward without assignment
+Version 0.1.10 added Owner request follow-through (#45),
+immediate important-update notices (#47) and Agent reopen (#49). Current source
+prepares 0.1.11 with Owner sequential subscription follow-up (#53) and Executor
+session titles (#55), without changing those historical observations or adding a
+schema migration. Schema v5 migrates forward without assignment
 backfill; all pre-upgrade assigned Tasks remain readable but cannot reopen.
 Old 0.1.9 cannot open schema v5; package rollback is not database rollback.
 
