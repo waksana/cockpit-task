@@ -236,11 +236,11 @@ read on demand and never imply business progress or capability readiness.
 
 For an exceptionally important change that cannot wait for checkpoints, Owner
 follows the [important-update handoff](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md):
-save the updated Task, preserve pending content before removing saved IDs, handle
-new arrivals explicitly, and if needed interrupt the main turn once while
-preserving the queue. Send one preserved-context summary followed by an updated
-reference and an instruction to read/ACK the latest revision. Do not copy description,
-blindly Stop/clear unread messages, cancel background work or loop interruptions.
+save the updated Task, confirm the same unfinished assignment and unacknowledged
+latest revision, then send one `cockpit_send_prompt` notice with `mode:"immediate"`.
+It interjects into a running turn without queue handling or interruption, carrying
+an updated reference and an instruction to read/ACK the latest revision.
+Acceptance is not consumption or ACK; uncertain delivery does not authorize retries.
 `task_edit` never sends this notice automatically.
 
 ### One-shot status subscriptions

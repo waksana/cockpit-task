@@ -122,9 +122,9 @@ Executor 在开工、恢复、重要阶段之间、重要外部操作前和交�
 首次派单不复制 description，Owner 不重复发单。普通编辑与报告静默。
 只有 Owner 判断重要更新不能等待正常同步点时，才按
 [重要更新参考](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)
-保存 pending 内容、按已保存 ID 清理，必要时单次保留队列地中断主轮次，
-再一次发送上下文摘要和 updated 引用。未知内容、并发新消息和后台工作必须明确处理，
-不能盲删、反复中断或自动推进队列。
+先保存 Task 并核对同一未结束指派及未 ACK 的最新 revision，再用
+`cockpit_send_prompt` 的 `mode:"immediate"` 单次发送 updated 引用和读取/ACK 要求。
+不整理或重放队列、不为通知中断工作；受理不等于消费或 ACK，未知效果不盲重试。
 
 状态订阅默认不使用。只有未来状态使 Owner 必须采取具体、必要的后续行动时
 才登记；单纯看进度或确认完成不是理由。不虚构后续工作或审批关卡，

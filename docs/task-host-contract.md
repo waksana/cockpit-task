@@ -168,7 +168,7 @@ Task adapter 不单独调用 [Cockpit #97](https://github.com/waksana/cockpit/pu
 
 已知忙碌时不发送或主动中断。检查与 enqueue 发送不是原子操作；
 竞态可能导致 queued，必须记录 `UNEXPECTED_QUEUE` 和实际消息状态，不能当作
-成功派单或“未发送”。不用 immediate 抢占检查后才开始的工作。
+成功派单或“未发送”。不用 immediate 向检查后才开始的工作插入指派。
 接受也不等于已读、ACK 或实际执行。
 
 拒绝时的 `operation.details` 保留 capability `reasons`、native `loaded/status`、
@@ -180,13 +180,11 @@ Task adapter 不单独调用 [Cockpit #97](https://github.com/waksana/cockpit/pu
 
 Owner 的例外更新流程由
 [随包参考](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)
-指导，不是 Task 工具或自动循环。Owner 根据宿主发布的 schema 读取原生状态、
-保存 pending 内容、按 ID 清理，必要时只中断主轮次一次，再发送一条摘要与 updated 引用。
-
-保留队列的主轮次中断不等于 Stop：Stop/cancel 可以清除 queued messages；
-中断回执也不证明后台工作停止或整个 session 已可接续。不能用清队列的取消
-替代保留队列操作，不能静默取消 subagent，不能盲删并发新消息。
-发送/清理非原子，未知效果不得重复执行。Task 不提供自动队列推进或新的调度器。
+指导，不是 Task 工具或自动循环。先保存 Task，核对仍为同一未结束指派且最新版未 ACK，
+再通过已有 `cockpit_send_prompt` 的 `mode:"immediate"` 发送一次 updated 引用及读取/ACK 要求。
+运行中的 immediate 是向当前轮次插入消息，不是新开一轮；不整理、删除或重放队列，
+也不为通知中断主轮次或后台工作。它不能回答待决 ask/plan/elicitation，受理不等于已读或 ACK，
+失败或未知效果只作有界核对，不盲重试或自动升级为中断。Task 不新增通知 API 或调度器。
 
 ## 4. 模块 HTTP 与官方 MCP transport
 

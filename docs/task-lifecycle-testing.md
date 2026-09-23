@@ -507,6 +507,13 @@ r5 final acceptance; inspect actual contents if a new run differs.
 
 ### S3: Important update, cancellation and stale-card resumption
 
+Historical baseline only: the queue-removal/interruption procedure and convenience
+commands below are superseded by the current
+[important-update handoff](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md).
+Current reruns must exercise one `immediate` notice with queued messages left intact
+and no notification-driven interruption. The original S3 evidence is not evidence
+for native immediate delivery; retain it as historical, not current acceptance.
+
 After A finishes, give its existing Executor a new C Task for anomaly notes.
 The user initially permits only preparation, not a final report. Register a done
 wait explicitly for the expiration test. This is a new Task, not reopening A.

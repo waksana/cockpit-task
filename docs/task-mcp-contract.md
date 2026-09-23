@@ -46,14 +46,14 @@ Task 自身不暴露角色变更，指派不追加角色、Skill 或 MCP。
 `task_session_create` 只为新 session 选择 Executor，不隐式选中两种角色。
 角色变化或多选不等于实际承接，也不放宽执行占用限制。
 
-### 普通更新不发消息，重要更新由 Owner 处理队列
+### 普通更新不发消息，重要更新由 Owner 单次即时提醒
 
 普通要求更新只写 Task，不发送追加指令、提醒或待执行 cue。
 Owner 判断重要更新不能等待正常同步时，可明确进行一次重要更新交接。
 
-- Owner 按 Skill 先读取并保留 pending 内容，再按已保存的消息 ID 清理，包括其他 session / subagent 的消息；不能盲删未知内容或并发新消息。
-- 随后总结保留的上下文，最后附上 `[Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新 revision 的要求，合为一条消息发送；不复制完整 description。
-- 必要时单次中断主轮次，不循环推进或静默取消后台工作；发送前查看真实原生状态，接受回执不等于已读取或 ACK。
+- Owner 按 Skill 先保存完整 Task 要求，核对仍为同一未结束指派且最新版未 ACK；已对齐则不重复通知。
+- 通过已有 `cockpit_send_prompt` 的 `mode:"immediate"` 一次发送 `[Task updated](task:<uuid>?event=updated)` 和读取完整 execution / ACK 最新 revision 的要求，不复制完整 description。
+- immediate 向运行中的当前轮次插入消息，不新开一轮、不整理或重放队列、不为通知中断工作；它不能回答待决 ask/plan/elicitation。接受不等于消费或 ACK；失败/未知只作有界核对，不盲重试或自动升级为中断。
 - 首次指派先检查 idle / 空 queue，已知忙碌则不发送、不主动中断；检查与 enqueue 发送之间存在竞态，queued / unconfirmed 必须保留真实分步结果，不承诺绝不入队或盲重发。
 - 不通过后台巡查、定时发送或 Task 自建消息队列触发该行为，不宣称是原子排他保证。
 
@@ -375,7 +375,7 @@ Executor 首次需要时自行加载相关 Skill 正文，不继承 Owner 的上
 输入：共用变更字段，加 `revision, executor, resume_request_id?`。`executor` 为 Owner 已创建或选好的真实 session ID。不提供 mode / reassign 参数；resume_request_id 仅恢复已证实未发送的操作，不续办 Task。
 
 - 仅用于尚未分配的 todo；已有 Executor 不可替换。
-- 同一目标的重复指派不作为重新唤醒命令；原 request_id 重放原结果，不重复发送。重要更新的队列处理是独立显式动作，不借指派工具追加 cue。
+- 同一目标的重复指派不作为重新唤醒命令；原 request_id 重放原结果，不重复发送。重要更新的即时提醒是独立显式动作，不借指派工具追加 cue。
 - done / cancelled 均不可通过指派恢复。
 - 目标不可承担第二项未结束 Task。程序不因冲突而取消其现有任务或另建 session。
 
@@ -391,7 +391,7 @@ Executor 首次需要时自行加载相关 Skill 正文，不继承 Owner 的上
 Owner 不手工重复发送。`event` 是消息/引用元数据，不增加工具参数、Task 字段、
 Task 类型或状态，也不是命令或调度机制。工具的能力检查、原生忙碌判断与幂等规则不变。
 
-发送时 Task 的定义与归属必须仍符合该次操作前提，不能拿先前检查冒充现在可发送。已知目标不能安全接收时，在绑定前拒绝；若绑定后重新检查发现忙碌或冲突，返回归属已应用、消息未发送的真实部分结果，不自动重试或换人。适配器在确认 idle 且队列为空后调用 `prompt({sessionId,text,mode:"enqueue"})`，空闲时直接开始；不使用会中断新启动工作的 immediate。检查与发送之间不是原子窗口，竞态下实际 queued 必须作为异常保留，不能宣称严格 idle-only 保证。
+发送时 Task 的定义与归属必须仍符合该次操作前提，不能拿先前检查冒充现在可发送。已知目标不能安全接收时，在绑定前拒绝；若绑定后重新检查发现忙碌或冲突，返回归属已应用、消息未发送的真实部分结果，不自动重试或换人。适配器在确认 idle 且队列为空后调用 `prompt({sessionId,text,mode:"enqueue"})`，空闲时直接开始；不使用 immediate 向新启动的工作插入指派。检查与发送之间不是原子窗口，竞态下实际 queued 必须作为异常保留，不能宣称严格 idle-only 保证。
 
 新建 session 通常来自 `task_session_create`；复用由 Owner 从宿主列表选择候选者，
 排除绑定未结束 Task 的 session，需要准备时先显式调用 `task_session_prepare`。
@@ -659,10 +659,10 @@ Executor:
 
 每次写入都带 actor_session_id 和新的明确 request_id；已有 Task 写入还带读取返回的 write_context，create/session_create/session_prepare/unsubscribe 不带。相同操作重试保留相同输入和 request_id。Skill 读取也提交自己的 actor_session_id；每次响应都处理 definition_check。仅登记 backlog 不创建/准备 Executor 或派单。
 
-重要更新由 Owner 按 Skill 保存并清理 pending 内容，再通过宿主公开发送入口一次发送
-摘要、`[Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新版要求。
-必要时单次保留队列地中断；不用 Stop 作为清理捷径，不重复未知发送，
-不把接续回执当作当前 revision 的 ACK。普通 task_edit 不发送通知。
+重要更新由 Owner 按 Skill 保存 Task，核对同一未结束指派及未 ACK 的最新 revision 后，
+通过已有 `cockpit_send_prompt` 的 `mode:"immediate"` 一次发送
+`[Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新版要求。
+不整理或重放队列、不为通知中断工作，不重复未知发送；受理不是 ACK。普通 task_edit 不发送通知。
 
 ## 6. 传输与启动边界
 
