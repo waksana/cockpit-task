@@ -229,7 +229,7 @@ test('a pending notice survives restart and is recovered exactly once', async t 
   assert.equal(f.notices(d.task_id)[0].notification.status, 'accepted');
 });
 
-test('schema v5 databases migrate forward to v6 without changing existing Tasks', t => {
+test('schema v5 databases migrate forward to v7 without changing existing Tasks', t => {
   const root = join(process.cwd(), '.task-board-tests', randomUUID());
   mkdirSync(root, { recursive: true });
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -243,7 +243,7 @@ test('schema v5 databases migrate forward to v6 without changing existing Tasks'
   legacy.close();
   store = new TaskStore(root);
   try {
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 6);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 7);
     assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
     assert.deepEqual(store.db.prepare('SELECT * FROM operations').all(), receipts);
     const migrated = store.task(task.task_id);

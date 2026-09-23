@@ -1,6 +1,8 @@
 import { TaskError } from './contracts.js';
 
 const executorRoles = [{ moduleId: 'cockpit-task', roleId: 'executor' }];
+// Created sessions execute their own assignment and may own more specific child Tasks without a reload.
+const createdRoles = [{ moduleId: 'cockpit-task', roleId: 'owner' }, ...executorRoles];
 
 function availabilityReasons(meta) {
   if (meta === null) return ['session_not_found'];
@@ -38,7 +40,7 @@ export function createHostAdapter(host) {
   };
   return {
     ownerExists: async sessionId => (await get(sessionId)) !== null,
-    create: cwd => host.call('session/new', { cwd, roles: executorRoles }),
+    create: cwd => host.call('session/new', { cwd, roles: createdRoles }),
     preparationSupported: host.resourcePreparationVersion === 1,
     prepare: (sessionId, { skills, mcp_servers }) => host.call('session/resources-prepare', {
       sessionId, ...(skills !== undefined ? { skills } : {}),

@@ -277,7 +277,7 @@ test('module HTTP and host bridge preserve registration, creation, assignment an
     const session = await f.write('task_session_create', { cwd: '/tmp' });
     assert.equal(session.body.result.operation.capability, 'ready');
     assert.deepEqual(f.calls[0], {
-      name: 'session/new', body: { cwd: '/tmp', roles: [{ moduleId: 'cockpit-task', roleId: 'executor' }] },
+      name: 'session/new', body: { cwd: '/tmp', roles: [{ moduleId: 'cockpit-task', roleId: 'owner' }, { moduleId: 'cockpit-task', roleId: 'executor' }] },
     });
     const execution = (await f.read(id)).body.result;
     const assigned = await f.write('task_assign', { task_id: id, revision: 1, executor: 'executor', write_context: execution.write_context });

@@ -3,7 +3,8 @@
 Agent is the default: one independent Executor delivers a complete authorized
 outcome. Owner may instead choose automation for an already known, trusted,
 repeatable local script. This is not arbitrary task-to-script conversion, a
-workflow/dependency engine, a scheduler, or permission to invent child Tasks.
+workflow/dependency engine, a scheduler, or permission to invent child Tasks outside
+authorized delegation scope.
 Registration, Task creation, optional subscription and execution are separate.
 
 Script automation is available only on Linux (including WSL2). On other platforms

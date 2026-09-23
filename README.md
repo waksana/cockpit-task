@@ -122,5 +122,6 @@ npm run package:module
 Task 依赖新增 schema v6（`task_dependencies`、`dependency_notices`），v5→v6
 迁移只新建表。schema v6 只能向前滚动：已安装的 `0.1.11` 不能打开 v6；
 切回旧包不等于数据库回退，不得用历史备份覆盖实时数据。部署前应在隔离的一致副本上验证迁移。
+长期分支 `experiment/hierarchical-delegation`（#66）引入按 Task 区分的层级委派：session 对自己被指派的 Task 是 Executor，对其创建的子 Task 是 Owner；新增 schema v7（`tasks.parent_task_id`、`tasks.depth`，最多 3 层，超出返回 `DELEGATION_DEPTH_EXCEEDED`），只能向前滚动，已安装的 `0.1.12` 不能打开 v7。该分支不升级版本、不部署。
 `0.1.11` 在 `0.1.10` 基础上包含 Owner 顺序订阅跟进（#53）和 Executor 会话标题（#55），
 不新增 schema 迁移。升级为 schema v5 时不回填历史指派；升级前已派单 Task 保持可读但均不可重开。

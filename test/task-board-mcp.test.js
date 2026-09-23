@@ -88,7 +88,7 @@ test('published tool descriptions explain filters, dispatch races and same-repor
       assert.deepEqual(tool.inputSchema, z.toJSONSchema(toolSchemas[tool.name], { target: 'draft-7' }));
       assert.ok(tool.description.length < 500, `${tool.name}: keep workflow detail in Skills`);
     }
-    assert.match(descriptions.task_read, /list, explicitly filter by owner or executor/);
+    assert.match(descriptions.task_read, /list, explicitly filter by owner, executor or parent_task_id/);
     assert.match(descriptions.task_read, /actor_session_id.*not an automatic list filter or authentication/);
     assert.match(descriptions.task_read, /Reads never acknowledge/);
     const readSchema = tools.find(tool => tool.name === 'task_read').inputSchema;

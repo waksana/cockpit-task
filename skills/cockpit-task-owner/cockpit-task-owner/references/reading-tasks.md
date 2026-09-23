@@ -7,6 +7,7 @@ explanation. Familiar reads do not require reloading it. These are the implement
 ## Owner's default view
 
 For an overview of your work, use `view=list` with `owner` set to your session ID.
+For one Task's direct children, use `view=list` with `parent_task_id` and `status=all`.
 For one Task, use `view=overview` with its `task_id` and select only needed groups
 with `include`. Context alone is `include=["context"]`.
 Include your own `actor_session_id` on reads. This is reported attribution and
@@ -20,6 +21,7 @@ Without `include`, the single-Task overview retains its existing compact shape:
 | `kind`, `automation` | `agent` by default; automation runtime facts without an Executor or ACK obligation |
 | `owner`, `executor`, `status` | Coordination responsibility, assigned session or null, and declared lifecycle state |
 | `revision`, `acknowledged_revision` | Current definition versus actual Executor confirmation; null means no ACK |
+| `parent_task_id`, `depth` | Delegation lineage fixed at creation: the parent Task whose Executor created this Task, or null for top-level; `depth` 1–3. Not a readiness gate or authority |
 | `blocked_by`, `ready` | Each declared blocker's `task_id` and current `status`, and whether all are `done`; `[]`/true without dependencies. Ready is a dispatch gate, not a status or instruction |
 | `activity` | Latest activity or null, including its ID, revision, Executor, author, time and reported source |
 | `activity.text`, `activity.truncated` | Up to 320 characters of that actual activity, not a generated summary; expand activity if truncated and relevant |
@@ -49,7 +51,7 @@ This selects content groups, not arbitrary columns or a role-dependent projectio
 
 Every selected response includes compact current context: `id`, `task_id`, `title`,
 `owner`, `executor`, `status`, `revision`, `acknowledged_revision`, `created_at`,
-`updated_at`, `write_context`, `kind`, `blocked_by`, `ready`. Context is always returned even if not explicit;
+`updated_at`, `write_context`, `kind`, `parent_task_id`, `depth`, `blocked_by`, `ready`. Context is always returned even if not explicit;
 `include=["context"]` returns only that context.
 
 | Group | Additional content |

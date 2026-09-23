@@ -11,8 +11,8 @@ Use project instructions and work skills for execution methods.
 
 Automation Tasks are service-managed, not Executor assignments. You may read their
 `kind`, `automation` facts, outcomes and bounded `automation_log`; do not ACK or report
-them. Existing read/edit/cancel tools do not grant create/start or script registration.
-Do not create child Tasks or add Owner capabilities to route your assigned work through automation.
+them. Executor read/edit/cancel tools do not grant create/start or script registration;
+only Owner guidance covers trusted automation, including as a child Task.
 
 ## Own the whole authorized result
 
@@ -27,15 +27,26 @@ without assuming inherited Owner context. MCP connected is not tool offered,
 and initialized tool metadata is not final readiness.
 
 Own the entire authorized result: investigation, execution, correction and delivery,
-not just a proposal or stage. Organize internal steps/subagents without child Tasks,
-helper-request workflows or transferring responsibility. Do not add Owner capabilities
-to bypass this boundary. Hold one unfinished Task at a time, not one lifetime goal;
+not just a proposal or stage. Organize internal steps/subagents without helper-request
+workflows, stage-by-stage redispatch or transferring responsibility; delegate child Tasks
+only by scope, below. Hold one unfinished Task at a time, not one lifetime goal;
 having both roles does not change that limit.
 
 Respect "discuss only", "not now" and scope: investigation does not authorize changes
 or unrelated follow-up work. Ask real decisions, consequential scope changes or
 missing essentials directly of the user here, not through Owner. Do not wait for
 stage-by-stage redispatch or repeat requests for already-granted permission.
+
+## Deliver directly or delegate by scope
+
+Roles are per Task: Executor for your assignment, Owner for child Tasks you create for it.
+Deliver a coherent result directly. Split only for several independent outcomes, item-by-item
+trade-off discussion with the user, or follow-up detail that would crowd your context; lean
+toward delegation as load grows. Then load `cockpit-task-owner` and follow it for each child:
+more specific than your Task, never passed down unchanged, within its authorized scope.
+You still own your Task: integrate and verify child outcomes before done; never implement a
+child you delegated, accept your own work or fake delegation without ready Owner capability
+([delegating child Tasks](references/task-writes-and-recovery.md#delegating-child-tasks)).
 
 ## Coding work
 

@@ -173,7 +173,7 @@ test('selected overview returns only requested full latest records, distinguishi
   const context = read(['context']);
   assert.deepEqual(Object.keys(context).sort(), [
     'id', 'task_id', 'title', 'owner', 'executor', 'status', 'revision', 'acknowledged_revision',
-    'created_at', 'updated_at', 'write_context', 'kind', 'blocked_by', 'ready',
+    'created_at', 'updated_at', 'write_context', 'kind', 'parent_task_id', 'depth', 'blocked_by', 'ready',
   ].sort());
   assert.equal(context.status, 'done');
   f.edit(context, { description: 'Revised after completion' });
@@ -793,7 +793,7 @@ test('v3 migration preserves historical rows and receipts without inventing a nu
   const tasks = f.store.db.prepare('SELECT * FROM tasks').all();
   const receipts = f.store.db.prepare('SELECT * FROM operations').all();
   f.restart();
-  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 6);
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 7);
   assert.deepEqual(f.store.db.prepare('SELECT * FROM tasks').all(), tasks);
   assert.deepEqual(f.store.db.prepare('SELECT * FROM operations').all(), receipts);
   assert.deepEqual(f.store.task(task.task_id).retro, { status: 'not_recorded' });

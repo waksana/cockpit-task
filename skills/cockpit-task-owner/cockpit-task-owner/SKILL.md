@@ -40,8 +40,9 @@ blockers rather than silently abandoning a request.
 ## Delegate one complete outcome
 
 One coherent Agent outcome belongs to one Task and one accountable Executor, including investigation, implementation, correction and delivery. Split independent outcomes,
-not tightly coupled stages, resources or specialties. Tasks are flat: use references and
-`blocked_by` readiness gates, not child Tasks, workflow engines, helper-request workflows or standing role pools.
+not tightly coupled stages, resources or specialties. Link related Tasks with references and
+`blocked_by` readiness gates, not workflow engines, helper-request workflows or standing role pools;
+hierarchy arises only from [child Tasks](#child-tasks-delegate-from-your-own-assignment).
 Executor manages internal steps/subagents without stage-by-stage redispatch or a
 mandatory Owner acceptance gate.
 
@@ -64,6 +65,18 @@ Inspect the receipt, then `task_assign` once: it checks, never repairs. Unknown 
 Preparation does not install/authenticate, reload, change global defaults or prompt; readiness is not authorization, acceptance, ACK or execution.
 Skill enabled is not body loaded; Executor loads relevant bodies when first needed, without inheriting your context.
 `task_assign` sends the first assigned reference itself; do not send a duplicate.
+
+## Child Tasks: delegate from your own assignment
+
+Roles are per Task: Executor for your assignment, Owner (this Skill) for child Tasks you create
+for it. Delegation follows scope, not a preset lead identity: split only for several independent
+outcomes, item-by-item trade-off discussion with the user, or follow-up detail that would crowd
+your context; deliver a coherent result directly, leaning toward delegation as load grows.
+A child is more specific than its parent, never passed down unchanged, and within the parent's
+authorized scope; ask the user before anything outside it. Assign children to other sessions,
+never implement them yourself, and integrate their outcomes before reporting your Task done.
+The service records lineage and caps it at 3 levels; pending-decision Tasks go to a new session
+([delegating child Tasks](references/task-writes-and-recovery.md#delegating-child-tasks)).
 
 ## Known scripts, not arbitrary automation
 
@@ -114,7 +127,7 @@ split a complete outcome or add an approval gate to justify a wait.
 Owner may explicitly subscribe to specified Task states only for that necessary
 follow-up. Choose the fewest target states that enable it; withdraw a still-waiting
 subscription if the follow-up is no longer needed. For authorized "do B after A" work, create B at once as an unassigned Task with `blocked_by`
-and a complete description instead of subscribing; private notes never wake you. On its `event=ready` or `event=blocker_cancelled` card, reassess before dispatching or revising B; an undecided follow-up may be a pending-decision planning Task, discussed with the user before rewrite or cancel ([dependencies](references/task-writes-and-recovery.md#task-dependencies-blocked_by)).
+and a complete description instead of subscribing; private notes never wake you. On its `event=ready` or `event=blocker_cancelled` card, reassess before dispatching or revising B; an undecided follow-up may be a pending-decision planning Task, dispatched to a new session that discusses it with the user before delivering, delegating or cancelling ([dependencies](references/task-writes-and-recovery.md#task-dependencies-blocked_by)).
 The first real matching transition ends the subscription; already matching at registration means failure, not an immediate notice.
 On `[Task status updated](task:<uuid>?event=status_changed)`, read only necessary
 latest content in one bounded call where possible and reassess the planned follow-up;

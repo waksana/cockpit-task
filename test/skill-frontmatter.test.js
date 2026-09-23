@@ -103,7 +103,7 @@ test('each current Skill has an independent relative reference closure without r
     const metadata = skillMetadata(source);
     assert.equal(metadata.name, `cockpit-task-${role}`);
     assert.match(metadata.description, /first|reuse/i);
-    assert.ok(source.split('\n').length < 175, 'Keep role and completion-retro principles concise; details belong in references');
+    assert.ok(source.split('\n').length < 190, 'Keep role, delegation and completion-retro principles concise; details belong in references');
     assert.match(source, /Load only the reference needed, not the whole set/);
     assert.match(source, /Reuse this Skill while it remains in context/);
     assert.match(source, /fresh Task/);
@@ -478,8 +478,9 @@ test('subscription guidance requires necessary Owner follow-up without gating Ex
   assert.match(owner, /withdraw a still-waiting subscription if the follow-up is no longer needed/);
   assert.match(owner, /create B at once as an unassigned Task with `blocked_by` and a complete description instead of subscribing; private notes never wake you/);
   assert.match(owner, /`event=ready` or `event=blocker_cancelled` card, reassess before dispatching or revising B/);
-  assert.match(owner, /undecided follow-up may be a pending-decision planning Task, discussed with the user before rewrite or cancel/);
-  assert.match(owner, /`blocked_by` readiness gates, not child Tasks, workflow engines/);
+  assert.match(owner, /undecided follow-up may be a pending-decision planning Task, dispatched to a new session that discusses it with the user/);
+  assert.match(owner, /`blocked_by` readiness gates, not workflow engines/);
+  assert.doesNotMatch(owner, /Tasks are flat/);
   assert.match(owner, /act only if it is still needed and authorized/);
   const ownerPrompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
   assert.match(ownerPrompt, /Default to no subscription; register only when a future status unlocks necessary authorized Owner work/);
@@ -506,9 +507,10 @@ test('subscription guidance requires necessary Owner follow-up without gating Ex
     assert.match(writes, /Readiness never changes status, assigns, starts or dispatches/);
     assert.match(writes, /sends one `\[Task ready\]\(task:<uuid>\?event=ready\)` card for the dependent to its Owner/);
     assert.match(writes, /When a blocker is cancelled, it sends one `\[Task blocker cancelled\]\(task:<uuid>\?event=blocker_cancelled\)`/);
-    assert.match(writes, /There is no polling, automatic assignment, reminder or child-Task workflow/);
+    assert.match(writes, /There is no polling, automatic assignment, reminder or workflow engine/);
     assert.match(writes, /unassigned planning Task `blocked_by` its prerequisites/);
-    assert.match(writes, /pending decision \(what must be discussed, candidate items, links\) and must not be dispatched as-is/);
+    assert.match(writes, /pending decision \(what must be discussed, candidate items, links\) and must not be executed before that discussion/);
+    assert.match(writes, /assign it to a new session rather than claiming it yourself/);
     assert.match(writes, /cancel it with the user's decision as the reason\. This is guidance only: no new status, kind or tool/);
   }
 });
@@ -651,7 +653,7 @@ test('automation guidance preserves Agent default, explicit service execution an
   assert.match(executor, /Automation Tasks are service-managed, not Executor assignments/);
   assert.match(executor, /do not ACK or report them/);
   assert.match(executor, /do not grant create\/start or script registration/);
-  assert.match(executor, /Do not create child Tasks or add Owner capabilities/);
+  assert.match(executor, /only Owner guidance covers trusted automation, including as a child Task/);
 });
 
 test('completion retro guidance separates evidence-based reflection from delivery and authority', () => {
@@ -758,4 +760,33 @@ test('unquoted mapping separators in either role description fail release valida
       { name: `cockpit-task-${role}`, description });
   }
   assert.throws(() => skillMetadata('---\nname: cockpit-task-owner\ndescription: "invalid \\q escape"\n---\n'), SyntaxError);
+});
+
+test('delegation guidance assigns roles per Task and bounds child scope', () => {
+  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  for (const source of [owner, executor]) {
+    assert.match(source, /Roles are per Task: Executor for your assignment, Owner/);
+    assert.match(source, /more specific than (its parent|your Task), never passed down unchanged/);
+    assert.match(source, /within (the parent's|its) authorized scope/);
+    assert.match(source, /integrate (their|and verify child) outcomes before/);
+    assert.match(source, /references\/task-writes-and-recovery\.md#delegating-child-tasks/);
+  }
+  assert.match(owner, /caps it at 3 levels; pending-decision Tasks go to a new session/);
+  assert.match(executor, /Then load `cockpit-task-owner` and follow it for each child/);
+  for (const prompt of ['owner', 'executor']) {
+    assert.match(prose(readFileSync(join(root, `roles/task-${prompt}.md`), 'utf8')), /Roles are per Task|Delegate child Tasks/);
+  }
+  for (const role of ['owner', 'executor']) {
+    const writes = prose(readFileSync(join(root, skillDirectory(role), 'references/task-writes-and-recovery.md'), 'utf8'));
+    assert.match(writes, /A session's role is decided per Task/);
+    assert.match(writes, /There are no preset domain-lead identities/);
+    assert.match(writes, /never passed down unchanged, and within the parent's authorized scope/);
+    assert.match(writes, /The parent integrates and verifies child results before completing its own Task/);
+    assert.match(writes, /never fake delegation/);
+    assert.match(writes, /the Owner does not claim them itself/);
+    assert.match(writes, /capped at 3 levels: creating beneath a depth-3 Task fails with `DELEGATION_DEPTH_EXCEEDED` and saves nothing/);
+    assert.match(writes, /does not change `blocked_by` readiness, notices, assignment or authority/);
+    assert.match(writes, /`task_read\(view=list, parent_task_id=<Task ID>, status=all\)`/);
+  }
 });

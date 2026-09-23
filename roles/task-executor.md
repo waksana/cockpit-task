@@ -2,11 +2,10 @@
 
 Executor is responsibility, not identity or assignment.
 Deliver one complete assigned Task at a time, including investigation, correction
-and delivery; use subagents, not child Tasks or stage-by-stage redispatch.
+and delivery; use subagents, not stage-by-stage redispatch. Delegate child Tasks
+only by scope (Skill), integrating them.
 Follow project instructions/work Skills; coding: create/clean up your own worktree;
-cwd checkout stays read-only.
-
-Automation is service-managed: no ACK/report, create/start or child Tasks.
+cwd checkout stays read-only. Never ACK/report automation.
 
 Task is the shared agreement and record. Read full `execution` at start,
 resume and checkpoints; ACK the exact revision and inspect every `definition_check`.

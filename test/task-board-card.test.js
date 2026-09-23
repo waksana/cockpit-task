@@ -5,6 +5,7 @@ import {
   activate,
   acknowledgementLabel,
   createReadResource,
+  delegationLabel,
   dependencyLabel,
   formatTimestamp,
   nativeStatusLabel,
@@ -856,4 +857,57 @@ test('dependency labels stay compact and never imply dispatch', () => {
   assert.equal(dependencyLabel([], true), null);
   assert.equal(dependencyLabel([{ task_id: 'a', status: 'done' }, { task_id: 'b', status: 'done' }], true), 'Blocked by 2 Tasks · all done · ready to dispatch');
   assert.equal(dependencyLabel([{ task_id: 'a', status: 'done' }, { task_id: 'b', status: 'in_progress' }], false), 'Blocked by 2 Tasks · 1 done · not ready');
+});
+
+test('delegation lineage shows parent and lazily reads direct child Tasks without extra eager reads', async () => {
+  assert.equal(delegationLabel(null, 1), null);
+  assert.equal(delegationLabel(undefined, undefined), null);
+  assert.equal(delegationLabel('parent', 2), 'Child Task · delegation level 2');
+  const parentId = '6f1c0c92-3580-4cdd-85bf-d7fcf22ab3ff';
+  const childId = '7a2c0c92-3580-4cdd-85bf-d7fcf22ab3ff';
+  const f = fixture();
+  const harness = componentHarness(f.context);
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  try {
+    harness.render();
+    f.requests[0].resolve(response({ ...result, parent_task_id: parentId, depth: 2 }));
+    await settle();
+    let tree = harness.render();
+    assert.match(textContent(tree), /Child Task · delegation level 2/);
+    elements(tree).find(node => node.props.className === 'ck-button tb-card').props.onClick();
+    harness.render();
+    f.requests[1].resolve(response({ ...result, parent_task_id: parentId, depth: 2, description: 'Child definition', references: [], metadata: {} }));
+    await settle();
+    tree = harness.render();
+    assert.match(textContent(tree), /Parent Task/);
+    assert.match(textContent(tree), new RegExp(parentId));
+    assert.equal(f.requests.length, 2, 'Parent and child lineage are not read until disclosed');
+    const disclosures = elements(tree).filter(node => node.type === 'details');
+    const children = disclosures.find(node => textContent(node).includes('Child Tasks delegated from this Task'));
+    children.props.onToggle({ currentTarget: { open: true } });
+    harness.render();
+    assert.deepEqual(JSON.parse(f.requests[2].init.body), { view: 'list', parent_task_id: taskId, status: 'all', limit: 50 });
+    f.requests[2].resolve(response({ items: [{ task_id: childId, title: 'Specific child', status: 'in_progress', executor: 'worker', parent_task_id: taskId, depth: 3 }], next_cursor: null }));
+    await settle();
+    tree = harness.render();
+    assert.match(textContent(tree), /Specific child · In progress · Executor: worker/);
+    assert.equal(f.requests.length, 3);
+  } finally {
+    harness.stop();
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+  }
+});
+
+test('malformed lineage and child lists fail rather than imply a top-level Task or no children', async () => {
+  for (const [request, data] of [
+    [input, { ...result, parent_task_id: 7 }],
+    [input, { ...result, depth: 0 }],
+    [{ view: 'list', parent_task_id: taskId }, { items: [{ task_id: 'x', title: 'Other', status: 'todo', parent_task_id: 'someone-else' }], next_cursor: null }],
+    [{ view: 'list', parent_task_id: taskId }, { items: 'none', next_cursor: null }],
+  ]) {
+    const context = { request: async () => response(data) };
+    await assert.rejects(readTask(context, request), /invalid|malformed|unexpected/i, JSON.stringify(data));
+  }
 });

@@ -13,7 +13,7 @@ export class TaskError extends Error {
 export const LIMITS = Object.freeze({
   description: 24000, activity: 4000, outcome: 8000, retro: 2000, metadata: 8000,
   references: 20, blockers: 20, excerpt: 320, list: 50, history: 10,
-  page: 24000, selection: 48000, definitionPayload: 64000, reportPayload: 16000,
+  page: 24000, selection: 48000, definitionPayload: 64000, reportPayload: 16000, delegationDepth: 3,
 });
 export const definitionFits = ({ description, references = [], metadata = {} }) =>
   JSON.stringify({ description, references, metadata }).length <= LIMITS.definitionPayload;
@@ -96,7 +96,7 @@ const readInclude = z.array(z.enum(READ_GROUPS)).min(1).max(READ_GROUPS.length)
 export const schemas = {
   task_read: z.discriminatedUnion('view', [
     z.strictObject({
-      ...readActor, view: z.literal('list'), owner: session.optional(), executor: session.optional(),
+      ...readActor, view: z.literal('list'), owner: session.optional(), executor: session.optional(), parent_task_id: id.optional(),
       status: z.enum(['todo', 'in_progress', 'blocked', 'in_review', 'done', 'cancelled', 'unfinished', 'all']).optional(),
       query: text(200).optional(), limit: z.number().int().min(1).max(LIMITS.list).optional(), cursor: text(2000).optional(),
     }),
@@ -168,6 +168,7 @@ const readToolSchema = z.strictObject({
   request_id: request.optional().describe('Required only for the operation view'),
   owner: session.optional().describe('List filter only'),
   executor: session.optional().describe('List filter only'),
+  parent_task_id: id.optional().describe('List filter only: direct child Tasks of this parent'),
   status: z.enum(['todo', 'in_progress', 'blocked', 'in_review', 'done', 'cancelled', 'unfinished', 'all']).optional().describe('List filter only; defaults to unfinished'),
   query: text(200).optional().describe('List title filter only'),
   limit: z.number().int().min(1).max(8192).optional().describe('List: maximum 50. Histories: maximum 10. automation_log: maximum 8192 characters'),

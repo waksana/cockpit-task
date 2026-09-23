@@ -10,7 +10,6 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const hostWorktree = process.env.TASK_BOARD_HOST_WORKTREE;
 const ownerTools = ['task_read', 'task_create', 'task_script_register', 'task_script_read', 'task_automation_start', 'task_automation_reconcile', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe'];
 const executorTools = ['task_read', 'task_edit', 'task_ack', 'task_reopen', 'task_report', 'task_cancel'];
-const ownerOnlyTools = ownerTools.filter(name => !executorTools.includes(name));
 const allTools = [...new Set([...ownerTools, ...executorTools])].sort();
 
 async function removeIsolatedTree(root) {
@@ -460,7 +459,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       const codingDescription = JSON.parse(/^description: (".*")$/m.exec(codingSource)[1]);
       assert.ok(capturedJson.includes(JSON.stringify(codingDescription).slice(1, -1)),
         'The native provider must see the shared work Skill metadata, not only a role hint');
-      for (const role of roles.read(sessionId)) {
+      for (const role of await roles.read(sessionId)) {
         assert.ok(capturedJson.includes(`Module cockpit-task / role ${role.roleId}`));
         const source = await readFile(join(installed.root, `roles/task-${role.roleId}.md`), 'utf8');
         assert.ok(capturedJson.includes(JSON.stringify(source).slice(1, -1)),
@@ -504,7 +503,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       'Preparation cannot send a prompt to the target');
     assert.equal((await engine.roleReadiness(unionId, [executor])).ready, true);
 
-    stage = 'creating a real Executor through packaged task_session_create';
+    stage = 'creating a real Owner+Executor session through packaged task_session_create';
     const createInput = {
       request_id: 'integration-create-session', actor_session_id: ownerId, cwd: dirs.work,
       skills: ['github-coding'], mcp_servers: [{ name: 'cockpit-task', tools: ['task_read', 'task_report'] }],
@@ -516,14 +515,16 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(creation.result.operation.preparation, 'prepared');
     assert.equal(creation.result.operation.resources.skills[0].effect, 'unchanged');
     assert.equal((await engine.roleReadiness(executorId, [executor])).ready, true);
-    await verifyAssembly(executorId, [executor], executorTools, ['cockpit-task-executor']);
+    assert.deepEqual((await engine.getMeta(executorId)).roles.map(role => role.roleId).sort(), ['executor', 'owner'],
+      'Created sessions carry both Task roles so delegation needs no reload');
+    await verifyAssembly(executorId, [owner, executor], allTools, ['cockpit-task-executor', 'cockpit-task-owner']);
     assert.deepEqual((await tool('task_session_create', createInput)).result, creation.result);
     assert.equal(bridgeCalls.filter(call => call.name === 'session/new').length, 1, 'Creation replay cannot create a replacement');
 
     stage = 'rejecting unknown selections and genuinely filtered tools without hidden repair';
     for (const [suffix, selections] of [
       ['unknown', { skills: ['unknown-synthetic-work'] }],
-      ['filtered', { mcp_servers: [{ name: 'cockpit-task', tools: ['task_create'] }] }],
+      ['filtered', { mcp_servers: [{ name: 'cockpit-task', tools: ['task_synthetic_unoffered'] }] }],
     ]) {
       const failed = await mcp.callTool({ name: 'task_session_prepare', arguments: {
         request_id: `integration-prepare-${suffix}`, actor_session_id: ownerId, session_id: executorId, ...selections,
@@ -570,8 +571,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     await verifyNativePrompts(executorId, dispatched);
     for (const request of dispatched) {
       const offered = JSON.stringify(request.tools);
-      for (const name of executorTools) assert.ok(offered.includes(name), `Missing Executor tool ${name}`);
-      for (const name of ownerOnlyTools) assert.ok(!offered.includes(name), `Unexpected Executor tool ${name}`);
+      for (const name of allTools) assert.ok(offered.includes(name), `Missing Owner+Executor tool ${name}`);
     }
     const reference = `[Task assigned to you](task:${taskId}?event=assigned)`;
     assert.deepEqual(nativeMessages.filter(message => message.sessionId === executorId), [{ sessionId: executorId, content: reference }]);
@@ -681,9 +681,9 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     await engine.load(executorId);
     assert.equal((await engine.roleReadiness(executorId, [executor])).ready, true);
     assert.equal(requests.length, afterNoticeModels, 'Cold resume must not send a startup prompt');
-    await verifyAssembly(executorId, [executor], executorTools, ['cockpit-task-executor']);
-    await promptAndInspect(executorId, 'Synthetic cold-resumed Executor capability check; acknowledge without tools.',
-      executorTools, ownerOnlyTools);
+    await verifyAssembly(executorId, [owner, executor], allTools, ['cockpit-task-executor', 'cockpit-task-owner']);
+    await promptAndInspect(executorId, 'Synthetic cold-resumed Owner+Executor capability check; acknowledge without tools.',
+      allTools, []);
 
     stage = 'explicitly subscribing and delivering one status-change card only to the isolated Owner';
     const beforeSubscriptionMessages = nativeMessages.length;
