@@ -115,14 +115,12 @@ npm run package:module
 [Owner](skills/cockpit-task-owner/cockpit-task-owner/SKILL.md) 和
 [Executor](skills/cockpit-task-executor/cockpit-task-executor/SKILL.md)。
 两角色都通过现有装载机制发现同一份 `github-coding` 工作 Skill，双角色不会重复装配，
-选择角色不等于每次都加载正文。准备包版本为 `0.1.11`；不同内容使用新版本，
+选择角色不等于每次都加载正文。准备包版本为 `0.1.12`；不同内容使用新版本，
 不覆盖同版本的既有安装。源码合并、CI 归档均不会自动升级线上。
 持久化仅使用宿主提供的模块目录，不自动导入其他数据库或修改既有安装。
-本次准备在 `0.1.10` 基础上包含 Owner 顺序订阅跟进（#53）和 Executor 会话标题（#55）；
-已安装的 `0.1.10` 保持不可变。标题结果保存在既有 operations JSON 中，不新增 schema 迁移；
-依赖宿主原生名称来源和 `session/rename`，旧宿主缺少来源时安全跳过。
-升级为 schema v5 是前向迁移，不回填历史指派；升级前已派单 Task 保持可读但均不可重开。
-已安装的 `0.1.9` 保持不可变，不能打开新 schema；切回旧包不等于数据库回退，
-不得用历史备份覆盖实时数据。部署前应在隔离的一致副本上验证迁移。
-main 上尚未发布的 Task 依赖（#64）新增 schema v6（仅新建表）；已安装的 `0.1.11`
-不能打开 v6，另行授权打包时须使用新版本。
+本次准备打包 `0.1.11` 之后已合并的原生 Task 依赖和 `github-coding` Skill 更新（#59、#61、#63、#65）。
+Task 依赖新增 schema v6（`task_dependencies`、`dependency_notices`），v5→v6
+迁移只新建表。schema v6 只能向前滚动：已安装的 `0.1.11` 不能打开 v6；
+切回旧包不等于数据库回退，不得用历史备份覆盖实时数据。部署前应在隔离的一致副本上验证迁移。
+`0.1.11` 在 `0.1.10` 基础上包含 Owner 顺序订阅跟进（#53）和 Executor 会话标题（#55），
+不新增 schema 迁移。升级为 schema v5 时不回填历史指派；升级前已派单 Task 保持可读但均不可重开。

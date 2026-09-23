@@ -146,7 +146,7 @@ activity 只能引用固定 Executor 实际确认过的精确 revision，包括�
 ### Task 依赖与 schema v6
 
 schema v6 仅新建 `task_dependencies` 与 `dependency_notices` 两表，前向且不破坏既有数据；
-已安装的 `0.1.11` 不能打开 v6。blocker 真实转入 done/cancelled 时，同事务为仍待派发的
+schema v6 只能向前滚动，已安装的 `0.1.11` 不能打开 v6。blocker 真实转入 done/cancelled 时，同事务为仍待派发的
 依赖方写入通知：全部 blocker done 时 `ready`，blocker 取消时 `blocker_cancelled`，
 发给依赖方 Owner。就绪不改变状态、不指派、不启动；Owner 编辑从不发通知。
 blocker 重开后再次 done 属于新生命周期，可再次通知。
