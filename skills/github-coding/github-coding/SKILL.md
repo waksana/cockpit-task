@@ -1,6 +1,6 @@
 ---
 name: github-coding
-description: "Use when authorized work requires changing version-controlled repository files: Owner prepares isolation and any GitHub Issue, Executor delivers through the authorized review/merge boundary, and Owner safely cleans up. Not triggered by GitHub mentions or deployment using existing artifacts alone. Keep Git isolation without GitHub; reuse guidance already in context."
+description: "Use when authorized work requires changing version-controlled repository files: Owner prepares isolation and any GitHub Issue (Executor only for user-authorized emergent same-result changes), Executor delivers through the authorized review/merge boundary, and Owner safely cleans up. Not triggered by GitHub mentions or deployment using existing artifacts alone. Keep Git isolation without GitHub; reuse guidance already in context."
 ---
 
 # GitHub coding
@@ -54,11 +54,11 @@ For initially known GitHub repository changes, find and reuse the corresponding
 Issue or create one describing their goal, scope and completion conditions, and
 prepare the isolated environment **before creating and assigning Task**.
 Do not speculate about repository changes just to create a deployment Task.
-If changes emerge during execution, keep the existing Task's requirements current
-and obtain Owner-coordinated Issue/environment preparation before editing repository
-files. Use Task coordination and direct user questions when needed, not Executor-to-Owner
-messages or changes in a shared checkout.
-Issue maintenance and preparing/cleaning this work environment are Owner coordination,
+If changes emerge during execution that the same result needs, including in other code or repositories, Executor asks the user directly before editing, not Owner.
+After the user authorizes, Executor may reuse or create the corresponding Issue and a dedicated branch and worktree from freshly fetched mainline, record them in Task references/metadata with the full requirements kept current in its description, then deliver through the flow below.
+Never edit a shared checkout or another worker's worktree, or switch someone else's checkout; Owner still cleans up.
+Unrelated changes need a separate Task, not a drive-by fix.
+Owner's Issue maintenance and preparing/cleaning of work environments are coordination,
 not permission to implement the code personally or through Owner's subagents.
 
 Create one Task for the complete result, including development, validation, review
@@ -85,7 +85,7 @@ Safely fetch and normally merge current mainline into the retained branch as nee
 Independently review the complete follow-up and normally merge only within authorization. Source-only stays source-only: no release, install, deployment, restart or data migration is implied. Owner retains safe cleanup responsibility.
 
 Read the latest Task, linked Issue and repository instructions; confirm and ACK
-the current agreement and verify the designated worktree before editing. Do not
+the current agreement and verify the designated (or authorized self-prepared) worktree before editing. Do not
 assume you inherited Owner's Skill context. Read this Skill when first needed,
 then reuse it while available. Continue Task synchronization at meaningful checkpoints.
 
@@ -106,9 +106,9 @@ If blocked, preserve the branch and report the actual blocker rather than claimi
 delivery or transferring routine completion to Owner.
 
 When the agreed boundary is met, record an outcome with Issue/PR links, the actual
-merge or limited-delivery result, useful evidence, PR/branch/worktree path and
+merge or limited-delivery result, useful evidence, every PR/branch/worktree path and
 any remaining cleanup. Record explicit release evidence: which workers have stopped
-using the worktree, any outstanding users and artifacts to preserve. Do not claim
+using each worktree, any outstanding users and artifacts to preserve. Do not claim
 release while you or subagents still use it; Executor must not delete its own cwd.
 Report done against the latest acknowledged agreement with that new outcome and explicit retro text or null, including on every reopened delivery.
 Do not manually message Owner, directly or through subagents, even if notification
