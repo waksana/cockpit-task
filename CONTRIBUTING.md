@@ -18,8 +18,17 @@ Synchronize `package.json`, `cockpit.module.json`, both root version entries in
 `package-lock.json`, the embedded MCP server version, tests and current-source
 documentation. Preserve historical release facts. If fresh main already prepares
 the appropriate undelivered version, reuse it rather than repeating its bump:
-the current 0.1.9 preparation includes the coding/deployment Skill boundary
-clarification and supersedes installed 0.1.8; that installation remains immutable.
+the current 0.1.10 preparation includes Owner request follow-through (#45),
+immediate important-update notices (#47) and Agent reopen (#49), superseding
+installed 0.1.9; that installation remains immutable. Version 0.1.9 introduced the
+coding/deployment Skill boundary clarification.
+
+This preparation opens older supported databases with a forward migration to
+schema v5. It deliberately does not backfill assignment records: all pre-upgrade
+assigned Tasks remain readable but cannot reopen. Installed 0.1.9 cannot open the
+new schema; switching its package back is not a database rollback. Never overwrite
+live data with a historical backup. Validate migration on an isolated consistent
+copy before separately authorized deployment.
 
 Keep the documented UI source pairing
 `9fd5204bda99a8bd65b2c5ef152cc47ce87837d5` and `uiSurfaceVersion: 1` as the UI

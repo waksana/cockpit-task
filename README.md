@@ -106,6 +106,10 @@ npm run package:module
 [Owner](skills/cockpit-task-owner/cockpit-task-owner/SKILL.md) 和
 [Executor](skills/cockpit-task-executor/cockpit-task-executor/SKILL.md)。
 两角色都通过现有装载机制发现同一份 `github-coding` 工作 Skill，双角色不会重复装配，
-选择角色不等于每次都加载正文。准备包版本为 `0.1.9`；不同内容使用新版本，
+选择角色不等于每次都加载正文。准备包版本为 `0.1.10`；不同内容使用新版本，
 不覆盖同版本的既有安装。源码合并、CI 归档均不会自动升级线上。
 持久化仅使用宿主提供的模块目录，不自动导入其他数据库或修改既有安装。
+本次准备包含 Owner 请求跟进（#45）、重要更新立即通知（#47）和 Agent reopen（#49）。
+升级为 schema v5 是前向迁移，不回填历史指派；升级前已派单 Task 保持可读但均不可重开。
+已安装的 `0.1.9` 保持不可变，不能打开新 schema；切回旧包不等于数据库回退，
+不得用历史备份覆盖实时数据。部署前应在隔离的一致副本上验证迁移。
