@@ -594,8 +594,8 @@ revision/ack 和新 write_context，不重复全文。
 
 不重新派单、不自发消息或要求 Owner 消息。triggered/cancelled/expired
 订阅保持结束，不自动续订、补发或重复通知。无 UI 重开按钮。
-编码默认复用经核实的既有 worktree/branch，即使旧 PR 已合并；缺失/改作他用
-需明确解决，不由 reopen 自动建环境。具体安全同步、独立 review 和后续 PR
+编码默认复用经核实的既有 worktree/branch，即使旧 PR 已合并；已删除时由 Executor
+按 `github-coding` 新建，改作他用需明确解决；reopen 本身不建环境。具体安全同步、独立 review 和后续 PR
 按 `github-coding` 执行，不扩大源码交付为发布/部署授权。
 
 主要失败为 `REOPEN_NOT_ELIGIBLE`（缺追踪或存在后续指派）、

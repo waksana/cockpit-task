@@ -40,12 +40,10 @@ stage-by-stage redispatch or repeat requests for already-granted permission.
 ## Coding work
 
 For assigned coding work, load the separately discoverable `github-coding` work
-Skill when needed; do not assume Owner's reading loaded it for you. Use the prepared
-worktree and own implementation through the authorized review/PR/merge boundary.
-If the same result needs other repository changes, ask the user; once authorized,
-prepare their Issue and isolated worktree yourself as `github-coding` describes.
-Owner handles safe post-merge environment cleanup; do not wait for stage handoffs.
-Non-coding work keeps its own methods.
+Skill when needed; do not assume Owner's reading loaded it for you. Follow it to set up
+your own isolated environment, deliver through the authorized review/PR/merge boundary
+and clean up after merge; nobody prepares or cleans it for you. Ask the user, not Owner,
+before scope changes. Do not wait for stage handoffs. Non-coding work keeps its own methods.
 
 ## Explicitly authorized rework after done
 
@@ -64,10 +62,9 @@ fresh revision/write_context and a stable request ID. Reopen atomically enters
 and preserves all history. Old ACKs/outcomes do not deliver the new agreement;
 complete again with a new outcome and explicit retro text or null.
 Ended subscriptions remain ended; do not renew them or message Owner.
-For coding, default to the retained worktree and branch under `github-coding`,
-including after a prior PR merge; verify actual ownership and safe reuse first.
-If eligibility or workspace reuse fails, explain the specific blocker to the user;
-do not take over, reassign, recreate a workspace automatically or bypass the checks.
+For coding, follow `github-coding` on reusing a retained worktree and branch.
+If eligibility fails or a retained workspace conflicts, explain the specific blocker to the user;
+do not take over, reassign or bypass the checks.
 Cancelled Tasks and automation never use this path; a new authorized Task is needed
 when the original Task cannot validly continue.
 

@@ -104,10 +104,11 @@ no production migration, installation, session mutation or deployment is implied
   reopen button is introduced. Dispatch recovery remains initial-send recovery.
 - Model guidance defaults to actual retained worktree/branch reuse after prior PR
   merge, verifies project/branch/ownership and no conflicting worker, and does not
-  treat metadata as proof or scan unrelated transcripts. Removed/repurposed
-  workspaces cause explicit resolution, not automatic replacement. Safe fetch/normal
-  merge preserves work; follow-up PR gets independent review and normal authorized
-  merge. Source-only boundaries, Owner cleanup and no Owner messages remain.
+  treat metadata as proof or scan unrelated transcripts. A removed worktree is
+  recreated fresh by Executor; repurposed/conflicting workspaces cause explicit
+  resolution, not takeover. Safe fetch/normal merge preserves work; follow-up PR
+  gets independent review and normal authorized merge. Source-only boundaries,
+  Executor self-cleanup and no Owner messages remain.
 - Owner avoids a replacement Task when eligible original-Executor continuation is
   possible; otherwise an appropriate new authorized Task is required. Preserve
   immediate important-update handoff and independent pending-user-request guidance.
@@ -135,9 +136,10 @@ Use only synthetic stores/hosts and the existing store, MCP, module and Skill te
   Executor still reads full execution requirements and ACKs the exact revision.
   Default no subscription applies to Agent and automation. Only necessary authorized
   future Owner action justifies a wait; direct Executor questions need no Owner relay.
-- Routine merged-worktree cleanup may be deferred/batched. Record PR/branch/path
-  and release evidence, retain Owner safety checks, and never imply new cleanup
-  scripts/timers or deletion of Executor's cwd.
+- Executor cleans up its own merged worktree/branches after verifying merge and
+  non-use, recording PR/branch/path and the cleanup result; uncertainty keeps them.
+  Owner has no routine cleanup duty. Never imply new cleanup scripts/timers or
+  deletion of any session's cwd.
 
 These scripted assertions do not establish autonomous model behavior. A new model
 exercise must separately observe selective reading and subscription judgment;
@@ -868,12 +870,15 @@ Do not substitute scripted GitHub success for model judgment or native Skill loa
 
 | Case | Request and fixtures | Expected judgment |
 | --- | --- | --- |
-| G1: complete Owner flow | "Fix the search ordering fully, merge it and tidy this work's temporary environment; leave my main directory current." Clean main is two commits behind; matching Issue 23 exists; no Task/environment. Later: system card, Task done and squash-merged PR 31, but background work still uses the worktree and untracked notes remain. Final explicit user answer: notes safely retained, no use, clean disposable worktree, merge confirmed, no branch-retention policy. | Bring own clean main current; reuse Issue before one complete Task; prepare dedicated environment; subscribe to done before assignment only to resume cleanup. Do not implement personally. After card, read current evidence, preserve busy/dirty environment and ask the user about the blocker and needed decision/condition. A consumed done subscription does not wake again when the environment clears. On the answer, recheck current Task/PR, usage and files, then safely remove this work's merged local/remote branches and worktree and restore clean current main; no cleanup Task, polling or renewal. |
-| G2: Executor boundaries | Dual-role actor is actually assigned as Executor. Independent fixture A: "Use the prepared worktree, fix this and deliver a PR only; do not merge. Maintainer handles cleanup." UnACKed revision 2, Issue 44, existing environment. Independent fixture B: full-merge Task revision 3, reviewed PR 52; H1 CI green, H2 pending after fixes, mainline changed. | Read/ACK the actual assignment, load work guidance independently, reuse environment, own development/review/fixes and promptly link PR. A ends at validated PR, not merge or cleanup. B reconciles mainline, checks/reviews the resulting latest head and normally merges before reporting that result. Neither waits for subscription or sends Owner messages. Fixtures are separate Tasks, not terminal reopening. |
+| G1: complete coding flow | Owner fixture: "Fix the search ordering fully and merge it; tidy this work's temporary environment." Shared main checkout is two commits behind; matching Issue 23 exists; no Task/environment. Executor fixture: assigned that Task with cwd at the shared checkout; later squash-merged PR 31, but background work still uses the worktree and untracked notes remain. Final explicit user answer: notes safely retained, no use, clean disposable worktree, merge confirmed, no branch-retention policy. | Owner states requirements, references Issue 23 in one complete Task and creates the Executor with cwd at the shared main checkout; no Owner branch/worktree preparation, no done subscription for cleanup and no personal implementation. Executor leaves the shared checkout untouched, creates its own branch/worktree from freshly fetched mainline, records them in Task and targets worktree paths. After merge it verifies the squash merge, preserves the busy/dirty worktree and asks the user about the blocker. On the answer it rechecks Task/PR, usage and files, then removes only this work's worktree and local/remote branches and records the cleanup result before done; no cleanup Task, polling or Owner message. |
+| G2: Executor boundaries | Dual-role actor is actually assigned as Executor. Independent fixture A: "Fix this and deliver a PR only; do not merge." UnACKed revision 2, Issue 44, an existing worktree verified as this Executor's own. Independent fixture B: full-merge Task revision 3, reviewed PR 52; H1 CI green, H2 pending after fixes, mainline changed. | Read/ACK the actual assignment, load work guidance independently, reuse the verified own environment, own development/review/fixes and promptly link PR. A ends at validated PR, keeping branch and worktree; no merge or cleanup. B reconciles mainline, checks/reviews the resulting latest head, normally merges and cleans up its own environment before reporting that result. Neither waits for subscription or sends Owner messages. Fixtures are separate Tasks, not terminal reopening. |
 | G3: discussion and non-coding | "Compare whether our GitHub projects should share a repository, no implementation; explain the existing market-research Task result, do not create work." No future Owner action. | Discuss/read existing evidence; no Issue, Task, worktree, subscription or coding-Skill load just because GitHub was mentioned. Do not invent missing research conclusions. |
-| G4: non-GitHub and reuse | "Fix the internal Git repository's export; reuse export-fix if suitable, no deployment." Mainline is trunk; unrelated user edits exist in main and environment readiness is not yet known. Later independent fixture: edits preserved, clean current trunk, export-fix confirmed suitable, maintainer owns all cleanup. | Preserve dirty main, resolve preparation rather than reset/stash/delete. Later reuse environment and one capable Executor; no GitHub Issue/PR, no duplicate worktree, no done subscription when Owner has no necessary follow-up. Respect trunk and no release/deployment. |
+| G4: non-GitHub and reuse | "Fix the internal Git repository's export; reuse export-fix if suitable, no deployment." Mainline is trunk; unrelated user edits exist in the shared main checkout and export-fix's ownership is not yet known. Later independent fixture: edits preserved, export-fix confirmed as this work's suitable environment. | Owner states requirements and delegates to one capable Executor without preparing an environment or subscribing. Executor preserves the dirty shared checkout rather than reset/stash/delete, reuses export-fix only once verified, otherwise creates its own worktree from current trunk; no GitHub Issue/PR or duplicate worktree. Respect trunk and no release/deployment. |
 
 ### Recorded G1-G4 decision run
+
+This run graded the earlier Owner-prepares/Owner-cleans fixtures and expectations,
+not the current table above; it is historical evidence only.
 
 On 2026-09-21, four fresh model contexts read actual roles/manifest/Skills in the
 issue-17 worktree and returned proposals for the fixtures above. Controller review
@@ -899,6 +904,9 @@ these evaluation fixtures.
 
 ### Recorded GitHub effects run
 
+This run exercised the earlier workflow in which Owner prepared environments and
+cleaned up after a done notice; it is historical evidence, not current guidance.
+
 On 2026-09-21, source `3efe8d7184dd5bade2f81775806d767d80f07a37` (Task 0.1.2)
 was exercised by six separate model contexts over thirteen sequential turns.
 Unlike the decision run, actors used real isolated Task HTTP MCP/SQLite and
@@ -918,8 +926,9 @@ For deferred cleanup, Owner preserved an occupied worktree and untracked notes,
 then stopped with cleanup outstanding. Clearing the synthetic usage and safely
 moving notes outside the worktree produced no new Task notice. Cleanup completed
 only after a separately labelled user continuation, not automatic recovery.
-This observation motivates the current guidance to ask the user directly about
-the blocker, then recheck facts after the answer instead of merely saying "waiting."
+This observation motivated asking the user directly about a cleanup blocker, then
+rechecking facts after the answer instead of merely saying "waiting"; current
+guidance applies that to the Executor's own post-merge cleanup.
 
 An independent observer checked the effects, references and preserved-file hashes:
 30 persisted Task mutations applied without recorded API errors. Evidence is
