@@ -5,6 +5,7 @@ import {
   activate,
   acknowledgementLabel,
   createReadResource,
+  dependencyLabel,
   formatTimestamp,
   nativeStatusLabel,
   parseTaskReference,
@@ -146,7 +147,7 @@ test('activation requires public compatibility and preserves native fallback on 
   const rendered = renderer.component({ node: { kind: 'link', target: `task:${taskId}` }, fallback });
   assert.equal(rendered.props.taskId, taskId);
   assert.equal(rendered.props.event, null);
-  for (const event of ['assigned', 'updated', 'status_changed']) {
+  for (const event of ['assigned', 'updated', 'status_changed', 'ready', 'blocker_cancelled']) {
     const node = { kind: 'link', target: `task:${taskId}?event=${event}`, label: 'An unrelated label' };
     assert.equal(renderer.matches(node), true);
     assert.equal(renderer.component({ node, fallback }).props.event, event);
@@ -191,6 +192,15 @@ test('card event headings come from the message and survive loading, failure and
   snapshot = { phase: 'ready', data: { ...result, status: 'in_progress', revision: 5 }, error: null };
   assert.deepEqual(heading(render('status_changed')).children, ['Task status updated']);
   assert.equal(heading(render(null, 'Task updated')), undefined);
+  const ready = render('ready');
+  assert.deepEqual(heading(ready).children, ['Task ready']);
+  assert.match(heading(ready).props.title, /Nothing was assigned or started/);
+  assert.ok(ready.children.some(child => child?.children?.includes('Dependency notice to Owner · not assigned or started · current state shown below')));
+  assert.deepEqual(heading(render('blocker_cancelled')).children, ['Task blocker cancelled']);
+  snapshot = { phase: 'ready', data: { ...result, blocked_by: [{ task_id: taskId, status: 'cancelled' }], ready: false }, error: null };
+  assert.ok(render(null).children.some(child => child?.children?.includes('Blocked by 1 Task · 0 done · 1 cancelled (Owner decision needed) · not ready')));
+  snapshot = { phase: 'ready', data: { ...result, blocked_by: [], ready: true }, error: null };
+  assert.equal(render(null).children.some(child => String(child?.children?.[0] ?? '').startsWith('Blocked by')), false);
   snapshot = { phase: 'missing', data: null, error: new Error('Missing Task') };
   assert.deepEqual(heading(render('updated')).children, ['Task updated']);
   assert.deepEqual(heading(render('status_changed')).children, ['Task status updated']);
@@ -839,4 +849,11 @@ test('detail refresh preserves Agent history cursors and automation log offsets'
     if (oldDocument === undefined) delete globalThis.document;
     else globalThis.document = oldDocument;
   }
+});
+
+test('dependency labels stay compact and never imply dispatch', () => {
+  assert.equal(dependencyLabel(undefined, true), null);
+  assert.equal(dependencyLabel([], true), null);
+  assert.equal(dependencyLabel([{ task_id: 'a', status: 'done' }, { task_id: 'b', status: 'done' }], true), 'Blocked by 2 Tasks · all done · ready to dispatch');
+  assert.equal(dependencyLabel([{ task_id: 'a', status: 'done' }, { task_id: 'b', status: 'in_progress' }], false), 'Blocked by 2 Tasks · 1 done · not ready');
 });

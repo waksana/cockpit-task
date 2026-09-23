@@ -17,6 +17,10 @@ const canonical = value => {
 };
 const hash = value => createHash('sha256').update(canonical(value)).digest('hex');
 const fail = (code, message, status = 409, result = null) => { throw new TaskError(code, message, status, result); };
+const notificationTable = table => {
+  if (!['subscriptions', 'dependency_notices'].includes(table)) throw new Error('Unknown notification table');
+  return table;
+};
 function decode(value, code) {
   try {
     if (!/^[A-Za-z0-9_-]+$/.test(value)) throw new Error();
@@ -34,7 +38,7 @@ export class TaskStore {
     try {
       chmodSync(file, 0o600);
       const version = this.db.prepare('PRAGMA user_version').get().user_version;
-      if (version > 5) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
+      if (version > 6) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
       this.db.exec(`
       PRAGMA journal_mode=WAL;
       PRAGMA synchronous=FULL;
@@ -136,7 +140,26 @@ export class TaskStore {
           log TEXT NOT NULL DEFAULT '', omitted_characters INTEGER NOT NULL DEFAULT 0,
           reconciled_at TEXT, reconciled_by TEXT, reconciliation_reason TEXT
         );
-        PRAGMA user_version=5;
+        CREATE TABLE IF NOT EXISTS task_dependencies (
+          seq INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id TEXT NOT NULL REFERENCES tasks(id), blocker_id TEXT NOT NULL REFERENCES tasks(id),
+          author TEXT NOT NULL, at TEXT NOT NULL, UNIQUE(task_id, blocker_id), CHECK(task_id <> blocker_id)
+        );
+        CREATE INDEX IF NOT EXISTS task_dependencies_blocker ON task_dependencies(blocker_id);
+        CREATE TABLE IF NOT EXISTS dependency_notices (
+          seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+          task_id TEXT NOT NULL REFERENCES tasks(id), blocker_id TEXT NOT NULL REFERENCES tasks(id),
+          blocker_lifecycle INTEGER NOT NULL, owner TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK(kind IN ('ready','blocker_cancelled')),
+          event TEXT NOT NULL, created_at TEXT NOT NULL,
+          delivery_status TEXT NOT NULL DEFAULT 'pending'
+            CHECK(delivery_status IN ('pending','unknown','accepted','queued','not_sent')),
+          attempted_at TEXT, completed_at TEXT, delivery_error TEXT,
+          UNIQUE(task_id, kind, blocker_id, blocker_lifecycle)
+        );
+        CREATE INDEX IF NOT EXISTS dependency_notices_task ON dependency_notices(task_id,seq);
+        CREATE INDEX IF NOT EXISTS dependency_notices_pending ON dependency_notices(seq) WHERE delivery_status='pending';
+        PRAGMA user_version=6;
         COMMIT;
       `);
       this.automation = new AutomationStore(this, { platform });
@@ -179,8 +202,50 @@ export class TaskStore {
       id: row.id, task_id: row.id, title: row.title, owner: row.owner, executor: row.executor,
       status: row.status, revision: row.revision, acknowledged_revision: row.acknowledged_revision,
       created_at: row.created_at, updated_at: row.updated_at, write_context: this.context(row),
-      kind: row.kind,
+      kind: row.kind, ...this.dependencies(row.id),
     };
+  }
+  dependencies(taskId) {
+    const blocked_by = this.db.prepare(`SELECT d.blocker_id AS task_id, t.status FROM task_dependencies d
+      JOIN tasks t ON t.id=d.blocker_id WHERE d.task_id=? ORDER BY d.seq`).all(taskId).map(entry => ({ ...entry }));
+    return { blocked_by, ready: blocked_by.every(entry => entry.status === 'done') };
+  }
+  awaitingDispatch(row) {
+    if (row.status !== 'todo' || row.executor) return false;
+    return row.kind !== 'automation' || this.automation.run(row.id, { includeLog: false }).state === 'created';
+  }
+  assertReady(row) {
+    const waiting = this.dependencies(row.id).blocked_by.filter(entry => entry.status !== 'done');
+    if (waiting.length) {
+      fail('TASK_NOT_READY', `Task is blocked by ${waiting.length} Task(s) not yet done (${waiting.map(entry => `${entry.task_id}: ${entry.status}`).join(', ')}); dispatch after every blocker is done, or edit blocked_by`);
+    }
+  }
+  setBlockers(row, requested, author, at) {
+    const next = requested.map(value => value.toLowerCase());
+    const current = this.db.prepare('SELECT blocker_id FROM task_dependencies WHERE task_id=?').all(row.id).map(entry => entry.blocker_id);
+    const added = next.filter(value => !current.includes(value));
+    const removed = current.filter(value => !next.includes(value));
+    if (!added.length && !removed.length) return false;
+    if (!this.awaitingDispatch(row)) {
+      fail('DEPENDENCY_LOCKED', 'blocked_by can change only while the Task awaits dispatch (unassigned todo, or automation not yet started)');
+    }
+    for (const id of added) {
+      if (id === row.id) fail('DEPENDENCY_SELF', 'A Task cannot be blocked by itself', 400);
+      const blocker = this.db.prepare('SELECT id,owner,status FROM tasks WHERE id=?').get(id);
+      if (!blocker) fail('BLOCKER_NOT_FOUND', `Blocker Task ${id} does not exist`, 404);
+      if (blocker.owner !== row.owner) fail('BLOCKER_OWNER_MISMATCH', 'Blockers must belong to the same Owner as the dependent Task');
+      if (blocker.status === 'cancelled') fail('BLOCKER_CANCELLED', `Blocker Task ${id} is cancelled and can never become done`);
+    }
+    for (const id of removed) this.db.prepare('DELETE FROM task_dependencies WHERE task_id=? AND blocker_id=?').run(row.id, id);
+    for (const id of added) {
+      this.db.prepare('INSERT INTO task_dependencies(task_id,blocker_id,author,at) VALUES(?,?,?,?)').run(row.id, id, author, at);
+    }
+    const cycle = added.length && this.db.prepare(`WITH RECURSIVE reachable(id) AS (
+        SELECT blocker_id FROM task_dependencies WHERE task_id=?
+        UNION SELECT d.blocker_id FROM task_dependencies d JOIN reachable r ON d.task_id=r.id
+      ) SELECT 1 FROM reachable WHERE id=? LIMIT 1`).get(row.id, row.id);
+    if (cycle) fail('DEPENDENCY_CYCLE', 'blocked_by would create a dependency cycle');
+    return true;
   }
   summary(row) {
     return {
@@ -303,7 +368,8 @@ export class TaskStore {
       .run(id, input.title, input.description, input.owner, JSON.stringify(input.references || []), JSON.stringify(input.metadata || {}), at, at);
     this.recordDefinition(this.row(id), 'Initial definition', input.actor_session_id, at);
     if (input.automation) this.automation.create(id, input.automation);
-    return { result: this.effects(this.row(id)) };
+    if (input.blocked_by?.length) this.setBlockers(this.row(id), input.blocked_by, input.actor_session_id, at);
+    return { result: { ...this.effects(this.row(id)), ...this.dependencies(id) } };
   }
   edit(input) {
     const row = this.row(input.task_id);
@@ -318,18 +384,25 @@ export class TaskStore {
     if (!definitionFits({ description: input.description ?? row.description, references: JSON.parse(references), metadata: JSON.parse(metadata) })) {
       fail('INVALID_INPUT', 'Combined serialized description and materials exceed 64000 characters', 400);
     }
+    const at = now();
+    const blockersChanged = input.blocked_by !== undefined && this.setBlockers(row, input.blocked_by, input.actor_session_id, at);
     const metadataChanged = (input.title !== undefined && input.title !== row.title)
       || canonical(JSON.parse(references)) !== canonical(JSON.parse(row.refs))
-      || canonical(JSON.parse(metadata)) !== canonical(JSON.parse(row.metadata));
+      || canonical(JSON.parse(metadata)) !== canonical(JSON.parse(row.metadata)) || blockersChanged;
     if (!descriptionChanged && !metadataChanged) return { result: this.effects(row, 'unchanged') };
-    const revision = row.revision + Number(descriptionChanged), at = now();
+    const revision = row.revision + Number(descriptionChanged);
     this.db.prepare('UPDATE tasks SET title=?,description=?,refs=?,metadata=?,revision=?,editable=editable+?,updated_at=? WHERE id=?')
       .run(input.title ?? row.title, input.description ?? row.description, references, metadata, revision, Number(metadataChanged), at, row.id);
     if (descriptionChanged) {
       this.recordDefinition(this.row(row.id), input.reason, input.actor_session_id, at);
       if (!terminal(row.status) && row.executor === input.actor_session_id) this.recordAck(this.row(row.id), input.actor_session_id);
     }
-    return { result: { ...this.effects(this.row(row.id)), description_changed: descriptionChanged, metadata_changed: metadataChanged } };
+    return {
+      result: {
+        ...this.effects(this.row(row.id)), description_changed: descriptionChanged, metadata_changed: metadataChanged,
+        ...(input.blocked_by !== undefined ? { blockers_changed: blockersChanged, ...this.dependencies(row.id) } : {}),
+      },
+    };
   }
   recordDefinition(row, reason, author, at) {
     this.db.prepare('INSERT INTO definitions(task_id,revision,description,reason,author,at) VALUES(?,?,?,?,?,?)')
@@ -394,7 +467,7 @@ export class TaskStore {
       retro: field(input.retro !== undefined),
     };
     const at = now();
-    let subscription_ids = [];
+    let subscription_ids = [], notice_ids = [];
     if (input.activity) {
       const id = randomUUID();
       this.db.prepare('INSERT INTO activities(id,task_id,revision,executor,author,text,at) VALUES(?,?,?,?,?,?,?)')
@@ -414,6 +487,7 @@ export class TaskStore {
         this.db.prepare('UPDATE tasks SET status=?,lifecycle=lifecycle+? WHERE id=?').run(input.status, Number(input.status !== row.status), row.id);
         fields.task_status = { status: 'saved', value: input.status };
         subscription_ids = this.transitionSubscriptions(row, input.status, input, at);
+        notice_ids = this.transitionDependents(row, input.status, input, at);
       }
     }
     if (input.activity || (!stale && (input.status || input.outcome))) {
@@ -424,6 +498,7 @@ export class TaskStore {
       result: {
         ...this.effects(this.row(row.id), rejected ? (input.activity ? 'partially_applied' : 'rejected') : 'applied'), ...fields,
         ...(subscription_ids.length ? { subscription_ids } : {}),
+        ...(notice_ids.length ? { notice_ids } : {}),
       },
       error: rejected ? { code: 'DESCRIPTION_UPDATED', message: 'Task description has changed; requested status, outcome and retro were not saved. Read the current definition; its acknowledgement belongs to the assigned Executor', status: 409 } : null,
     };
@@ -437,8 +512,14 @@ export class TaskStore {
     this.db.prepare("UPDATE tasks SET status='cancelled',lifecycle=lifecycle+1,cancellation=?,updated_at=? WHERE id=?")
       .run(JSON.stringify(cancellation), cancellation.at, row.id);
     const subscription_ids = this.transitionSubscriptions(row, 'cancelled', input, cancellation.at);
+    const notice_ids = this.transitionDependents(row, 'cancelled', input, cancellation.at);
     if (row.kind === 'automation') this.automation.cancel(row.id);
-    return { result: { ...this.effects(this.row(row.id)), cancellation, ...(subscription_ids.length ? { subscription_ids } : {}) } };
+    return {
+      result: {
+        ...this.effects(this.row(row.id)), cancellation,
+        ...(subscription_ids.length ? { subscription_ids } : {}), ...(notice_ids.length ? { notice_ids } : {}),
+      },
+    };
   }
   subscription(row) {
     return {
@@ -499,27 +580,74 @@ export class TaskStore {
     }
     return ids;
   }
-  pendingNotificationBoundary() {
-    return this.db.prepare("SELECT max(seq) AS seq FROM subscriptions WHERE delivery_status='pending'").get().seq ?? 0;
+  transitionDependents(row, status, input, at) {
+    // Only a real transition of a blocker into done/cancelled can notify, once per dependent.
+    if (status === row.status || !terminal(status)) return [];
+    const blocker = this.row(row.id);
+    const dependents = this.db.prepare(`SELECT t.* FROM task_dependencies d JOIN tasks t ON t.id=d.task_id
+      WHERE d.blocker_id=? ORDER BY d.seq`).all(row.id).filter(dependent => this.awaitingDispatch(dependent));
+    const ids = [];
+    for (const dependent of dependents) {
+      const kind = status === 'done' ? 'ready' : 'blocker_cancelled';
+      if (kind === 'ready' && !this.dependencies(dependent.id).ready) continue;
+      const id = randomUUID();
+      const event = {
+        event_id: randomUUID(), blocker_id: row.id, blocker_status: status, request_id: input.request_id, at,
+        actor_session_id: input.actor_session_id,
+        ...(input.source === 'automation' ? { source: 'automation', run_id: input.run_id } : {}),
+      };
+      const inserted = this.db.prepare(`INSERT OR IGNORE INTO dependency_notices(id,task_id,blocker_id,blocker_lifecycle,owner,kind,event,created_at)
+        VALUES(?,?,?,?,?,?,?,?)`).run(id, dependent.id, row.id, blocker.lifecycle, dependent.owner, kind, JSON.stringify(event), at);
+      if (inserted.changes) ids.push(id);
+    }
+    return ids;
   }
-  pendingNotifications(after, through, limit = 20) {
-    return this.db.prepare("SELECT seq,id FROM subscriptions WHERE delivery_status='pending' AND seq>? AND seq<=? ORDER BY seq LIMIT ?")
+  notice(row) {
+    return {
+      notice_id: row.id, task_id: row.task_id, blocker_id: row.blocker_id, owner: row.owner, kind: row.kind,
+      event: JSON.parse(row.event), created_at: row.created_at,
+      notification: {
+        status: row.delivery_status, attempted_at: row.attempted_at, completed_at: row.completed_at,
+        error: row.delivery_error ? JSON.parse(row.delivery_error) : null,
+      },
+    };
+  }
+  getNotice(id) {
+    const row = this.db.prepare('SELECT * FROM dependency_notices WHERE id=?').get(id);
+    if (!row) fail('NOTICE_NOT_FOUND', 'Dependency notice does not exist', 404);
+    return this.notice(row);
+  }
+  notificationChannel(id) {
+    // Subscriptions and dependency notices share one durable delivery discipline.
+    if (this.db.prepare('SELECT 1 FROM subscriptions WHERE id=?').get(id)) {
+      return { table: 'subscriptions', event: 'status_changed', read: () => this.getSubscription(id) };
+    }
+    const notice = this.getNotice(id);
+    return { table: 'dependency_notices', event: notice.kind, read: () => this.getNotice(id) };
+  }
+  pendingNotificationBoundary(table = 'subscriptions') {
+    return this.db.prepare(`SELECT max(seq) AS seq FROM ${notificationTable(table)} WHERE delivery_status='pending'`).get().seq ?? 0;
+  }
+  pendingNotifications(after, through, limit = 20, table = 'subscriptions') {
+    return this.db.prepare(`SELECT seq,id FROM ${notificationTable(table)} WHERE delivery_status='pending' AND seq>? AND seq<=? ORDER BY seq LIMIT ?`)
       .all(after, through, limit);
   }
   claimNotification(id) {
+    const { table, read } = this.notificationChannel(id);
     return this.transaction(() => {
       // Unknown is durable before any send. It is deliberately never a recovery candidate.
       const error = { code: 'NOTIFICATION_UNCONFIRMED', message: 'Notification attempt may be in flight or interrupted; inspect before taking any manual action. Never blindly resend.' };
-      const changed = this.db.prepare("UPDATE subscriptions SET delivery_status='unknown',attempted_at=?,delivery_error=? WHERE id=? AND delivery_status='pending'")
+      const changed = this.db.prepare(`UPDATE ${table} SET delivery_status='unknown',attempted_at=?,delivery_error=? WHERE id=? AND delivery_status='pending'`)
         .run(now(), JSON.stringify(error), id);
-      return changed.changes ? this.getSubscription(id) : null;
+      return changed.changes ? read() : null;
     });
   }
   finishNotification(id, expected, status, error = null) {
+    const { table, read } = this.notificationChannel(id);
     return this.transaction(() => {
-      this.db.prepare('UPDATE subscriptions SET delivery_status=?,delivery_error=?,completed_at=? WHERE id=? AND delivery_status=?')
+      this.db.prepare(`UPDATE ${table} SET delivery_status=?,delivery_error=?,completed_at=? WHERE id=? AND delivery_status=?`)
         .run(status, error ? JSON.stringify(error) : null, now(), id, expected);
-      return this.getSubscription(id);
+      return read();
     });
   }
   bindAssignment(rawInput) {
@@ -545,6 +673,7 @@ export class TaskStore {
         this.db.prepare('UPDATE operations SET resumed_by=? WHERE request_id=?').run(input.request_id, input.resume_request_id);
       } else {
         if (row.executor || row.status !== 'todo') fail('ASSIGNMENT_CONFLICT', 'Only an unassigned todo can be assigned');
+        this.assertReady(row);
         try {
           this.db.prepare('UPDATE tasks SET executor=?,lifecycle=lifecycle+1,updated_at=? WHERE id=?')
             .run(input.executor, now(), row.id);
@@ -705,12 +834,12 @@ export class TaskStore {
     }
     const row = this.row(input.task_id);
     if (input.view === 'automation_log') return this.automation.log(input);
-    if (input.view === 'subscriptions') {
+    if (input.view === 'subscriptions' || input.view === 'dependency_notices') {
       const scope = hash({ view: input.view, task_id: row.id });
       const limit = input.limit ?? 5;
-      const rows = this.db.prepare('SELECT * FROM subscriptions WHERE task_id=? AND seq < ? ORDER BY seq DESC LIMIT ?')
+      const rows = this.db.prepare(`SELECT * FROM ${notificationTable(input.view)} WHERE task_id=? AND seq < ? ORDER BY seq DESC LIMIT ?`)
         .all(row.id, this.cursor(input, scope), limit + 1);
-      return this.page(rows, limit, scope, entry => this.subscription(entry), { task_id: row.id });
+      return this.page(rows, limit, scope, entry => input.view === 'subscriptions' ? this.subscription(entry) : this.notice(entry), { task_id: row.id });
     }
     if (input.view === 'overview') return this.overview(row);
     if (input.view === 'execution' || input.view === 'definition') return this.task(row.id);

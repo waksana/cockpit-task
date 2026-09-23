@@ -36,8 +36,11 @@ export class TaskService {
     try {
       input = parseInput(name, rawInput);
       if (signal?.aborted) throw new TaskError('REQUEST_CANCELLED', 'Task request was cancelled before execution', 409);
-      if (name === 'task_assign' && this.store.row(input.task_id).kind === 'automation') {
-        throw new TaskError('AUTOMATION_MANAGED', 'Automation Tasks cannot be assigned to an Agent');
+      if (name === 'task_assign') {
+        const row = this.store.row(input.task_id);
+        if (row.kind === 'automation') throw new TaskError('AUTOMATION_MANAGED', 'Automation Tasks cannot be assigned to an Agent');
+        // Reject before reserving or inspecting the Executor; binding rechecks inside its transaction.
+        if (!input.resume_request_id && !this.store.receipt(name, input)) this.store.assertReady(row);
       }
       if (['task_session_create', 'task_session_prepare', 'task_assign'].includes(name)) {
         const receipt = this.store.reserveOperation(name, input);
@@ -124,9 +127,10 @@ export class TaskService {
     }
     let notifications;
     let notification_error;
-    if (outcome.result?.subscription_ids?.length) {
+    const notificationIds = [...(outcome.result?.subscription_ids ?? []), ...(outcome.result?.notice_ids ?? [])];
+    if (notificationIds.length) {
       notifications = [];
-      for (const id of outcome.result.subscription_ids) {
+      for (const id of notificationIds) {
         try {
           notifications.push(await this.deliver(id, signal));
         } catch (error) {
@@ -177,23 +181,26 @@ export class TaskService {
   recoverNotifications({ signal } = {}) {
     if (this.closing || signal?.aborted) return Promise.resolve();
     if (this.recovery) return this.recovery;
-    // A fixed high-water mark bounds this startup pass. New transitions deliver themselves.
-    const through = this.store.pendingNotificationBoundary();
-    if (!through) return Promise.resolve();
+    // Fixed high-water marks bound this startup pass. New transitions deliver themselves.
+    const sources = ['subscriptions', 'dependency_notices']
+      .map(table => ({ table, through: this.store.pendingNotificationBoundary(table) })).filter(source => source.through);
+    if (!sources.length) return Promise.resolve();
     this.active++;
     this.recovery = (async () => {
-      let after = 0;
-      while (!this.closing && !signal?.aborted) {
-        const batch = this.store.pendingNotifications(after, through);
-        if (!batch.length) break;
-        for (const entry of batch) {
-          if (this.closing || signal?.aborted) return;
-          const subscription = await this.deliver(entry.id, signal);
-          if (subscription.notification.error) this.report(new TaskError(
-            subscription.notification.error.code, subscription.notification.error.message, 502, subscription,
-          ));
-          this.invalidate();
-          after = entry.seq;
+      for (const { table, through } of sources) {
+        let after = 0;
+        while (!this.closing && !signal?.aborted) {
+          const batch = this.store.pendingNotifications(after, through, 20, table);
+          if (!batch.length) break;
+          for (const entry of batch) {
+            if (this.closing || signal?.aborted) return;
+            const subscription = await this.deliver(entry.id, signal);
+            if (subscription.notification.error) this.report(new TaskError(
+              subscription.notification.error.code, subscription.notification.error.message, 502, subscription,
+            ));
+            this.invalidate();
+            after = entry.seq;
+          }
         }
       }
     })().catch(error => this.report(error)).finally(() => {

@@ -324,7 +324,7 @@ test('storage failure after host acceptance remains unknown durably and cannot r
   assert.equal(f.sent.length, 1);
 });
 
-test('schema 1 upgrade preserves Task rows and receipts while fencing old binaries with version 5', t => {
+test('schema 1 upgrade preserves Task rows and receipts while fencing old binaries with version 6', t => {
   const f = fixture(t), task = f.executable();
   const before = f.store.task(task.task_id);
   const receipts = f.store.db.prepare('SELECT * FROM operations ORDER BY request_id').all();
@@ -338,7 +338,7 @@ test('schema 1 upgrade preserves Task rows and receipts while fencing old binari
   old.close();
   const upgraded = new TaskStore(f.root);
   try {
-    assert.equal(upgraded.db.prepare('PRAGMA user_version').get().user_version, 5);
+    assert.equal(upgraded.db.prepare('PRAGMA user_version').get().user_version, 6);
     assert.deepEqual(upgraded.task(task.task_id), before);
     assert.deepEqual(upgraded.db.prepare('SELECT * FROM operations ORDER BY request_id').all(), receipts);
     assert.deepEqual(upgraded.read({ view: 'subscriptions', task_id: task.task_id }).items, []);

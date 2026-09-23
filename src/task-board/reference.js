@@ -4,6 +4,8 @@ export const TASK_EVENTS = Object.freeze({
   assigned: 'Task assigned to you',
   updated: 'Task updated',
   status_changed: 'Task status updated',
+  ready: 'Task ready',
+  blocker_cancelled: 'Task blocker cancelled',
 });
 const taskTarget = new RegExp(`^task:(${idPattern})(?:\\?event=(${Object.keys(TASK_EVENTS).join('|')}))?$`);
 
