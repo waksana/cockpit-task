@@ -224,6 +224,10 @@ script_id 与输入此后不能改变，重新执行须新授权和新 Task。
 
 ### task_script_read / task_script_register
 
+脚本自动化仅支持 Linux（含 WSL2）。其他平台上 `task_script_register`、带 `automation`
+的 `task_create` 与 `task_automation_start` 均提前返回 `AUTOMATION_PLATFORM`，不写入
+脚本、Task 或运行记录；读取、既有记录和普通 Agent Task 不受影响。
+
 read 输入：`actor_session_id?, script_id?`，或 `actor_session_id?, limit?, cursor?`；
 单项选择不能与分页组合。目录默认 20、最大 50 项，返回 items/next_cursor；
 单项返回完整配置、sha256、registered_at、registered_by。

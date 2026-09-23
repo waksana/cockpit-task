@@ -43,6 +43,8 @@ Owner 也可为已授权、可信、可重复的已知脚本选择轻量 automat
 `task_create` 保存脚本和类型化参数快照，按必要后续行动选择订阅后，再显式
 `task_automation_start`。服务持久单队列执行，不创建 Executor、不 ACK、不占 session
 任务槽。成功写 done+outcome，失败/中断写 blocked+outcome，不自动重跑。
+脚本自动化仅支持 Linux（含 WSL2）；其他平台登记、创建与启动均返回 `AUTOMATION_PLATFORM`
+且不写入任何记录。
 Linux 进程组终止屏障只由 `task_automation_reconcile` 在内核确认组已不存在后解除；
 未回收 zombie 也会保持屏障，须由宿主回收，不手改数据库绕过。
 取消不回滚副作用。详见[轻量自动化](docs/task-automation.md)及

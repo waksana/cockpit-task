@@ -1,11 +1,11 @@
 import { fork } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
-import { TaskError } from './contracts.js';
+import { assertAutomationPlatform } from './automation-store.js';
 
 // Only a kernel ESRCH proves group absence. Enumerating /proc can miss a child
 // forked while its parent exits; even zombie-only groups remain conservative barriers.
 export function groupAlive(group) {
-  if (process.platform !== 'linux') throw new TaskError('AUTOMATION_PLATFORM', 'Automation requires Linux process-group observation');
+  assertAutomationPlatform();
   try { process.kill(-group, 0); return true; }
   catch (error) { if (error.code === 'ESRCH') return false; throw error; }
 }

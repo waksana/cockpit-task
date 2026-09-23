@@ -19,9 +19,9 @@ async function until(predicate, message = 'Condition timed out') {
   }
   assert.fail(message);
 }
-function fixture({ ready = true } = {}) {
+function fixture({ ready = true, platform } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'task-automation-'));
-  let store = new TaskStore(directory), service;
+  let store = new TaskStore(directory, { platform }), service;
   let request = 0;
   const sent = [], errors = [];
   const open = () => {
@@ -66,10 +66,10 @@ function fixture({ ready = true } = {}) {
       await until(() => !['created', 'queued', 'starting', 'running'].includes(store.automation.run(id).state));
       return store.task(id);
     },
-    async restart() {
+    async restart(options = {}) {
       service.close();
       await until(() => service.closed);
-      store = new TaskStore(directory);
+      store = new TaskStore(directory, options);
       open();
     },
     async close() {
@@ -176,6 +176,59 @@ test('strict script catalog and parameters reject changes, unknown fields and mi
     assert.equal((await f.change('task_edit', id, { reason: 'Clarify before start', description: 'Updated agreement' })).error, null);
     assert.equal(f.store.task(id).revision, 2);
     assert.equal(f.store.task(id).acknowledged_revision, null);
+  } finally { await f.close(); }
+});
+
+test('non-Linux platforms reject registration, automation creation and start early without stored effects', async () => {
+  const f = fixture();
+  try {
+    await f.register('existing', 'console.log("ok")');
+    const existing = await f.create('existing');
+    const counts = () => Object.fromEntries(['scripts', 'tasks', 'automation_runs', 'definitions']
+      .map(table => [table, f.store.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n]));
+    const path = join(f.directory, 'fresh.mjs');
+    writeFileSync(path, 'console.log("fresh")');
+    const definition = {
+      script_id: 'fresh', title: 'fresh', description: 'Synthetic trusted test script',
+      executable: process.execPath, script_path: path, argv: [], parameters: [],
+    };
+    for (const platform of ['win32', 'darwin']) {
+      await f.restart({ platform });
+      const before = counts();
+      const expectRejected = result => {
+        assert.equal(result.error.code, 'AUTOMATION_PLATFORM');
+        assert.match(result.error.message, /Linux or WSL2/);
+        assert.match(result.error.message, new RegExp(platform));
+      };
+      const register = { actor_session_id: 'owner', request_id: `register-${platform}`, ...definition };
+      expectRejected(await f.service.execute('task_script_register', register));
+      expectRejected(await f.service.execute('task_script_register', register));
+      expectRejected(await f.service.execute('task_script_register', { ...register, request_id: `register-existing-${platform}`, script_id: 'existing' }));
+      const create = {
+        actor_session_id: 'owner', request_id: `create-${platform}`, title: 'Automation', description: 'Blocked', owner: 'owner',
+        automation: { script_id: 'existing', parameters: {} },
+      };
+      expectRejected(await f.service.execute('task_create', create));
+      expectRejected(await f.service.execute('task_create', create));
+      expectRejected(await f.change('task_automation_start', existing));
+      assert.deepEqual(counts(), before);
+      assert.throws(() => f.store.executeLocal('task_script_read', { script_id: 'fresh' }), { code: 'SCRIPT_NOT_FOUND' });
+      assert.equal(f.store.executeLocal('task_script_read', { script_id: 'existing' }).script_id, 'existing');
+      assert.equal(f.store.task(existing).kind, 'automation');
+      assert.equal(f.store.task(existing).status, 'todo');
+      assert.equal(f.store.automation.run(existing).state, 'created');
+      const agent = await f.write('task_create', { title: 'Agent', description: 'Ordinary work', owner: 'owner' });
+      assert.equal(agent.error, null, JSON.stringify(agent));
+      assert.equal(f.store.task(agent.result.task_id).kind, 'agent');
+    }
+    await f.restart({ platform: 'linux' });
+    assert.equal((await f.service.execute('task_script_register', {
+      actor_session_id: 'owner', request_id: 'register-linux', ...definition,
+    })).error, null);
+    const id = await f.create('fresh');
+    await f.start(id);
+    assert.equal((await f.finished(id)).status, 'done');
+    assert.equal(f.store.automation.run(existing).state, 'created');
   } finally { await f.close(); }
 });
 
