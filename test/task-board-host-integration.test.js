@@ -312,6 +312,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
         if (name === 'session/get') return { meta: await engine.getMeta(body.sessionId) };
         if (name === 'roles/readiness') return engine.roleReadiness(body.sessionId, body.roles);
         if (name === 'session/resources-prepare') return engine.prepareSessionResources(body);
+        if (name === 'session/rename') return { ok: true, title: await engine.rename(body.sessionId, body.name) };
         if (name === 'prompt') {
           if (expectedStartupNotification) {
             assert.equal(runtimeReady, true, 'Cold recovery cannot send before native runtime startup');
@@ -583,6 +584,18 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(nativeStarted.acknowledged_revision, 1);
     assert.equal(nativeStarted.status, 'in_progress');
     assert.deepEqual((await tool('task_assign', assignInput)).result, assigned.result);
+    const renames = bridgeCalls.filter(call => call.name === 'session/rename');
+    if (assigned.result.operation.session_title.error?.code === 'TITLE_PROVENANCE_UNAVAILABLE') {
+      // Hosts predating name provenance keep the native title and are never asked to rename.
+      assert.equal(assigned.result.operation.session_title.status, 'skipped');
+      assert.deepEqual(renames, []);
+    } else {
+      assert.deepEqual(assigned.result.operation.session_title, { status: 'renamed', title: nativeStarted.title });
+      assert.deepEqual(renames, [{ name: 'session/rename', body: { sessionId: executorId, name: nativeStarted.title } }]);
+      const renamed = await engine.getMeta(executorId);
+      assert.equal(renamed.title, nativeStarted.title);
+      assert.equal(renamed.nativeNameUserSet, true);
+    }
     assert.deepEqual(bridgeCalls.filter(call => call.name === 'prompt'), [
       { name: 'prompt', body: { sessionId: executorId, text: reference, mode: 'enqueue' } },
     ]);

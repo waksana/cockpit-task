@@ -386,8 +386,26 @@ Executor 首次需要时自行加载相关 Skill 正文，不继承 Owner 的上
 ```text
 确认所选 session 及执行能力可用
   → 首次绑定 Task 的 Executor，ACK 仍为空，等待明确确认和开始执行
+  → 尽力把 Executor 原生会话标题设为 Task 标题（独立步骤，不影响指派结果）
   → 确认 idle / 空 queue 后仅发送一次 [Task assigned to you](task:<uuid>?event=assigned)
 ```
+
+<a id="assign-session-title"></a>
+绑定后的会话标题步骤写入 `operation.session_title`，只在归属已应用后出现：
+
+| status | 含义 |
+| --- | --- |
+| `renamed` | 经公开 `session/rename` 确认；`title` 为宿主返回的实际标题 |
+| `unchanged` | 原生名称已等于 Task 标题，未调用改名 |
+| `skipped` | 未改名：`CUSTOM_TITLE_PRESERVED`（原生 `nativeNameUserSet=true` 且不是本模块此前确认写入的标题）、`TITLE_PROVENANCE_UNAVAILABLE`（宿主未提供原生名称来源，例如旧宿主） |
+| `failed` | 读取名称来源失败，未调用改名 |
+| `unconfirmed` | 改名调用抛错或未确认；可能已生效，不重试 |
+| `unknown` / `not_attempted` | 调用前已持久化的不确定状态，或请求已取消而未尝试 |
+
+只有原生无名称或 `nativeNameUserSet=false`（自动摘要）才替换；用户或其他来源显式设置的
+名称保留，除非它正是本模块最近一次对该 session 确认写入的标题。该步骤不改变
+`operation.status`/`error`、归属、ACK、通知或发送；同一 request_id 重放原结果，不重复改名。
+reopen 不改标题，Task 标题的后续编辑不同步。
 
 该引用就是完整首次派单消息，标签无需 UI 渲染也能说明原因，不复制 description。
 Owner 不手工重复发送。`event` 是消息/引用元数据，不增加工具参数、Task 字段、

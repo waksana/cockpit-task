@@ -155,7 +155,45 @@ export async function createExecutor(options) {
   return finish('applied');
 }
 
-export async function assignExecutor({ input, inspect, bind, recheck, send, save, signal }) {
+async function retitleExecutor({ operation, title, retitle, save, signal }) {
+  const record = value => {
+    operation.session_title = value;
+    save({ result: { operation: { ...operation } }, error: null });
+  };
+  if (signal?.aborted) return record({ status: 'not_attempted', error: cancellation(signal) });
+  if (typeof title !== 'string' || !title.trim()) {
+    return record({ status: 'skipped', error: fault('TITLE_UNAVAILABLE', 'The bound Task has no usable title') });
+  }
+  let state;
+  let previous;
+  try {
+    state = await retitle.nameState(operation.executor);
+    previous = retitle.previous();
+  } catch (error) {
+    return record({ status: 'failed', error: errorDetail(error, 'TITLE_PROVENANCE_UNAVAILABLE') });
+  }
+  if (!state) {
+    return record({ status: 'skipped', error: fault('TITLE_PROVENANCE_UNAVAILABLE', 'Host exposes no verifiable native name provenance; the title was left unchanged') });
+  }
+  if (state.name === title.trim()) return record({ status: 'unchanged', title: state.name });
+  if (state.name !== null && state.userSet && state.name !== previous) {
+    return record({ status: 'skipped', error: fault('CUSTOM_TITLE_PRESERVED', 'The session has an explicitly set name not written by Task; it was preserved') });
+  }
+  // A lost host response must never repeat the rename with this request ID.
+  record({ status: 'unknown' });
+  let result;
+  try {
+    result = await retitle.rename(operation.executor, title);
+  } catch (error) {
+    return record({ status: 'unconfirmed', error: errorDetail(error, 'TITLE_UNCONFIRMED') });
+  }
+  if (result?.ok !== true || typeof result.title !== 'string') {
+    return record({ status: 'unconfirmed', error: fault('TITLE_UNCONFIRMED', 'Host did not confirm the session rename') });
+  }
+  return record({ status: 'renamed', title: result.title });
+}
+
+export async function assignExecutor({ input, inspect, bind, recheck, send, save, signal, retitle }) {
   const operation = {
     request_id: input.request_id, task_id: input.task_id, status: 'running', executor: input.executor,
     capability: 'unchecked', assignment: 'not_applied', message: 'not_sent',
@@ -188,14 +226,17 @@ export async function assignExecutor({ input, inspect, bind, recheck, send, save
   }
   const beforeBind = stopped();
   if (beforeBind) return beforeBind;
+  let task;
   try {
-    const task = bind();
+    task = bind();
     operation.assignment = 'applied';
     operation.write_context = task.write_context;
   } catch (error) {
     return finish('rejected', errorDetail(error, 'ASSIGNMENT_CONFLICT'));
   }
   save({ result: { operation: { ...operation } }, error: null });
+  // Title is a separate best-effort step: it never changes the assignment result.
+  if (retitle) await retitleExecutor({ operation, title: task.title, retitle, save, signal });
   try {
     current = await inspect(input.executor);
     recheck();

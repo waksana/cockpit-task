@@ -73,7 +73,8 @@ Executor 开始、恢复与要求同步仍完整读取 execution 并精确 ACK�
 
 Owner 明确选择现有可发现的 Skill/MCP 资源，以 `task_session_create` 新建并准备，
 或用 `task_session_prepare` 准备已加载空闲、无未结束 Task 的既有 Executor；
-检查分步回执后，由 `task_assign` 最终检查、绑定并发送一次派单。登记 backlog 不派单，
+检查分步回执后，由 `task_assign` 最终检查、绑定并发送一次派单；绑定后把默认/自动生成的
+Executor 会话标题设为 Task 标题（保留显式设置的名称，失败单独报告，不影响派单）。登记 backlog 不派单，
 准备也不发送初始化消息。就绪不等于授权、ACK 或执行，Skill 启用不等于正文已加载。
 显式资源准备要求宿主 `resourcePreparationVersion: 1`；省略资源选择的旧创建保持兼容。
 

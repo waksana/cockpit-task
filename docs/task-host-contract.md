@@ -114,6 +114,11 @@ Host API 使用 camelCase，Task MCP 使用 snake_case。Task adapter 仅依赖�
 | `session/resources-prepare` | `{sessionId,skills?,mcpServers?:[{name,tools?}]}` → `{sessionId,ok,skills,mcpServers,tools,error?}`；严格验证、分步回执 |
 | `roles/readiness` | `{sessionId,roles:[{moduleId:"cockpit-task",roleId:"executor"}]}` → 含 `sessionId,loaded,ready,roles,reasons` 的显式检查结果 |
 | `prompt` | `{sessionId,text,mode:"enqueue"}` → `{ok,queued?}` |
+| `session/rename` | `{sessionId,name}` → `{ok,title?}`；仅用于指派后的会话标题步骤 |
+
+指派的标题步骤依赖宿主在完整 `session/get` 中提供 `nativeName` 与 `nativeNameUserSet`
+（原生 workspace `user_named`）。缺少这些字段时视为来源未知，跳过且不调用 `session/rename`；
+规则见 [MCP 契约](task-mcp-contract.md#assign-session-title)。
 
 `task_session_create` 省略资源字段时保持旧创建及能力检查路径；提供任一资源字段
 （包括空数组）时，在创建前检查准备 v1 标记，创建后与 `task_session_prepare`
@@ -149,7 +154,7 @@ Task 在下一次宿主调用开始前检查取消。单次受保护的 `session
 提交后，所选内部原生步骤可能继续完成；不逐 RPC 中断、回滚或重试。
 实际结果可得时写入回执，不能把调用者取消当作准备没有生效的证明。
 
-既有 `session/new`、`session/get`、`roles/readiness`、`prompt` 契约不变。
+既有 `session/new`、`session/get`、`roles/readiness`、`prompt` 契约不变；`session/rename` 只由指派标题步骤调用。
 Task adapter 不单独调用 [Cockpit #97](https://github.com/waksana/cockpit/pull/97)
 的 `session/tools-initialize`：它是相关宿主内部支持，不是 Task 的第二套修复路径。
 不暴露任意 `host.call` 透传或访问私有 SDK handle。

@@ -153,3 +153,40 @@ test('successful creation checks readiness separately without sending', async ()
   assert.equal(outcome.result.operation.creation, 'created');
   assert.equal(outcome.result.operation.status, 'applied');
 });
+
+test('title provenance failure is a separate failed step and the dispatch still proceeds', async () => {
+  let renamed = 0;
+  const f = assignment({
+    bind: () => ({ write_context: 'bound-context', title: 'Synthetic' }),
+    retitle: {
+      nameState: async () => { throw new Error('session/get unavailable'); },
+      previous: () => null,
+      rename: async () => { renamed++; return { ok: true, title: 'Synthetic' }; },
+    },
+  });
+  const outcome = await f.run();
+  assert.equal(outcome.error, null);
+  assert.equal(outcome.result.operation.status, 'applied');
+  assert.equal(outcome.result.operation.message, 'accepted');
+  assert.deepEqual(outcome.result.operation.session_title, {
+    status: 'failed', error: { code: 'TITLE_PROVENANCE_UNAVAILABLE', message: 'session/get unavailable' },
+  });
+  assert.equal(renamed, 0);
+  assert.equal(f.sent.length, 1);
+});
+
+test('rename uncertainty is persisted before the host call', async () => {
+  let f;
+  let observed;
+  f = assignment({
+    bind: () => ({ write_context: 'bound-context', title: 'Synthetic' }),
+    retitle: {
+      nameState: async () => ({ name: null, userSet: false }),
+      previous: () => null,
+      rename: async () => { observed = f.saved.at(-1).result.operation.session_title; return { ok: true, title: 'Synthetic' }; },
+    },
+  });
+  const outcome = await f.run();
+  assert.deepEqual(observed, { status: 'unknown' });
+  assert.deepEqual(outcome.result.operation.session_title, { status: 'renamed', title: 'Synthetic' });
+});
