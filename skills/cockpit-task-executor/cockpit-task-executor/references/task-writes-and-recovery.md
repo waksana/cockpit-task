@@ -206,18 +206,21 @@ Choose the fewest target states that enable the needed action. If that action is
 no longer needed, withdraw the still-waiting subscription instead of retaining a
 completion reminder. Executor's authorized work never waits for Owner to subscribe
 or read a notice.
+An Executor's direct user question, even when blocked, stays in that session;
+Owner does not subscribe to relay it or turn it into an acceptance step.
 
 Sequenced follow-up is a typical necessary case. When the user has authorized
-"do B after A completes", subscribe to A's `done` when assigning A, or before,
-not afterwards, so a fast completion cannot pass unnoticed. When B depends on
-several prerequisites, subscribe to `done` on each unfinished prerequisite; one
-already done needs no subscription. Since at most one subscription may wait per
-Task, include `done` in that Task's single subscription rather than adding another.
+"do B after A completes", subscribe to A's `done` after creating A and before
+`task_assign` or `task_automation_start`, not afterwards, so a fast completion cannot
+pass unnoticed; if A is already running when B is authorized, subscribe right away.
+When B depends on several prerequisites, subscribe to `done` on each unfinished
+prerequisite; one already done needs no subscription, and a registration rejected
+because A already reached `done` means A is complete. At most one subscription may
+wait per Task: if one is already waiting, withdraw it and register one covering both
+needs; if that ends on an earlier state, register `done` again while B is still needed.
 On each notice, check the remaining prerequisites and dispatch B only when the
 last one completes. Private Owner notes, todos and plans trigger no reminder:
 without a subscription, a status-dependent follow-up waits until the user prompts it.
-An Executor's direct user question, even when blocked, stays in that session;
-Owner does not subscribe to relay it or turn it into an acceptance step.
 
 Owner can explicitly register with `task_subscribe`, withdraw with `task_unsubscribe`,
 and inspect records with `task_read(view=subscriptions)`. Use current tool schemas
