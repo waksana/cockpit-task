@@ -217,7 +217,8 @@ When B depends on several prerequisites, subscribe to `done` on each unfinished
 prerequisite; one already done needs no subscription, and a registration rejected
 because A already reached `done` means A is complete. At most one subscription may
 wait per Task: if one is already waiting, withdraw it and register one covering both
-needs; if that ends on an earlier state, register `done` again while B is still needed.
+needs. If that ends on an earlier state while B is still needed, registering `done`
+is part of acting on that notice's planned follow-up, not automatic resubscription.
 On each notice, check the remaining prerequisites and dispatch B only when the
 last one completes. Private Owner notes, todos and plans trigger no reminder:
 without a subscription, a status-dependent follow-up waits until the user prompts it.

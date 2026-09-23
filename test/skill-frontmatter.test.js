@@ -462,6 +462,7 @@ test('subscription guidance requires necessary Owner follow-up without gating Ex
     assert.match(writes, /subscribe to A's `done` after creating A and before `task_assign` or `task_automation_start`, not afterwards/);
     assert.match(writes, /subscribe to `done` on each unfinished prerequisite; one already done needs no subscription/);
     assert.match(writes, /if one is already waiting, withdraw it and register one covering both needs/);
+    assert.match(writes, /registering `done` is part of acting on that notice's planned follow-up, not automatic resubscription/);
     assert.match(writes, /check the remaining prerequisites and dispatch B only when the last one completes/);
     assert.match(writes, /Private Owner notes, todos and plans trigger no reminder: without a subscription, a status-dependent follow-up waits until the user prompts it/);
   }
