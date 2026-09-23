@@ -108,10 +108,11 @@ cannot account for escaped processes. Immutable configuration and script SHA256
 do not freeze runtime/interpreter bytes, imports, dependencies or external state.
 Do not put secrets in Task inputs or retained output.
 
-Current source/package version is **0.1.10**, retaining completion retro for Agent Tasks,
-selective Task reads and the coding/deployment Skill boundary clarification, and
-adding Owner request follow-through (#45), immediate important-update notices (#47)
-and Agent reopen (#49). Automation Tasks remain ineligible for reopen.
+Current source/package version is **0.1.11**, retaining completion retro for Agent Tasks,
+selective Task reads, the coding/deployment Skill boundary clarification,
+Owner request follow-through (#45), immediate important-update notices (#47)
+and Agent reopen (#49), and adding Owner sequential subscription follow-up (#53)
+and Executor session titles (#55). Automation Tasks remain ineligible for reopen.
 Automation remains exempt from retro. Source changes and isolated validation
 are not installation, production tests, deployment or restart authorization; no
 existing installation is replaced or upgraded by this feature's documentation.

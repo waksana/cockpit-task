@@ -1,11 +1,15 @@
 # Task
 
 Task is a Cockpit module for independent work records shared by Owner and Executor.
-Its module ID and HTTP MCP key are `cockpit-task`, source preparation version `0.1.10`.
+Its module ID and HTTP MCP key are `cockpit-task`, source preparation version `0.1.11`.
 It runs in Cockpit, not a standalone daemon or dashboard.
 
-This preparation includes Owner request follow-through (#45), immediate notices
-for important updates (#47), and Agent reopen (#49). Installed 0.1.9 stays immutable.
+This preparation adds Owner sequential subscription follow-up (#53) and Executor
+session titles (#55) to 0.1.10. Installed 0.1.10 stays immutable. Session-title
+results use existing operations JSON without a new schema migration. Hosts without
+native name provenance safely skip the title step; renaming requires the public
+`session/rename` contract. Version 0.1.10 introduced Owner request follow-through
+(#45), immediate notices for important updates (#47), and Agent reopen (#49).
 Opening older supported data migrates forward to schema v5 without assignment
 backfill: pre-upgrade assigned Tasks remain readable but cannot reopen. Old 0.1.9
 cannot open schema v5, so switching back to its package is not a database rollback.
@@ -319,7 +323,7 @@ npm test
 npm run package:module
 ```
 
-`dist/cockpit-task-0.1.10.tgz` contains runtime dependencies, backend/frontend assets,
+`dist/cockpit-task-0.1.11.tgz` contains runtime dependencies, backend/frontend assets,
 role prompts, two role Skills and the shared coding Skill. Its `.sha256` sidecar identifies the
 archive. [Task CI](https://github.com/waksana/cockpit-task/blob/main/.github/workflows/task-board-ci.yml) retains these as the
 `cockpit-task-module` artifact; an artifact is not an installation or deployment.
@@ -328,7 +332,7 @@ Installation is an explicit operator action on a compatible host. From the host
 checkout, stage the local artifact using the host's module installer:
 
 ```sh
-pnpm module install /absolute/path/to/cockpit-task-0.1.10.tgz --trust-local-code
+pnpm module install /absolute/path/to/cockpit-task-0.1.11.tgz --trust-local-code
 ```
 
 This command deliberately omits automatic enablement. Follow that host's documented
