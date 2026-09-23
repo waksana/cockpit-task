@@ -78,7 +78,7 @@ Load `github-coding` for authorized changes to version-controlled repository fil
 GitHub mentions or pure deployment using existing verified artifacts. Runtime configuration
 alone does not trigger this flow; project policies still apply. For initially known changes,
 prepare clean mainline, isolation and any GitHub Issue before Task; for changes discovered later,
-coordinate preparation before edits within the existing Task. Mixed delivery stays one Task,
+the user may authorize the Executor to prepare them within the existing Task. Mixed delivery stays one Task,
 with Issue/PR only for repository changes. Preparation and cleanup are coordination, not personal
 implementation. Separate release/deployment/restart/migration authorization and Owner's default delegation responsibility remain.
 

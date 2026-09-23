@@ -164,8 +164,8 @@ test('coding guidance composes with roles without widening implementation or sub
     /Do not manually message Owner, directly or through subagents/,
     /Task done means the complete agreed result/,
     /not code merge alone, resource cleanup or an idle native session/,
-    /PR\/branch\/worktree path/,
-    /explicit release evidence: which workers have stopped using the worktree, any outstanding users and artifacts to preserve/,
+    /every PR\/branch\/worktree path/,
+    /explicit release evidence: which workers have stopped using each worktree, any outstanding users and artifacts to preserve/,
     /Do not claim release while you or subagents still use it/,
     /Executor must not delete its own cwd/,
     /worktree is no longer used by Executor, subagents or other work/,
@@ -234,14 +234,24 @@ test('coding scope distinguishes repository changes from deployment and keeps mi
   const preparation = prose(source.split('## Owner: prepare, then delegate')[1]
     .split('## Executor: deliver through the authorized boundary')[0]);
   assert.match(preparation, /initially known GitHub repository changes/);
-  assert.match(preparation, /If changes emerge during execution/);
-  assert.match(preparation, /Owner-coordinated Issue\/environment preparation before editing/);
+  assert.match(preparation, /If changes emerge during execution that the same result needs/);
+  assert.match(preparation, /Executor asks the user directly before editing, not Owner/);
+  assert.match(preparation, /After the user authorizes, Executor may reuse or create the corresponding Issue and a dedicated branch and worktree from freshly fetched mainline/);
+  assert.match(preparation, /Never edit a shared checkout or another worker's worktree, or switch someone else's checkout; Owner still cleans up/);
+  assert.match(preparation, /Unrelated changes need a separate Task, not a drive-by fix/);
+  assert.doesNotMatch(prose(source), /Owner-coordinated Issue\/environment preparation/);
+  assert.match(prose(source), /verify the designated \(or authorized self-prepared\) worktree/);
   assert.doesNotMatch(preparation, /For GitHub work,/);
   const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8')
     .split('## Coding work')[1].split('## Coordinate through Task')[0]);
   assert.match(owner, /version-controlled repository files/);
   assert.match(owner, /pure deployment using existing verified artifacts/);
   assert.match(owner, /changes discovered later/);
+  assert.match(owner, /user may authorize the Executor to prepare them within the existing Task/);
+  const executorCoding = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8')
+    .split('## Coding work')[1].split('\n## ')[0]);
+  assert.match(executorCoding, /same result needs other repository changes, ask the user; once authorized/);
+  assert.match(prose(readFileSync(join(root, 'docs/task-board.md'), 'utf8')), /Executor asks the user; once authorized it prepares their Issue and isolated worktree/);
   assert.match(owner, /Mixed delivery stays one Task/);
   assert.match(owner, /default delegation responsibility/);
 });

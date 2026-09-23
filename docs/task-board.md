@@ -95,8 +95,8 @@ configuration use Task without this Skill requiring Issue/PR/branch/worktree;
 project policies, immutable installation requirements and separate deployment
 authorization still apply. Owner's default delegation responsibility is unchanged.
 Mixed delivery stays one Task with Issue/PR only for necessary repository changes.
-If changes emerge later, update that Task and obtain Owner-coordinated Issue/environment
-preparation before editing, not a new deployment Issue or stage Task.
+If same-result changes emerge later, Executor asks the user; once authorized it prepares
+their Issue and isolated worktree within that Task, not a new deployment Issue or stage Task.
 For initially known changes, Owner prepares clean current mainline, a dedicated branch/worktree and environment,
 then reuses or creates an Issue before Task. Executor owns implementation, checks,
 independent review and authorized PR merge. Owner safely removes only this work's

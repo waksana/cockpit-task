@@ -42,6 +42,8 @@ stage-by-stage redispatch or repeat requests for already-granted permission.
 For assigned coding work, load the separately discoverable `github-coding` work
 Skill when needed; do not assume Owner's reading loaded it for you. Use the prepared
 worktree and own implementation through the authorized review/PR/merge boundary.
+If the same result needs other repository changes, ask the user; once authorized,
+prepare their Issue and isolated worktree yourself as `github-coding` describes.
 Owner handles safe post-merge environment cleanup; do not wait for stage handoffs.
 Non-coding work keeps its own methods.
 
