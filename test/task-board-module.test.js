@@ -94,6 +94,35 @@ test('HTTP completion requires explicit valid retro with atomic effects and dura
   } finally { f.close(); }
 });
 
+test('HTTP reopen checks real host readiness while the Executor is running and does not dispatch', async () => {
+  const f = fixture();
+  try {
+    const created = (await f.write('task_create', { owner: 'owner', title: 'Reopen', description: 'Agreement' })).body.result;
+    await f.write('task_assign', { task_id: created.task_id, revision: 1, write_context: created.write_context, executor: 'executor' });
+    const task = (await f.read(created.task_id)).body.result;
+    const base = { task_id: task.id, revision: 1, write_context: task.write_context, actor_session_id: 'executor' };
+    await f.write('task_ack', base);
+    const completed = (await f.write('task_report', { ...base, status: 'done', outcome: { summary: 'Original result' }, retro: null })).body.result;
+    f.meta = { ...f.meta, status: 'running', nativeProcessing: true, activeOperations: 1 };
+    const before = f.calls.length, invalidations = f.invalidations;
+    const reopened = await f.write('task_reopen', {
+      ...base, write_context: completed.write_context, description: 'Revised agreement', reason: 'Explicit user request',
+    });
+    assert.equal(reopened.status, 200);
+    assert.equal(reopened.body.result.revision, 2);
+    assert.equal(reopened.body.result.task_status, 'in_progress');
+    assert.equal(reopened.body.definition_check.tasks[0].needs_ack, false);
+    assert.deepEqual(f.calls.slice(before).map(call => call.name), ['roles/readiness', 'session/get']);
+    assert.equal(f.invalidations, invalidations + 1);
+    f.restart();
+    const current = (await f.read(task.id)).body.result;
+    assert.equal(current.description, 'Revised agreement');
+    assert.equal(current.retro.current, false);
+    assert.equal((await f.read(task.id, 'outcomes')).body.result.items[0].current, false);
+    assert.deepEqual(f.errors, []);
+  } finally { f.close(); }
+});
+
 test('HTTP selective reads preserve legacy defaults, errors, revision checks and exact chosen groups', async () => {
   const f = fixture();
   try {
@@ -164,7 +193,7 @@ test('module roles retain tool subsets and share one coding Skill alongside the 
   ]);
   for (const role of manifest.roles) assert.deepEqual(Object.keys(role.mcpServers), ['cockpit-task']);
   assert.deepEqual(owner.mcpServers['cockpit-task'].tools, ['task_read', 'task_create', 'task_script_register', 'task_script_read', 'task_automation_start', 'task_automation_reconcile', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe']);
-  assert.deepEqual(executor.mcpServers['cockpit-task'].tools, ['task_read', 'task_edit', 'task_ack', 'task_report', 'task_cancel']);
+  assert.deepEqual(executor.mcpServers['cockpit-task'].tools, ['task_read', 'task_edit', 'task_ack', 'task_reopen', 'task_report', 'task_cancel']);
   assert.deepEqual([...new Set([...owner.mcpServers['cockpit-task'].tools, ...executor.mcpServers['cockpit-task'].tools])].sort(), [...TOOL_NAMES].sort());
   assert.deepEqual(owner.skillDirectories, ['skills/cockpit-task-owner', 'skills/github-coding']);
   assert.deepEqual(executor.skillDirectories, ['skills/cockpit-task-executor', 'skills/github-coding']);

@@ -148,6 +148,7 @@ test('a confirmed not-sent assignment can resume explicitly without rebinding', 
     assert.equal(resumed.error, null);
     assert.equal(resumed.result.operation.message, 'accepted');
     assert.equal(f.sent.length, 1);
+    assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM task_assignments WHERE task_id=?').get(task.id).n, 1);
   } finally { f.close(); }
 });
 
@@ -238,11 +239,11 @@ test('Task storage is private and a newer schema is rejected rather than overwri
     assert.equal(statSync(join(f.directory, 'task-board.sqlite')).mode & 0o777, 0o600);
     f.service.close();
     const future = new DatabaseSync(join(f.directory, 'task-board.sqlite'));
-    future.exec('PRAGMA user_version=5');
+    future.exec('PRAGMA user_version=6');
     future.close();
     assert.throws(() => new TaskStore(f.directory), error => error.code === 'SCHEMA_TOO_NEW');
     const unchanged = new DatabaseSync(join(f.directory, 'task-board.sqlite'));
-    try { assert.equal(unchanged.prepare('PRAGMA user_version').get().user_version, 5); }
+    try { assert.equal(unchanged.prepare('PRAGMA user_version').get().user_version, 6); }
     finally { unchanged.close(); }
   } finally { f.close(); }
 });

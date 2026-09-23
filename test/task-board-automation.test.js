@@ -388,7 +388,7 @@ test('v2 migration preserves Agent outcomes and defaults while allowing null-Exe
     assert.equal(store.task(task.task_id).automation, null);
     assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items[0].summary, 'Legacy result');
     assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items[0].source, 'reported');
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 4);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 5);
     assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
   } finally {
     store?.close();

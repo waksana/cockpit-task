@@ -7,6 +7,29 @@ import { schemas, toolSchemas, TOOL_NAMES, READ_GROUPS } from '../src/task-board
 
 const task_id = 'de33dc0a-2f93-4c5a-b14e-87111940d520';
 
+test('reopen public schema requires a full explicit revision agreement and excludes takeover fields', async t => {
+  const { client } = await fixture(t);
+  const schema = (await client.listTools()).tools.find(tool => tool.name === 'task_reopen').inputSchema;
+  const input = {
+    actor_session_id: 'executor', request_id: 'rework', task_id, write_context: 'context',
+    revision: 1, description: 'Full revised agreement', reason: 'User requested rework',
+  };
+  assert.deepEqual(schema.required, Object.keys(input));
+  assert.equal(schema.additionalProperties, false);
+  assert.equal(schema.properties.description.maxLength, 24000);
+  assert.equal(schema.properties.reason.maxLength, 2000);
+  assert.notEqual((await client.callTool({ name: 'task_reopen', arguments: input })).isError, true);
+  for (const key of Object.keys(input)) {
+    const missing = { ...input };
+    delete missing[key];
+    assert.equal((await client.callTool({ name: 'task_reopen', arguments: missing })).isError, true, key);
+  }
+  for (const change of [
+    { executor: 'replacement' }, { owner: 'replacement' }, { status: 'todo' },
+    { description: '' }, { reason: ' ' }, { description: 'x'.repeat(24001) },
+  ]) assert.equal((await client.callTool({ name: 'task_reopen', arguments: { ...input, ...change } })).isError, true);
+});
+
 async function fixture(t) {
   const server = new McpServer({ name: 'task-contract-test', version: '1.0.0' });
   const calls = [];

@@ -34,7 +34,7 @@
         "cockpit-task": {
           "type": "http",
           "path": "/mcp",
-          "tools": ["task_read", "task_edit", "task_ack", "task_report", "task_cancel"]
+          "tools": ["task_read", "task_edit", "task_ack", "task_reopen", "task_report", "task_cancel"]
         }
       }
     }

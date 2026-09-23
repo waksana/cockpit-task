@@ -73,8 +73,8 @@ HTTP MCP 配置和工具选择。Web 与 MCP 创建共用宿主角色选择流�
 | 选择 | Skill | Task MCP 工具（省略 `task_` 前缀） |
 | --- | --- | --- |
 | Owner | `cockpit-task-owner`、`github-coding` | read、create、session_create、session_prepare、assign、edit、cancel、subscribe、unsubscribe、script_read、script_register、automation_start、automation_reconcile |
-| Executor | `cockpit-task-executor`、`github-coding` | read、edit、ack、report、cancel |
-| 两者 | 两份角色 Skill 与一份 `github-coding` | 十五个工具的并集，共用 `cockpit-task` HTTP MCP 配置 |
+| Executor | `cockpit-task-executor`、`github-coding` | read、edit、ack、report、reopen、cancel |
+| 两者 | 两份角色 Skill 与一份 `github-coding` | 十六个工具的并集，共用 `cockpit-task` HTTP MCP 配置 |
 
 两角色都声明同一个 `skills/github-coding` 发现根；宿主复用同来源工作 Skill，
 不复制到各角色目录，不新增装载接口。它仅在编码工作需要时读取，非编码不触发；
@@ -175,6 +175,13 @@ Task adapter 不单独调用 [Cockpit #97](https://github.com/waksana/cockpit/pu
 固定 `availability_reasons` 与 `observed_at`；不复制 pending/问题内容。
 这些是失败时观察，读取/重放回执不会刷新宿主或变成持续监控。
 完整原因码及安全恢复条件见 [MCP 契约](task-mcp-contract.md#task_assign)。
+
+`task_reopen` 使用相同公开适配器检查原 Executor 存在且能力就绪，但不是接单：
+当前 session 正在执行用户授权返工时可调用，不要求 idle/空队列或无当前 MCP 操作。
+不创建/加载/重载 session、不修复资源、不调用 prepare 或 prompt，也不发新派单。
+服务在宿主观察后仍于本地写事务核对原归属、revision/context、持久指派序号资格
+及无其他未结束 Task。能力、业务资格与用户授权分别判断；actor 相等不是认证，
+不读取聊天验证用户决定。首次 assign/prepare 的原生空闲门槛保持不变。
 
 ### 重要更新使用已有单次操作
 

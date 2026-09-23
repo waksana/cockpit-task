@@ -103,6 +103,9 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     assert.match(descriptions.task_assign, /per-step results and failure-time availability_reasons; never blindly resend/);
     assert.doesNotMatch(descriptions.task_assign, /Does not interrupt or queue instructions/);
     assert.match(descriptions.task_edit, /actual description change.*unfinished Task/);
+    assert.match(descriptions.task_reopen, /original ready Executor.*done Agent Task.*in_progress/);
+    assert.match(descriptions.task_reopen, /no later assignment.*Actor is attribution, not authentication/);
+    assert.match(descriptions.task_cancel, /Cancelled Tasks cannot reopen/);
     assert.match(descriptions.task_edit, /unchanged text and metadata-only edits do not/);
     assert.match(descriptions.task_edit, /Does not send messages or change execution status/);
     assert.match(descriptions.task_report, /done requires a new outcome in the same request/);

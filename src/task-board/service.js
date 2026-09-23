@@ -78,7 +78,24 @@ export class TaskService {
           }
         }
       } else {
-        outcome = { result: this.store.executeLocal(name, input), error: null };
+        let validationError;
+        if (name === 'task_reopen' && !this.store.receipt(name, input)) {
+          try {
+            this.store.reopenCandidate(input);
+            const capability = await this.host.inspect(input.actor_session_id);
+            // Self-continuation is performed by a running Executor, not an idle dispatch target.
+            if (!capability.ready || !capability.executor) {
+              throw new TaskError('CAPABILITY_UNAVAILABLE', 'The original Executor must have loaded, ready Executor capability');
+            }
+            if (signal?.aborted) throw new TaskError('REQUEST_CANCELLED', 'Task request was cancelled before reopening');
+          } catch (error) {
+            if (!(error instanceof TaskError)) throw error;
+            validationError = error;
+          }
+        }
+        outcome = { result: this.store.executeLocal(name, input, {
+          validate: () => { if (validationError) throw validationError; },
+        }), error: null };
         if (name === 'task_cancel') this.automation.cancel(input.task_id);
         if (['task_automation_start', 'task_automation_reconcile'].includes(name)) this.automation.kick();
       }

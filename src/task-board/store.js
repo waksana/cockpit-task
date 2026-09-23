@@ -34,7 +34,7 @@ export class TaskStore {
     try {
       chmodSync(file, 0o600);
       const version = this.db.prepare('PRAGMA user_version').get().user_version;
-      if (version > 4) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
+      if (version > 5) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
       this.db.exec(`
       PRAGMA journal_mode=WAL;
       PRAGMA synchronous=FULL;
@@ -116,6 +116,12 @@ export class TaskStore {
           CHECK(retro_recorded IN (0,1));
       `);
       this.db.exec(`
+        CREATE TABLE IF NOT EXISTS task_assignments (
+          seq INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id TEXT NOT NULL UNIQUE REFERENCES tasks(id),
+          executor TEXT NOT NULL, author TEXT NOT NULL, at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS task_assignments_executor ON task_assignments(executor,seq);
         CREATE TABLE IF NOT EXISTS scripts (
           seq INTEGER PRIMARY KEY AUTOINCREMENT, script_id TEXT NOT NULL UNIQUE,
           definition TEXT NOT NULL, author TEXT NOT NULL, at TEXT NOT NULL
@@ -130,7 +136,7 @@ export class TaskStore {
           log TEXT NOT NULL DEFAULT '', omitted_characters INTEGER NOT NULL DEFAULT 0,
           reconciled_at TEXT, reconciled_by TEXT, reconciliation_reason TEXT
         );
-        PRAGMA user_version=4;
+        PRAGMA user_version=5;
         COMMIT;
       `);
       this.automation = new AutomationStore(this);
@@ -256,12 +262,12 @@ export class TaskStore {
       return this.operation(requestId);
     });
   }
-  executeLocal(name, rawInput) {
+  executeLocal(name, rawInput, { validate = () => {} } = {}) {
     const input = parseInput(name, rawInput);
     if (name === 'task_read') return this.read(input);
     if (name === 'task_script_read') return this.automation.script(input);
     const handlers = {
-      task_create: 'create', task_edit: 'edit', task_ack: 'ack', task_report: 'report', task_cancel: 'cancel',
+      task_create: 'create', task_edit: 'edit', task_ack: 'ack', task_report: 'report', task_cancel: 'cancel', task_reopen: 'reopen',
       task_subscribe: 'subscribe', task_unsubscribe: 'unsubscribe',
       task_script_register: 'registerScript', task_automation_start: 'startAutomation',
       task_automation_reconcile: 'reconcileAutomation',
@@ -273,6 +279,7 @@ export class TaskStore {
       // A savepoint prevents all business failures except explicitly returned stale-field results.
       this.db.exec('SAVEPOINT mutation');
       try {
+        validate();
         const { result, error = null } = this[handlers[name]](input);
         this.db.exec('RELEASE mutation');
         this.saveReceipt(input.request_id, result, error);
@@ -293,8 +300,7 @@ export class TaskStore {
     const id = randomUUID(), at = now();
     this.db.prepare('INSERT INTO tasks(id,title,description,owner,refs,metadata,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)')
       .run(id, input.title, input.description, input.owner, JSON.stringify(input.references || []), JSON.stringify(input.metadata || {}), at, at);
-    this.db.prepare('INSERT INTO definitions(task_id,revision,description,reason,author,at) VALUES(?,?,?,?,?,?)')
-      .run(id, 1, input.description, 'Initial definition', input.actor_session_id, at);
+    this.recordDefinition(this.row(id), 'Initial definition', input.actor_session_id, at);
     if (input.automation) this.automation.create(id, input.automation);
     return { result: this.effects(this.row(id)) };
   }
@@ -319,16 +325,49 @@ export class TaskStore {
     this.db.prepare('UPDATE tasks SET title=?,description=?,refs=?,metadata=?,revision=?,editable=editable+?,updated_at=? WHERE id=?')
       .run(input.title ?? row.title, input.description ?? row.description, references, metadata, revision, Number(metadataChanged), at, row.id);
     if (descriptionChanged) {
-      this.db.prepare('INSERT INTO definitions(task_id,revision,description,reason,author,at) VALUES(?,?,?,?,?,?)')
-        .run(row.id, revision, input.description, input.reason, input.actor_session_id, at);
+      this.recordDefinition(this.row(row.id), input.reason, input.actor_session_id, at);
       if (!terminal(row.status) && row.executor === input.actor_session_id) this.recordAck(this.row(row.id), input.actor_session_id);
     }
     return { result: { ...this.effects(this.row(row.id)), description_changed: descriptionChanged, metadata_changed: metadataChanged } };
+  }
+  recordDefinition(row, reason, author, at) {
+    this.db.prepare('INSERT INTO definitions(task_id,revision,description,reason,author,at) VALUES(?,?,?,?,?,?)')
+      .run(row.id, row.revision, row.description, reason, author, at);
   }
   recordAck(row, author) {
     this.db.prepare('INSERT OR IGNORE INTO acknowledgements(task_id,revision,confirmed_for,author,at) VALUES(?,?,?,?,?)')
       .run(row.id, row.revision, row.executor, author, now());
     this.db.prepare('UPDATE tasks SET acknowledged_revision=?,updated_at=? WHERE id=?').run(row.revision, now(), row.id);
+  }
+  reopenCandidate(input) {
+    const row = this.row(input.task_id);
+    this.checkContext(row, input, true);
+    this.currentRevision(row, input);
+    if (row.kind !== 'agent') fail('AUTOMATION_MANAGED', 'Automation Tasks cannot reopen');
+    if (row.status !== 'done') fail('TASK_STATE_CONFLICT', 'Only a done Agent Task can reopen');
+    if (!row.executor || row.executor !== input.actor_session_id) {
+      fail('EXECUTOR_MISMATCH', 'Only the recorded original Executor may reopen; actor attribution is not authentication');
+    }
+    const assignment = this.db.prepare('SELECT seq FROM task_assignments WHERE task_id=? AND executor=?').get(row.id, row.executor);
+    if (!assignment) fail('REOPEN_NOT_ELIGIBLE', 'Tasks assigned before assignment-order tracking cannot reopen');
+    const occupied = this.db.prepare("SELECT 1 FROM tasks WHERE executor=? AND status NOT IN ('done','cancelled')").get(row.executor);
+    if (occupied) fail('EXECUTOR_OCCUPIED', 'Executor already has an unfinished Task');
+    const later = this.db.prepare('SELECT 1 FROM task_assignments WHERE executor=? AND seq>? LIMIT 1').get(row.executor, assignment.seq);
+    if (later) fail('REOPEN_NOT_ELIGIBLE', 'Executor has since been assigned another Task, including completed or cancelled work');
+    if (!definitionFits({ description: input.description, references: JSON.parse(row.refs), metadata: JSON.parse(row.metadata) })) {
+      fail('INVALID_INPUT', 'Combined serialized description and materials exceed 64000 characters', 400);
+    }
+    return row;
+  }
+  reopen(input) {
+    const row = this.reopenCandidate(input), at = now();
+    // This runs under the same write transaction as assignment and its ordering record.
+    this.db.prepare("UPDATE tasks SET status='in_progress',description=?,revision=revision+1,lifecycle=lifecycle+1,updated_at=? WHERE id=?")
+      .run(input.description, at, row.id);
+    const current = this.row(row.id);
+    this.recordDefinition(current, input.reason, input.actor_session_id, at);
+    this.recordAck(current, input.actor_session_id);
+    return { result: this.effects(this.row(row.id)) };
   }
   ack(input) {
     const row = this.row(input.task_id);
@@ -421,7 +460,7 @@ export class TaskStore {
     const row = this.row(input.task_id);
     this.checkContext(row, input);
     if (input.statuses.includes(row.status)) fail('ALREADY_IN_TARGET_STATUS', 'Task is already in a target status; no subscription was created');
-    if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Terminal Tasks cannot transition; no subscription was created');
+    if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Subscriptions require an unfinished Task; no subscription was created');
     if (this.db.prepare("SELECT 1 FROM subscriptions WHERE task_id=? AND owner=? AND state='waiting'").get(row.id, row.owner)) {
       fail('SUBSCRIPTION_EXISTS', 'This Task Owner already has a waiting subscription; inspect or cancel it explicitly');
     }
@@ -514,6 +553,8 @@ export class TaskStore {
           }
           throw error;
         }
+        this.db.prepare('INSERT INTO task_assignments(task_id,executor,author,at) VALUES(?,?,?,?)')
+          .run(row.id, input.executor, input.actor_session_id, now());
       }
       const task = this.row(row.id);
       this.db.prepare('UPDATE operations SET binding_context=?,result=?,updated_at=? WHERE request_id=?')
@@ -678,7 +719,7 @@ export class TaskStore {
       const { seq, description, refs, retro, retro_recorded, ...fields } = entry;
       return {
         ...fields, source: fields.run_id ? 'automation' : 'reported',
-        ...(input.view === 'outcomes' ? { retro: this.retro(row, entry) } : {}),
+        ...(input.view === 'outcomes' ? { current: entry.revision === row.revision, retro: this.retro(row, entry) } : {}),
         ...(refs ? { references: JSON.parse(refs) } : {}),
         ...(description ? { description_available: true, description_length: description.length } : {}),
       };

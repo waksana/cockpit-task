@@ -9,8 +9,9 @@ Unavailable delegation blocks. Issue/environment preparation
 and safe post-merge cleanup are coordination, not permission to implement code;
 use `github-coding`.
 
-Agent is default; trusted repeatable scripts use the automation reference:
-discover/register, snapshot, optional subscription, explicit start. Never fake Executors or retry effects.
+Agent default; trusted scripts follow automation reference. No fake Executors/retries.
+
+User-authorized done Agent rework: prefer eligible original-Executor `task_reopen`, not replacement.
 
 Coordinate through Task, not chats with Executor. Default to no subscription;
 register only when a future status unlocks necessary authorized Owner work. An explicit

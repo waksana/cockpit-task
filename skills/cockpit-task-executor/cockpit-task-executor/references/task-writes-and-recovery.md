@@ -252,11 +252,55 @@ do not claim exactly-once delivery. An unknown send does not authorize a blind
 resend, replacement Task or another subscription. The system exception neither
 restores default progress/final notifications nor permits Executor-to-Owner messages.
 
+## Original-Executor rework after done
+
+Only explicit user authorization for rework permits the original Executor to use
+`task_reopen` on its done Agent Task. Read full current `execution`, reconcile the
+complete new agreement, and submit `task_id,actor_session_id,request_id,write_context,
+revision,description,reason`. Description is full text; reason records the user
+decision, not an authentication credential. Actor must equal the recorded Executor;
+do not impersonate it. Reopen is not `task_assign` dispatch recovery.
+
+Eligibility is durable: the assignment must have been recorded after schema v5
+upgrade, no other Task may have been assigned to that Executor since it, and no
+other unfinished Task may occupy it. Even later done/cancelled assignments disqualify.
+All pre-upgrade assignments are ineligible; no timestamps or historical backfill
+can establish order. The service uses monotonic assignment order and rechecks
+eligibility transactionally. Host capability readiness is required, not native
+idleness: the original Executor can call while executing this very user request.
+No prepare, self-prompt, dispatch or workspace creation is part of reopen.
+
+One atomic change preserves identity and histories, enters `in_progress`, creates
+a new description revision even for identical text, self-ACKs it and advances
+lifecycle context. The changelog keeps author, reason and time; references, activities,
+old ACKs, outcomes and completion retros remain. The prior outcome/retro is
+`current:false`; an old ACK/outcome cannot deliver the new revision. Complete again
+with a new outcome and explicit retro text or null, without mandatory status-log
+activities or a separate round state machine. Ended subscriptions stay ended;
+reopen sends no notice and does not renew or duplicate an earlier notification.
+
+`REOPEN_NOT_ELIGIBLE` means missing tracked assignment or an intervening assignment;
+`EXECUTOR_MISMATCH` means the actor differs from the original Executor;
+`EXECUTOR_OCCUPIED` means other unfinished work; `TASK_STATE_CONFLICT` means not done;
+`AUTOMATION_MANAGED` excludes automation. Existing revision/context, capability and
+request-replay checks still apply. Inspect saved effects on uncertainty rather
+than changing request IDs or retrying external work.
+
+For coding, use `github-coding`: default to the retained worktree/branch even after
+PR merge, verify actual project/branch/ownership and absence of conflicting workers,
+safely sync mainline, then deliver a separately reviewed follow-up PR as needed.
+Metadata is not ownership proof; do not scan unrelated chats or automatically
+recreate removed/repurposed environments. Resolve a workspace blocker explicitly.
+Owner does not create a replacement when eligible original-Executor continuation
+can meet the request; otherwise use an appropriate new authorized Task.
+
 ## Ending and preserving work
 
 Use cancellation only for an explicit cancellation decision. A cancelled Task
 does not prove its native session stopped; record changes do not reverse external
-effects. Completed/cancelled Tasks cannot resume execution or change Executor.
+effects. Cancelled Tasks cannot resume, and bound Tasks cannot change Executor.
+Done Agent Tasks may resume only through the explicit rework path above, never
+ordinary reports, old instructions or definition edits.
 For automation, prelaunch cancellation prevents launch and running cancellation requests
 process-group termination, not proof of exit or rollback. Read the run outcome/barrier.
 Started work never reruns on recovery; repeating requires new authorization and a new Task.

@@ -22,6 +22,9 @@ A delayed or duplicated notice does not authorize restarting a terminal Task or
 taking over someone else's assignment. The notice identifies why it was sent,
 not a snapshot of requirements. Old dispatch instructions and preserved-message
 summaries do not override the current agreement.
+Explicit user-authorized original-Executor `task_reopen` is a separate guarded
+operation, never an effect or authorization inferred from a notice. It sends no
+new assigned/updated/status_changed card and does not renew ended subscriptions.
 
 `status_changed` is a separate system card for the Owner's one-shot subscription,
 not an Executor instruction or a request to ACK a notification. It is distinct from
