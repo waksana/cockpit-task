@@ -24,6 +24,8 @@ No installation, deployment or production testing is implied.
 Select a known registration with `{"actor_session_id":"owner-session","script_id":"inventory-v1"}`;
 do not combine `script_id` with pagination. Inspect its full description, paths,
 fixed arguments, ordered input definitions and SHA256 before selecting it.
+Script automation requires a Linux (or WSL2) host; elsewhere registration, automation
+creation and start return `AUTOMATION_PLATFORM` and store nothing, so use an Agent Task.
 If no suitable registration exists, `task_script_register` registers an existing
 trusted local script without running it:
 

@@ -27,7 +27,7 @@ function decode(value, code) {
 }
 
 export class TaskStore {
-  constructor(directory) {
+  constructor(directory, { platform = process.platform } = {}) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const file = join(directory, 'task-board.sqlite');
     this.db = new DatabaseSync(file);
@@ -139,7 +139,7 @@ export class TaskStore {
         PRAGMA user_version=5;
         COMMIT;
       `);
-      this.automation = new AutomationStore(this);
+      this.automation = new AutomationStore(this, { platform });
     } catch (error) {
       this.db.close();
       throw error;
@@ -297,6 +297,7 @@ export class TaskStore {
   startAutomation(input) { return this.automation.start(input); }
   reconcileAutomation(input) { return this.automation.reconcile(input, groupAlive); }
   create(input) {
+    if (input.automation) this.automation.assertPlatform();
     const id = randomUUID(), at = now();
     this.db.prepare('INSERT INTO tasks(id,title,description,owner,refs,metadata,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)')
       .run(id, input.title, input.description, input.owner, JSON.stringify(input.references || []), JSON.stringify(input.metadata || {}), at, at);

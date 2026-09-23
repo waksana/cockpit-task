@@ -6,6 +6,12 @@ import { TaskError, scriptSchema } from './contracts.js';
 export const LOG_LIMIT = 65536;
 const now = () => new Date().toISOString();
 const fail = (code, message) => { throw new TaskError(code, message); };
+// The single platform gate: registration, creation, start and group probes all depend on Linux process groups.
+export function assertAutomationPlatform(platform = process.platform) {
+  if (platform !== 'linux') {
+    fail('AUTOMATION_PLATFORM', `Script automation requires Linux process groups (current platform: ${platform}); run Cockpit on Linux or WSL2. Agent Tasks and reads are unaffected`);
+  }
+}
 export function scriptDigest(path) {
   const stat = statSync(path);
   if (!stat.isFile() || stat.size > 8 * 1024 * 1024) {
@@ -40,7 +46,8 @@ export function scriptArguments(script, parameters) {
 }
 
 export class AutomationStore {
-  constructor(store) { this.store = store; this.db = store.db; }
+  constructor(store, { platform = process.platform } = {}) { this.store = store; this.db = store.db; this.platform = platform; }
+  assertPlatform() { assertAutomationPlatform(this.platform); }
   run(taskId, { includeLog = true } = {}) {
     const row = this.db.prepare(includeLog ? 'SELECT * FROM automation_runs WHERE task_id=?'
       : `SELECT run_id,task_id,script_id,script,parameters,state,revision,queued_at,started_at,finished_at,
@@ -71,6 +78,7 @@ export class AutomationStore {
     }));
   }
   register(input) {
+    this.assertPlatform();
     if (this.db.prepare('SELECT 1 FROM scripts WHERE script_id=?').get(input.script_id)) {
       fail('SCRIPT_EXISTS', 'Registrations are immutable; use a new script_id for a new version');
     }
@@ -90,6 +98,7 @@ export class AutomationStore {
     return { result: this.script({ script_id: script.script_id }) };
   }
   create(taskId, input) {
+    this.assertPlatform();
     const script = this.script({ script_id: input.script_id });
     scriptArguments(script, input.parameters);
     this.db.prepare("UPDATE tasks SET kind='automation' WHERE id=?").run(taskId);
@@ -97,7 +106,7 @@ export class AutomationStore {
       .run(randomUUID(), taskId, input.script_id, JSON.stringify(script), JSON.stringify(input.parameters));
   }
   start(input) {
-    if (process.platform !== 'linux') fail('AUTOMATION_PLATFORM', 'Automation currently requires Linux process groups');
+    this.assertPlatform();
     const task = this.store.row(input.task_id), run = this.run(task.id);
     this.store.checkContext(task, input, true);
     this.store.currentRevision(task, input);

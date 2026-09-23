@@ -6,6 +6,11 @@ repeatable local script. This is not arbitrary task-to-script conversion, a
 workflow/dependency engine, a scheduler, or permission to invent child Tasks.
 Registration, Task creation, optional subscription and execution are separate.
 
+Script automation is available only on Linux (including WSL2). On other platforms
+`task_script_register`, `task_create` with `automation` and `task_automation_start`
+fail with `AUTOMATION_PLATFORM` and store nothing; reads, existing records and
+ordinary Agent Tasks are unaffected.
+
 ## Explicit script flow
 
 1. Discover via `task_script_read`; inspect the complete registration and execution
