@@ -114,7 +114,7 @@ split a complete outcome or add an approval gate to justify a wait.
 Owner may explicitly subscribe to specified Task states only for that necessary
 follow-up. Choose the fewest target states that enable it; withdraw a still-waiting
 subscription if the follow-up is no longer needed. For authorized "do B after A" work, create B at once as an unassigned Task with `blocked_by`
-and a complete description instead of subscribing; private notes never wake you. On its `event=ready` or `event=blocker_cancelled` card, reassess before dispatching or revising B ([dependencies](references/task-writes-and-recovery.md#task-dependencies-blocked_by)).
+and a complete description instead of subscribing; private notes never wake you. On its `event=ready` or `event=blocker_cancelled` card, reassess before dispatching or revising B; an undecided follow-up may be a pending-decision planning Task, discussed with the user before rewrite or cancel ([dependencies](references/task-writes-and-recovery.md#task-dependencies-blocked_by)).
 The first real matching transition ends the subscription; already matching at registration means failure, not an immediate notice.
 On `[Task status updated](task:<uuid>?event=status_changed)`, read only necessary
 latest content in one bounded call where possible and reassess the planned follow-up;

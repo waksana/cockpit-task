@@ -478,6 +478,7 @@ test('subscription guidance requires necessary Owner follow-up without gating Ex
   assert.match(owner, /withdraw a still-waiting subscription if the follow-up is no longer needed/);
   assert.match(owner, /create B at once as an unassigned Task with `blocked_by` and a complete description instead of subscribing; private notes never wake you/);
   assert.match(owner, /`event=ready` or `event=blocker_cancelled` card, reassess before dispatching or revising B/);
+  assert.match(owner, /undecided follow-up may be a pending-decision planning Task, discussed with the user before rewrite or cancel/);
   assert.match(owner, /`blocked_by` readiness gates, not child Tasks, workflow engines/);
   assert.match(owner, /act only if it is still needed and authorized/);
   const ownerPrompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
@@ -506,6 +507,9 @@ test('subscription guidance requires necessary Owner follow-up without gating Ex
     assert.match(writes, /sends one `\[Task ready\]\(task:<uuid>\?event=ready\)` card for the dependent to its Owner/);
     assert.match(writes, /When a blocker is cancelled, it sends one `\[Task blocker cancelled\]\(task:<uuid>\?event=blocker_cancelled\)`/);
     assert.match(writes, /There is no polling, automatic assignment, reminder or child-Task workflow/);
+    assert.match(writes, /unassigned planning Task `blocked_by` its prerequisites/);
+    assert.match(writes, /pending decision \(what must be discussed, candidate items, links\) and must not be dispatched as-is/);
+    assert.match(writes, /cancel it with the user's decision as the reason\. This is guidance only: no new status, kind or tool/);
   }
 });
 

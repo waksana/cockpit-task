@@ -225,6 +225,14 @@ shows readiness; add groups only as the decision needs), reassess whether B is s
 needed and authorized, then dispatch or revise it. Inspect delivery with
 `task_read(view=dependency_notices)`; the same no-blind-resend rules as subscriptions apply.
 
+Follow-up recognized but not yet decided with the user may also be recorded as an
+unassigned planning Task `blocked_by` its prerequisites. Its description states plainly
+that it is a pending decision (what must be discussed, candidate items, links) and must
+not be dispatched as-is. On its ready card, discuss with the user, then either rewrite it
+into complete agreed requirements (splitting into further Tasks if needed) and dispatch,
+or cancel it with the user's decision as the reason. This is guidance only: no new
+status, kind or tool.
+
 ## One-shot status subscriptions
 
 Default to no subscription. Owner registers only when a future state enables a

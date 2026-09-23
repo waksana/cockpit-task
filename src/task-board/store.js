@@ -389,7 +389,8 @@ export class TaskStore {
     const metadataChanged = (input.title !== undefined && input.title !== row.title)
       || canonical(JSON.parse(references)) !== canonical(JSON.parse(row.refs))
       || canonical(JSON.parse(metadata)) !== canonical(JSON.parse(row.metadata)) || blockersChanged;
-    if (!descriptionChanged && !metadataChanged) return { result: this.effects(row, 'unchanged') };
+    const dependencyResult = input.blocked_by !== undefined ? { blockers_changed: blockersChanged, ...this.dependencies(row.id) } : {};
+    if (!descriptionChanged && !metadataChanged) return { result: { ...this.effects(row, 'unchanged'), ...dependencyResult } };
     const revision = row.revision + Number(descriptionChanged);
     this.db.prepare('UPDATE tasks SET title=?,description=?,refs=?,metadata=?,revision=?,editable=editable+?,updated_at=? WHERE id=?')
       .run(input.title ?? row.title, input.description ?? row.description, references, metadata, revision, Number(metadataChanged), at, row.id);
@@ -400,7 +401,7 @@ export class TaskStore {
     return {
       result: {
         ...this.effects(this.row(row.id)), description_changed: descriptionChanged, metadata_changed: metadataChanged,
-        ...(input.blocked_by !== undefined ? { blockers_changed: blockersChanged, ...this.dependencies(row.id) } : {}),
+        ...dependencyResult,
       },
     };
   }

@@ -107,6 +107,9 @@ test('edit replaces the set, bumps only the materials context and locks once dis
   assert.notEqual(after.write_context, before.write_context);
   const unchanged = await f.edit(d.task_id, { blocked_by: [b.task_id, a.task_id] });
   assert.equal(unchanged.result.status, 'unchanged');
+  assert.equal(unchanged.result.blockers_changed, false);
+  assert.deepEqual(ids(unchanged.result), [a.task_id, b.task_id]);
+  assert.equal(typeof unchanged.result.ready, 'boolean');
   const removed = await f.edit(d.task_id, { blocked_by: [b.task_id] });
   assert.deepEqual(ids(removed.result), [b.task_id]);
   const cleared = await f.edit(d.task_id, { blocked_by: [] });

@@ -333,6 +333,12 @@ edits never notify. Owner reassesses on the card, then dispatches, revises
 records with the same recovery semantics as subscriptions. There is no polling,
 automatic assignment or workflow engine.
 
+Owner may also record recognized but undecided follow-up as an unassigned planning
+Task blocked by its prerequisites, plainly marked as a pending decision that must not
+be dispatched as-is. On ready, Owner discusses it with the user, then rewrites it into
+complete agreed requirements and dispatches, or cancels it with the user's decision.
+This is Owner guidance only: no new status, kind or tool.
+
 ## Module API and packaging
 
 Relative to the host's protected, version-bound module API base:
