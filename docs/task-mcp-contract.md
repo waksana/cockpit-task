@@ -105,7 +105,7 @@ Executor 开始、恢复及执行要求同步仍读完整 `execution`，不能�
 
 | `view` | 其他输入 | 返回内容 |
 | --- | --- | --- |
-| `list` | `owner?`、`executor?`、`status?`、`query?`、`limit?`、`cursor?` | 按显式筛选的轻量任务摘要页；不含完整说明、资料和历史 |
+| `list` | `owner?`、`executor?`、`parent_task_id?`、`status?`、`query?`、`limit?`、`cursor?` | 按显式筛选的轻量任务摘要页；不含完整说明、资料和历史 |
 | `overview` | `task_id`、`include?` | 省略 include 保持原摘要；提供时只返回当前上下文和所选完整内容组，见下文 |
 | `execution` | `task_id` | Executor 默认视图：标题、归属、状态、完整当前 description、revision / ack、当前 references / metadata、write_context；不夹带活动、修订或成果历史 |
 | `definition` | `task_id` | 双方按需读取完整当前 description、revision、资料和 write_context；Owner 修订前使用 |
@@ -229,6 +229,7 @@ blocker 必须存在、与本 Task 同一 Owner、不是自身、不是已取消
 `BLOCKER_CANCELLED`、`DEPENDENCY_CYCLE`）。读取 context 返回
 `blocked_by:[{task_id,status}]` 与 `ready`（全部 blocker done 或无 blocker 时为 true）。
 未就绪时 `task_assign` 与 `task_automation_start` 返回 `TASK_NOT_READY`，没有覆盖参数。
+`task_create` 的 `owner` 若正在执行未完成的 Agent Task，服务自动记录其为新 Task 的 `parent_task_id`，`depth` 为父级加一（顶层为 1）；父 Task 已在第 3 层时返回 `DELEGATION_DEPTH_EXCEEDED` 且不保存。context 返回 `parent_task_id` 与 `depth`；`list` 可用 `parent_task_id` 读取直接子 Task。谱系不影响就绪。
 就绪不改变状态、不指派、不启动。仍待派发（todo、无 Executor；automation 尚未启动）的依赖方在
 最后一个 blocker 真实转入 done 时，系统向其 Owner 发送一次 `[Task ready](task:<uuid>?event=ready)`；
 blocker 被取消时发送一次 `[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)`。
@@ -296,8 +297,8 @@ session、装配 Task 指导与工具并显式检查能力。不要求 Owner 手
 完整输入：`actor_session_id, request_id, cwd, skills?, mcp_servers?`。
 可选资源选择见下节；不接受 `work_skills`、任意角色或宿主配置透传。
 Executor 角色仍通过既有 skillDirectories 发现协作 Skill 及共享 `github-coding`。
-模块调用 `session/new`，输入仍为
-`{cwd,roles:[{moduleId:"cockpit-task",roleId:"executor"}]}`。
+模块调用 `session/new`，输入为
+`{cwd,roles:[{moduleId:"cockpit-task",roleId:"owner"},{moduleId:"cockpit-task",roleId:"executor"}]}`，使新 session 可交付自己的 Task，也可为其委派子 Task；就绪检查仍针对 Executor 能力。
 省略两个资源字段时保留原创建行为和回执，即使宿主没有新的准备能力也不受影响。
 显式提供任一字段（包括空数组）则请求资源准备：在创建前检查宿主支持标记，
 创建后走与 `task_session_prepare` 相同的准备路径，再检查最终 Executor 能力及空闲状态。
@@ -696,6 +697,7 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 | `ASSIGNMENT_CONFLICT` | 已有绑定与本次首次指派冲突，不能换人覆盖；不是按调用者归属拒绝 |
 | `TASK_STATE_CONFLICT` | 读取当前生命周期状态，不用普通报告恢复已结束任务 |
 | `EXECUTOR_OCCUPIED` | 由 Owner 选择其他安排，不抢占或自动新建 |
+| `DELEGATION_DEPTH_EXCEEDED` | Owner 正执行的父 Task 已达 3 层委派上限，未保存；直接交付本层或询问用户如何重构 |
 | `TASK_NOT_READY` | `blocked_by` 尚有未 done 的 blocker；等待 ready 通知或修订 blocker，不绕过 |
 | `DEPENDENCY_LOCKED` / `DEPENDENCY_SELF` / `DEPENDENCY_CYCLE` | 已派发后不能改 blocker，或 blocker 为自身/成环 |
 | `BLOCKER_NOT_FOUND` / `BLOCKER_OWNER_MISMATCH` / `BLOCKER_CANCELLED` | 新增 blocker 不存在、Owner 不同或已取消 |

@@ -8,17 +8,18 @@ or an actual assignment as a capable Executor; dual-role selection alone is neit
 Unavailable delegation blocks. Coding Executors get cwd at a target repository's
 main checkout and set up/clean up their own worktree (`github-coding`).
 
-Agent default; trusted scripts follow automation reference. No fake Executors/retries.
+Roles are per Task; delegate from assignments only by scope (Skill).
 
-User-authorized done Agent rework: prefer eligible original-Executor `task_reopen`, not replacement.
+Agent default; trusted scripts: automation reference. No fake Executors/retries.
+User-authorized rework: prefer eligible original-Executor `task_reopen`.
 
 Coordinate through Task, not chats with Executor. Default to no subscription;
 register only when a future status unlocks necessary authorized Owner work. An explicit
 one-shot status subscription permits a system notice to Task's Owner.
 Read only needed latest content on receipt, in one bounded call where possible.
-No automatic resubscription or acceptance. Executors ask users directly, without Owner relay.
-Read Task on demand; do not monitor or schedule reminders.
+No automatic resubscription or acceptance. Executors ask users directly, without Owner relay;
+do not monitor or schedule reminders.
 
 Load `cockpit-task-owner` when first needed. Reuse its guidance; reload only when
-missing, changed or a rule is unclear, not for each new message or ordinary chat.
+missing, changed or a rule is unclear, not for each new message.
 Stable Skill reuse never replaces fresh Task reads or precise Executor ACK.

@@ -56,7 +56,7 @@ test('official MCP tools/list publishes all Task read selectors and a required v
   assert.equal(schema.additionalProperties, false);
   assert.deepEqual(schema.required, ['view']);
   assert.deepEqual(Object.keys(schema.properties).sort(), [
-    'actor_session_id', 'cursor', 'executor', 'include', 'limit', 'offset', 'owner', 'query',
+    'actor_session_id', 'cursor', 'executor', 'include', 'limit', 'offset', 'owner', 'parent_task_id', 'query',
     'request_id', 'revision', 'status', 'task_id', 'view',
   ].sort());
   assert.deepEqual(schema.properties.view.enum, [

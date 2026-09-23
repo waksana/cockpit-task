@@ -28,6 +28,14 @@ per pair, no self-edge, indexed by blocker, and `dependency_notices` with
 `blocker_cancelled`, plus the same pending/unknown/accepted delivery columns as
 subscriptions. The v5→v6 migration only creates these tables; installed 0.1.12
 opens schema v6, but installed 0.1.11 cannot. Schema v6 is roll-forward only.
+On `experiment/hierarchical-delegation` (#66), schema v7 adds nullable
+`tasks.parent_task_id REFERENCES tasks(id)` and `tasks.depth INTEGER NOT NULL DEFAULT 1`
+(`CHECK(depth>=1)`, indexed by parent). The v6→v7 migration only adds absent columns,
+so existing Tasks become top-level; installed 0.1.12 cannot open v7. `task_create`
+looks up the Owner's unfinished Agent Task where it is Executor in the same write
+transaction; that Task becomes the parent and `depth` is its depth plus one, rejected
+with `DELEGATION_DEPTH_EXCEEDED` beyond 3 levels before any row is saved. Lineage is
+immutable and changes no readiness, notice, assignment or authority rule.
 Blocker sets are validated in the write transaction: at most
 20 unique ids, existing same-Owner Tasks, no self or newly added cancelled blocker,
 and no cycle (recursive CTE). Edits are allowed only while the dependent awaits

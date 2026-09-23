@@ -43,6 +43,11 @@ export function dependencyLabel(blockedBy, ready) {
   return `${count} · ${done} done${cancelled ? ` · ${cancelled} cancelled (Owner decision needed)` : ''} · not ready`;
 }
 
+export function delegationLabel(parentTaskId, depth) {
+  if (typeof parentTaskId !== 'string' || !parentTaskId) return null;
+  return `Child Task · delegation level ${Number.isSafeInteger(depth) ? depth : 'unknown'}`;
+}
+
 export function formatTimestamp(value) {
   if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) return 'Time unavailable';
   return new Date(value).toISOString().replace('T', ' ').replace('.000Z', ' UTC').replace('Z', ' UTC');
@@ -71,7 +76,14 @@ function validResult(input, data) {
   const automation = (value) => object(value) && text(value.run_id) && text(value.script_id) && text(value.state);
   const dependencies = (value) => value.blocked_by === undefined || (Array.isArray(value.blocked_by) &&
     value.blocked_by.every((entry) => object(entry) && text(entry.task_id) && text(entry.status)) && typeof value.ready === 'boolean');
+  const lineage = (value) => (value.parent_task_id === undefined || value.parent_task_id === null || text(value.parent_task_id)) &&
+    (value.depth === undefined || (Number.isSafeInteger(value.depth) && value.depth > 0));
   if (!object(data)) return false;
+  if (input.view === 'list') {
+    return Array.isArray(data.items) && (data.next_cursor === null || (text(data.next_cursor) && data.next_cursor.length > 0)) &&
+      data.items.every((item) => object(item) && text(item.task_id) && text(item.title) && text(item.status) && lineage(item) &&
+        (input.parent_task_id === undefined || item.parent_task_id === input.parent_task_id));
+  }
   if (input.view === 'automation_log') {
     return data.task_id === input.task_id && text(data.run_id) && nonnegative(data.offset) &&
       data.offset === (input.offset ?? 0) && text(data.text) && data.text.length <= (input.limit ?? 4096) &&
@@ -83,7 +95,7 @@ function validResult(input, data) {
         !(data.executor === null || text(data.executor)) || !text(data.status) ||
         !revision(data.revision) || !(data.acknowledged_revision === null || revision(data.acknowledged_revision))) return false;
     if (data.kind !== undefined && !['agent', 'automation'].includes(data.kind)) return false;
-    if (!dependencies(data)) return false;
+    if (!dependencies(data) || !lineage(data)) return false;
     if (!retro(data.retro, input.view === 'execution')) return false;
     if (data.kind === 'automation') {
       if (data.executor !== null || data.acknowledged_revision !== null ||
@@ -329,7 +341,35 @@ export function activate(context) {
         h('dt', null, 'Blocked by'),
         h('dd', null, dependency, h('ul', { className: 'tb-references' }, task.blocked_by.map((entry) =>
           h('li', { key: entry.task_id }, `${entry.task_id} · ${statusLabel(entry.status)}`))))) : null,
+      task.parent_task_id ? h(React.Fragment, null,
+        h('dt', null, 'Parent Task'),
+        h('dd', null, delegationLabel(task.parent_task_id, task.depth), h(LazyTask, { taskId: task.parent_task_id }))) : null,
     );
+  }
+
+  function LazyTask({ taskId }) {
+    const [open, setOpen] = useState(false);
+    return h('details', { onToggle: event => setOpen(event.currentTarget.open) },
+      h('summary', null, taskId),
+      open ? h(Card, { taskId }) : null);
+  }
+
+  function ChildTaskList({ taskId }) {
+    const state = useRead({ view: 'list', parent_task_id: taskId, status: 'all', limit: 50 });
+    return h(ReadState, { state, subject: 'child Tasks' }, (page) => page.items.length
+      ? h(React.Fragment, null,
+        h('ul', { className: 'tb-references' }, page.items.map((child) =>
+          h('li', { key: child.task_id }, h(LazyTask, { taskId: child.task_id }),
+            h('span', { className: 'ck-text-secondary' }, `${child.title} · ${statusLabel(child.status)} · Executor: ${child.executor ?? 'Unassigned'}`)))),
+        page.next_cursor ? h('p', { className: 'ck-text-secondary' }, 'Showing the 50 newest child Tasks.') : null)
+      : h('p', null, 'No child Tasks recorded.'));
+  }
+
+  function ChildTasks({ taskId }) {
+    const [open, setOpen] = useState(false);
+    return h('details', { onToggle: event => setOpen(event.currentTarget.open) },
+      h('summary', null, 'Child Tasks delegated from this Task'),
+      open ? h(ChildTaskList, { taskId }) : null);
   }
 
   function Retro({ retro }) {
@@ -392,6 +432,7 @@ export function activate(context) {
       h('h3', null, 'Metadata'),
       h('pre', { className: 'tb-preserve tb-metadata' }, JSON.stringify(task.metadata, null, 2)),
       h(Retro, { retro: task.retro }),
+      task.kind === 'automation' ? null : h(ChildTasks, { taskId: task.id }),
     );
   }
 
@@ -564,6 +605,7 @@ export function activate(context) {
         'Dependency notice to Owner · not assigned or started · current state shown below') : null,
       h('span', { className: 'tb-card-title' }, summary),
       task && dependencyLabel(task.blocked_by, task.ready) ? h('span', { className: 'tb-card-meta' }, dependencyLabel(task.blocked_by, task.ready)) : null,
+      task && delegationLabel(task.parent_task_id, task.depth) ? h('span', { className: 'tb-card-meta' }, delegationLabel(task.parent_task_id, task.depth)) : null,
       task ? h(React.Fragment, null,
         task.kind === 'automation' ? h(React.Fragment, null,
           h('span', { className: 'tb-automation-badge' }, 'Automation'),

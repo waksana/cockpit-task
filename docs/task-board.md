@@ -11,6 +11,11 @@ creates new tables. Schema v6 is roll-forward only: installed 0.1.11 cannot open
 v6 data, and switching back to an older package is not a database rollback.
 Validate migration on an isolated consistent copy before authorized deployment;
 never overwrite live data with a historical backup.
+The long-lived `experiment/hierarchical-delegation` branch (#66) adds per-Task
+hierarchical delegation and schema v7 (nullable `tasks.parent_task_id`, `tasks.depth`)
+through a column-only forward migration; existing Tasks stay top-level. Schema v7 is
+roll-forward only: installed 0.1.12 cannot open v7 data. The branch has no version
+bump or deployment and must stay cleanly mergeable into main.
 
 Version 0.1.11 added Owner sequential subscription follow-up (#53) and Executor
 session titles (#55) to 0.1.10 without a schema migration. Version 0.1.10
@@ -65,8 +70,15 @@ For coding, Owner states requirements and references any existing Issue; it does
 not prepare or clean up branches/worktrees and does not implement code.
 
 One session can execute at most one unfinished Task, then be reused after
-completion/cancellation. Tasks are flat references: no child Tasks, workflow
-engine or reassignment; `blocked_by` is only a readiness gate. Only the original Executor may self-reopen an eligible
+completion/cancellation. Roles are per Task: a session is Executor for its own
+assignment and Owner for child Tasks it creates for it. `task_create` by an Owner that
+is executing an unfinished Agent Task records `parent_task_id` and `depth`
+(top-level = 1, capped at 3; deeper creation fails with `DELEGATION_DEPTH_EXCEEDED`).
+A child must be more specific than its parent, never passed down unchanged and within
+the parent's authorized scope; the parent integrates child results before done.
+`task_session_create` gives new sessions both roles. The board shows the delegation
+level, a lazy parent link and a lazy child list. There is no workflow engine or
+reassignment; `blocked_by` is only a readiness gate and lineage does not gate readiness. Only the original Executor may self-reopen an eligible
 done Agent Task for explicitly user-authorized rework; cancelled and automation
 Tasks never reopen. Review is optional unless the Task's
 requirements demand it; Executor can complete without a default Owner approval gate.

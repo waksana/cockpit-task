@@ -109,7 +109,7 @@ Host API 使用 camelCase，Task MCP 使用 snake_case。Task adapter 仅依赖�
 
 | 调用 | 输入/结果 |
 | --- | --- |
-| `session/new` | `{cwd,roles:[{moduleId:"cockpit-task",roleId:"executor"}]}` → `{sessionId}` |
+| `session/new` | `{cwd,roles:[{moduleId:"cockpit-task",roleId:"owner"},{moduleId:"cockpit-task",roleId:"executor"}]}` → `{sessionId}` |
 | `session/get` | `{sessionId}` → `{meta}`；未知 session 为 `meta:null` |
 | `session/resources-prepare` | `{sessionId,skills?,mcpServers?:[{name,tools?}]}` → `{sessionId,ok,skills,mcpServers,tools,error?}`；严格验证、分步回执 |
 | `roles/readiness` | `{sessionId,roles:[{moduleId:"cockpit-task",roleId:"executor"}]}` → 含 `sessionId,loaded,ready,roles,reasons` 的显式检查结果 |

@@ -54,6 +54,7 @@ cancelled / automation 不恢复执行。Owner / Executor 字段记录
 | `references` | `{label,target}` 数组；资料、成果或独立 Task 引用，不形成依赖 |
 | `blocked_by` | 最多 20 个同一 Owner 的 blocker Task UUID（schema v6 `task_dependencies`）；全部 done 前 `ready=false`，指派/启动返回 `TASK_NOT_READY`；仅待派发（todo、无 Executor、automation 未启动）时可整组替换，改变 `editable` 而非 revision；拒绝自身、环和新增已取消 blocker |
 | `dependency_notices` | schema v6 就绪/blocker 取消通知及投递证据，按依赖方、类型、blocker 与其生命周期唯一 |
+| `parent_task_id` / `depth` | schema v7 委派谱系：Owner 正执行未完成 Agent Task 时创建即记录其为父 Task，`depth` 为父级加一；顶层为 `null` / 1，最多 3 层（`DELEGATION_DEPTH_EXCEEDED`）；创建后不变，不影响就绪、通知、指派或权限 |
 | `metadata` | 有界纯 JSON 对象，供补充工作资料；不作为凭据、不覆盖固定字段或触发工作 |
 | 取消记录 | 取消原因、作者、时间；独立于 description changelog 和 Executor activity |
 | `task_assignments` | schema v5 后首次指派的持久单调序号与 Task/Executor/作者/时间；不从时间戳推断顺序，不回填升级前指派 |
@@ -150,6 +151,13 @@ schema v6 只能向前滚动，已安装的 `0.1.11` 不能打开 v6。blocker �
 依赖方写入通知：全部 blocker done 时 `ready`，blocker 取消时 `blocker_cancelled`，
 发给依赖方 Owner。就绪不改变状态、不指派、不启动；Owner 编辑从不发通知。
 blocker 重开后再次 done 属于新生命周期，可再次通知。
+
+### 层级委派与 schema v7
+
+schema v7（`experiment/hierarchical-delegation`，#66）仅在缺失时新增 `tasks.parent_task_id`
+与 `tasks.depth` 列，既有 Task 均为顶层；只能向前滚动，已安装的 `0.1.12` 不能打开 v7。
+角色按 Task 区分：session 对自己的指派是 Executor，对为其创建的子 Task 是 Owner。
+子 Task 必须比父 Task 更具体，不得原样下传，且在父 Task 已授权范围内；父 Task 完成前整合子结果。
 
 ### 原 Executor 自助返工与 schema v5
 

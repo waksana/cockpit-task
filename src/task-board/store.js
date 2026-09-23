@@ -38,7 +38,7 @@ export class TaskStore {
     try {
       chmodSync(file, 0o600);
       const version = this.db.prepare('PRAGMA user_version').get().user_version;
-      if (version > 6) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
+      if (version > 7) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
       this.db.exec(`
       PRAGMA journal_mode=WAL;
       PRAGMA synchronous=FULL;
@@ -159,7 +159,14 @@ export class TaskStore {
         );
         CREATE INDEX IF NOT EXISTS dependency_notices_task ON dependency_notices(task_id,seq);
         CREATE INDEX IF NOT EXISTS dependency_notices_pending ON dependency_notices(seq) WHERE delivery_status='pending';
-        PRAGMA user_version=6;
+      `);
+      // Schema v7 records delegation lineage. Existing Tasks stay top-level; nothing is inferred retroactively.
+      const taskColumns = new Set(this.db.prepare('PRAGMA table_info(tasks)').all().map(column => column.name));
+      if (!taskColumns.has('parent_task_id')) this.db.exec('ALTER TABLE tasks ADD COLUMN parent_task_id TEXT REFERENCES tasks(id)');
+      if (!taskColumns.has('depth')) this.db.exec('ALTER TABLE tasks ADD COLUMN depth INTEGER NOT NULL DEFAULT 1 CHECK(depth >= 1)');
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_task_id,seq) WHERE parent_task_id IS NOT NULL;
+        PRAGMA user_version=7;
         COMMIT;
       `);
       this.automation = new AutomationStore(this, { platform });
@@ -202,8 +209,18 @@ export class TaskStore {
       id: row.id, task_id: row.id, title: row.title, owner: row.owner, executor: row.executor,
       status: row.status, revision: row.revision, acknowledged_revision: row.acknowledged_revision,
       created_at: row.created_at, updated_at: row.updated_at, write_context: this.context(row),
-      kind: row.kind, ...this.dependencies(row.id),
+      kind: row.kind, parent_task_id: row.parent_task_id ?? null, depth: row.depth ?? 1,
+      ...this.dependencies(row.id),
     };
+  }
+  delegationParent(owner) {
+    // The creating Owner's own unfinished Agent assignment is the parent; occupancy guarantees at most one.
+    const parent = this.db.prepare("SELECT id,depth FROM tasks WHERE executor=? AND kind='agent' AND status NOT IN ('done','cancelled')").get(owner);
+    if (!parent) return { parent_task_id: null, depth: 1 };
+    if (parent.depth >= LIMITS.delegationDepth) {
+      fail('DELEGATION_DEPTH_EXCEEDED', `Owner is executing Task ${parent.id} at delegation level ${parent.depth}; child Tasks are limited to ${LIMITS.delegationDepth} levels. Deliver this level directly, or ask the user how to restructure the work`);
+    }
+    return { parent_task_id: parent.id, depth: parent.depth + 1 };
   }
   dependencies(taskId) {
     const blocked_by = this.db.prepare(`SELECT d.blocker_id AS task_id, t.status FROM task_dependencies d
@@ -364,8 +381,9 @@ export class TaskStore {
   create(input) {
     if (input.automation) this.automation.assertPlatform();
     const id = randomUUID(), at = now();
-    this.db.prepare('INSERT INTO tasks(id,title,description,owner,refs,metadata,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)')
-      .run(id, input.title, input.description, input.owner, JSON.stringify(input.references || []), JSON.stringify(input.metadata || {}), at, at);
+    const { parent_task_id, depth } = this.delegationParent(input.owner);
+    this.db.prepare('INSERT INTO tasks(id,title,description,owner,refs,metadata,created_at,updated_at,parent_task_id,depth) VALUES(?,?,?,?,?,?,?,?,?,?)')
+      .run(id, input.title, input.description, input.owner, JSON.stringify(input.references || []), JSON.stringify(input.metadata || {}), at, at, parent_task_id, depth);
     this.recordDefinition(this.row(id), 'Initial definition', input.actor_session_id, at);
     if (input.automation) this.automation.create(id, input.automation);
     if (input.blocked_by?.length) this.setBlockers(this.row(id), input.blocked_by, input.actor_session_id, at);
@@ -748,7 +766,7 @@ export class TaskStore {
     // Explicit projections keep unrequested bodies out of the read, not just the response.
     const columns = [
       'id', 'title', 'owner', 'executor', 'status', 'revision', 'acknowledged_revision',
-      'created_at', 'updated_at', 'lifecycle', 'editable', 'kind',
+      'created_at', 'updated_at', 'lifecycle', 'editable', 'kind', 'parent_task_id', 'depth',
       ...(include.has('definition') ? ['description', 'refs', 'metadata'] : []),
       ...(include.has('cancellation') ? ['cancellation'] : []),
     ];
@@ -821,10 +839,11 @@ export class TaskStore {
     if (input.include) return this.transaction(() => this.selected(input), { readOnly: true });
     if (input.view === 'operation') return this.operation(input.request_id);
     if (input.view === 'list') {
-      const { owner, executor, query, status = 'unfinished' } = input;
-      const scope = hash({ view: 'list', owner: owner ?? null, executor: executor ?? null, query: query ?? null, status });
+      const { owner, executor, parent_task_id: parent, query, status = 'unfinished' } = input;
+      const scope = hash({ view: 'list', owner: owner ?? null, executor: executor ?? null, parent: parent?.toLowerCase() ?? null, query: query ?? null, status });
       const clauses = ['seq < ?'], values = [this.cursor(input, scope)];
       if (owner) { clauses.push('owner=?'); values.push(owner); }
+      if (parent) { clauses.push('parent_task_id=?'); values.push(parent.toLowerCase()); }
       if (executor) { clauses.push('executor=?'); values.push(executor); }
       if (status === 'unfinished') clauses.push("status NOT IN ('done','cancelled')");
       else if (status !== 'all') { clauses.push('status=?'); values.push(status); }
