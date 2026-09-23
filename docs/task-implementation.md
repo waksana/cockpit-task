@@ -8,7 +8,7 @@ See the [MCP contract](task-mcp-contract.md) for input/result shapes, the
 ## Module and data
 
 The module ID and MCP server key are `cockpit-task`, display name Task, version
-`0.1.9` (source preparation; no deployment implied). Its manifest is [cockpit.module.json](../cockpit.module.json).
+`0.1.10` (source preparation; no deployment implied). Its manifest is [cockpit.module.json](../cockpit.module.json).
 `src/task-board/`, `web/task-board/` and the database filename `task-board.sqlite`
 are current internal paths. Task runs inside Cockpit, not a standalone service.
 
@@ -30,6 +30,9 @@ without assignment records, with no backfill or timestamp-based inference.
 Previously created but still unassigned Tasks acquire a sequence on first binding
 after upgrade. Retain assignment order after completion/cancellation and across
 restart; reopening never records a new assignment or resets this history.
+This is a forward migration: installed 0.1.9 cannot open schema v5, and switching
+back to that package is not a database rollback. Validate an isolated consistent
+copy before authorized deployment; never replace live data with a historical backup.
 
 Schema version 4 added nullable `outcomes.retro TEXT` and
 `outcomes.retro_recorded INTEGER NOT NULL DEFAULT 0` (restricted to 0/1).

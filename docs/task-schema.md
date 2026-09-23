@@ -152,6 +152,8 @@ schema v5 新增 `task_assignments`，每次升级后的首次指派在绑定事
 `seq INTEGER PRIMARY KEY AUTOINCREMENT`、唯一 `task_id`、`executor`、`author`、`at`，
 按 executor/seq 索引。所有升级前已指派 Task 均无追踪记录、均不可重开；
 迁移保留旧记录但不回填序号，不用 created_at/updated_at/指派时间或结果时间重建顺序。
+`0.1.10` 的 schema v5 为前向迁移；已安装的 `0.1.9` 不支持打开新 schema，
+切回旧包不等于数据库回退。部署前在隔离的一致副本上验证，不能用历史备份覆盖实时数据。
 升级前创建但升级后才首次指派的 Task 正常取得序号。重开不是新指派，不另分配序号。
 单调记录与单项未结束唯一约束在事务中重新验证，重启不能重置资格。
 
