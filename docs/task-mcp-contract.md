@@ -113,6 +113,7 @@ Executor 开始、恢复及执行要求同步仍读完整 `execution`，不能�
 | `activity` | `task_id`、`limit?`、`cursor?` | Executor 活动页，每条保留其 revision 和作者 |
 | `outcomes` | `task_id`、`limit?`、`cursor?` | 保留的成果页，区分对应定义版本和执行归属 |
 | `subscriptions` | `task_id`、`limit?`、`cursor?` | 有界订阅历史、匹配状态及投递事实，不扫描 Owner 聊天 |
+| `dependency_notices` | 依赖方 `task_id`、`limit?`、`cursor?` | 该 Task 的 ready / blocker_cancelled 通知及投递事实，分页同 subscriptions |
 | `automation_log` | `task_id`、`offset?`、`limit?` | automation 合并 stdout/stderr 的有界保留页与明确遗漏计数 |
 | `operation` | `request_id` | 某次明确操作的结果，特别是指派步骤 |
 
@@ -212,7 +213,7 @@ UI 可以不提供 actor，不伪造 human session ID；定向读取仍检查该
 
 ### task_create
 
-输入：`actor_session_id, request_id, title, description, owner, references?, metadata?, automation?`。owner 是明确的委派 session 业务标识，不作为授权凭据，不要求新增可信身份服务。
+输入：`actor_session_id, request_id, title, description, owner, references?, metadata?, automation?, blocked_by?`。owner 是明确的委派 session 业务标识，不作为授权凭据，不要求新增可信身份服务。
 
 输出：Task ID、初始状态/版本与 `write_context`，不重复回传输入的完整正文。状态为 todo，executor 和 acknowledged_revision 为 null。description 初始为 v1，保留初始定义记录。
 
@@ -221,6 +222,18 @@ UI 可以不提供 actor，不伪造 human session ID；定向读取仍检查该
 `automation={script_id,parameters}` 选择已登记脚本并保存不可变配置/SHA256/类型化输入快照；
 省略时为 `kind=agent`。创建 automation 也不执行或自动订阅，必须显式 start。
 script_id 与输入此后不能改变，重新执行须新授权和新 Task。
+
+`blocked_by` 为最多 20 个不重复（大小写不敏感）的 blocker Task UUID，用于“A 完成后做 B”：
+blocker 必须存在、与本 Task 同一 Owner、不是自身、不是已取消，且不成环
+（错误：`DEPENDENCY_SELF`、`BLOCKER_NOT_FOUND`、`BLOCKER_OWNER_MISMATCH`、
+`BLOCKER_CANCELLED`、`DEPENDENCY_CYCLE`）。读取 context 返回
+`blocked_by:[{task_id,status}]` 与 `ready`（全部 blocker done 或无 blocker 时为 true）。
+未就绪时 `task_assign` 与 `task_automation_start` 返回 `TASK_NOT_READY`，没有覆盖参数。
+就绪不改变状态、不指派、不启动。仍待派发（todo、无 Executor；automation 尚未启动）的依赖方在
+最后一个 blocker 真实转入 done 时，系统向其 Owner 发送一次 `[Task ready](task:<uuid>?event=ready)`；
+blocker 被取消时发送一次 `[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)`。
+引用指向依赖方。通知按依赖方、类型、blocker 与 blocker 生命周期唯一，重开后再次 done 可再通知；
+Owner 编辑从不发通知。投递与 subscriptions 使用相同证据与恢复规则，触发写入的 result 附 `notice_ids`。
 
 ### task_script_read / task_script_register
 
@@ -478,7 +491,11 @@ observed_at            该次观察完成的 ISO 时间；回执重放不刷新�
 automation 在 queued/starting/running 返回 `AUTOMATION_DEFINITION_LOCKED`；
 脚本与参数快照没有编辑入口，其他可编辑时机也不能修改它们。
 
-输入：共用变更字段，加 `revision, reason, description?, title?, references?, metadata?`；至少提供一个实际要修改的字段。
+输入：共用变更字段，加 `revision, reason, description?, title?, references?, metadata?, blocked_by?`；至少提供一个实际要修改的字段。
+
+`blocked_by` 整组替换，仅在依赖方仍待派发时允许，否则返回 `DEPENDENCY_LOCKED`；只校验新增 blocker，
+已保留的已取消 blocker 可保留。改变 blocker 属于资料编辑：递增 editable，不产生 description revision，也不发通知；
+结果附 `blockers_changed`、`blocked_by` 与 `ready`。
 
 description 如提供，必须是完整的新定义，不是让执行者自行拼接的增量文字。实际正文改变时，原子写入 description、新 revision 和一条 changelog。相同正文不制造虚假修订，也不借无变化的编辑隐式 ACK。
 
@@ -679,6 +696,9 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 | `ASSIGNMENT_CONFLICT` | 已有绑定与本次首次指派冲突，不能换人覆盖；不是按调用者归属拒绝 |
 | `TASK_STATE_CONFLICT` | 读取当前生命周期状态，不用普通报告恢复已结束任务 |
 | `EXECUTOR_OCCUPIED` | 由 Owner 选择其他安排，不抢占或自动新建 |
+| `TASK_NOT_READY` | `blocked_by` 尚有未 done 的 blocker；等待 ready 通知或修订 blocker，不绕过 |
+| `DEPENDENCY_LOCKED` / `DEPENDENCY_SELF` / `DEPENDENCY_CYCLE` | 已派发后不能改 blocker，或 blocker 为自身/成环 |
+| `BLOCKER_NOT_FOUND` / `BLOCKER_OWNER_MISMATCH` / `BLOCKER_CANCELLED` | 新增 blocker 不存在、Owner 不同或已取消 |
 | `REOPEN_NOT_ELIGIBLE` | 无 schema v5 后的指派追踪或已发生后续指派；不能回填历史或自动建替代环境绕过 |
 | `EXECUTOR_MISMATCH` | 重开自报 actor 不等于原 Executor；不能冒用其 ID，这不是身份认证 |
 | `CAPABILITY_UNAVAILABLE` | 能力未就绪，不宣称指派完成 |
@@ -712,7 +732,7 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 
 以下为调用顺序，省略的共用字段仍为实际输入必填。通用引用仍为 `[Task](task:<uuid>)`，例如 `[Task](task:de33dc0a-2f93-4c5a-b14e-87111940d520)`。整条首次派单消息则为 `[Task assigned to you](task:<uuid>?event=assigned)`，不附 description。
 
-只有小写 `assigned` / `updated` / `status_changed` 是有效 event。消息原因固定不变，卡片仍读取最新
+只有小写 `assigned` / `updated` / `status_changed` / `ready` / `blocker_cancelled` 是有效 event。消息原因固定不变，卡片仍读取最新
 Task；renderer 只看 URL 中的显式 event，不从 label 或 Task status 推断。
 通用引用及历史消息不显示事件标题，保持兼容；未知 event、畸形 query 不认领，
 不能丢弃 query 后冒充通用引用。不使用可能被识别为文件的相对 `task/<id>` 路径。

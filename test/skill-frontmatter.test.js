@@ -418,7 +418,12 @@ test('explicit one-shot subscriptions preserve silent defaults, role boundaries 
     assert.match(links, /System notice to Task's Owner after an explicit status subscription matches/);
     assert.match(links, /not an Executor instruction or a request to ACK a notification/);
     assert.match(links, /distinct from `updated`, which asks Executor to read and ACK the current definition/);
-    assert.match(links, /Only lowercase `assigned`, `updated` and `status_changed`/);
+    assert.match(links, /Only lowercase `assigned`, `updated`, `status_changed`, `ready` and `blocker_cancelled`/);
+    assert.ok(links.includes('[Task ready](task:<uuid>?event=ready)'));
+    assert.ok(links.includes('[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)'));
+    assert.match(links, /They point to the dependent, not the blocker; nothing was assigned or started/);
+    assert.match(reading, /`dependency_notices` with the dependent's `task_id`/);
+    assert.match(reading, /`blocked_by`, `ready`/);
     assert.match(links, /A link alone neither creates a subscription nor authorizes editing or scheduling/);
   }
   const handoff = prose(readFileSync(join(root, skillDirectory('owner'), 'references/important-updates.md'), 'utf8'));
@@ -471,7 +476,10 @@ test('subscription guidance requires necessary Owner follow-up without gating Ex
   assert.match(owner, /Do not invent follow-up work, split a complete outcome or add an approval gate/);
   assert.match(owner, /Choose the fewest target states that enable it/);
   assert.match(owner, /withdraw a still-waiting subscription if the follow-up is no longer needed/);
-  assert.match(owner, /subscribe to each unfinished prerequisite's `done` before assigning or starting it; private notes never wake you/);
+  assert.match(owner, /create B at once as an unassigned Task with `blocked_by` and a complete description instead of subscribing; private notes never wake you/);
+  assert.match(owner, /`event=ready` or `event=blocker_cancelled` card, reassess before dispatching or revising B/);
+  assert.match(owner, /undecided follow-up may be a pending-decision planning Task, discussed with the user before rewrite or cancel/);
+  assert.match(owner, /`blocked_by` readiness gates, not child Tasks, workflow engines/);
   assert.match(owner, /act only if it is still needed and authorized/);
   const ownerPrompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
   assert.match(ownerPrompt, /Default to no subscription; register only when a future status unlocks necessary authorized Owner work/);
@@ -490,12 +498,18 @@ test('subscription guidance requires necessary Owner follow-up without gating Ex
     assert.match(writes, /Owner judges this need without asking the user to name or approve the subscription/);
     assert.match(writes, /If that action is no longer needed, withdraw the still-waiting subscription/);
     assert.match(writes, /Executor's authorized work never waits for Owner to subscribe or read a notice/);
-    assert.match(writes, /subscribe to A's `done` after creating A and before `task_assign` or `task_automation_start`, not afterwards/);
-    assert.match(writes, /subscribe to `done` on each unfinished prerequisite; one already done needs no subscription/);
-    assert.match(writes, /if one is already waiting, withdraw it and register one covering both needs/);
-    assert.match(writes, /registering `done` is part of acting on that notice's planned follow-up, not automatic resubscription/);
-    assert.match(writes, /check the remaining prerequisites and dispatch B only when the last one completes/);
-    assert.match(writes, /Private Owner notes, todos and plans trigger no reminder: without a subscription, a status-dependent follow-up waits until the user prompts it/);
+    assert.match(writes, /Sequenced follow-up uses \[Task dependencies\]\(#task-dependencies-blocked_by\), not per-prerequisite subscriptions/);
+    assert.match(writes, /create B immediately as an unassigned Task with `blocked_by` and its complete description/);
+    assert.match(writes, /Keep one-shot subscriptions for other necessary follow-ups/);
+    assert.match(writes, /Private Owner notes, todos and plans trigger no reminder: without a dependency or subscription, a status-dependent follow-up waits until the user prompts it/);
+    assert.match(writes, /reject `TASK_NOT_READY` otherwise, before any Executor check; there is no override/);
+    assert.match(writes, /Readiness never changes status, assigns, starts or dispatches/);
+    assert.match(writes, /sends one `\[Task ready\]\(task:<uuid>\?event=ready\)` card for the dependent to its Owner/);
+    assert.match(writes, /When a blocker is cancelled, it sends one `\[Task blocker cancelled\]\(task:<uuid>\?event=blocker_cancelled\)`/);
+    assert.match(writes, /There is no polling, automatic assignment, reminder or child-Task workflow/);
+    assert.match(writes, /unassigned planning Task `blocked_by` its prerequisites/);
+    assert.match(writes, /pending decision \(what must be discussed, candidate items, links\) and must not be dispatched as-is/);
+    assert.match(writes, /cancel it with the user's decision as the reason\. This is guidance only: no new status, kind or tool/);
   }
 });
 

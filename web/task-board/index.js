@@ -34,6 +34,15 @@ export function acknowledgementLabel(revision, acknowledgedRevision) {
   return `Definition v${revision} · ACK v${acknowledgedRevision}${acknowledgedRevision === revision ? '' : ' · current definition not ACKed'}`;
 }
 
+export function dependencyLabel(blockedBy, ready) {
+  if (!Array.isArray(blockedBy) || !blockedBy.length) return null;
+  const done = blockedBy.filter((entry) => entry.status === 'done').length;
+  const cancelled = blockedBy.filter((entry) => entry.status === 'cancelled').length;
+  const count = `Blocked by ${blockedBy.length} Task${blockedBy.length === 1 ? '' : 's'}`;
+  if (ready) return `${count} · all done · ready to dispatch`;
+  return `${count} · ${done} done${cancelled ? ` · ${cancelled} cancelled (Owner decision needed)` : ''} · not ready`;
+}
+
 export function formatTimestamp(value) {
   if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) return 'Time unavailable';
   return new Date(value).toISOString().replace('T', ' ').replace('.000Z', ' UTC').replace('Z', ' UTC');
@@ -60,6 +69,8 @@ function validResult(input, data) {
   ));
   const nonnegative = (value) => Number.isSafeInteger(value) && value >= 0;
   const automation = (value) => object(value) && text(value.run_id) && text(value.script_id) && text(value.state);
+  const dependencies = (value) => value.blocked_by === undefined || (Array.isArray(value.blocked_by) &&
+    value.blocked_by.every((entry) => object(entry) && text(entry.task_id) && text(entry.status)) && typeof value.ready === 'boolean');
   if (!object(data)) return false;
   if (input.view === 'automation_log') {
     return data.task_id === input.task_id && text(data.run_id) && nonnegative(data.offset) &&
@@ -72,6 +83,7 @@ function validResult(input, data) {
         !(data.executor === null || text(data.executor)) || !text(data.status) ||
         !revision(data.revision) || !(data.acknowledged_revision === null || revision(data.acknowledged_revision))) return false;
     if (data.kind !== undefined && !['agent', 'automation'].includes(data.kind)) return false;
+    if (!dependencies(data)) return false;
     if (!retro(data.retro, input.view === 'execution')) return false;
     if (data.kind === 'automation') {
       if (data.executor !== null || data.acknowledged_revision !== null ||
@@ -306,12 +318,17 @@ export function activate(context) {
 
   function TaskFacts({ task }) {
     const automated = task.kind === 'automation';
+    const dependency = dependencyLabel(task.blocked_by, task.ready);
     return h('dl', { className: 'tb-facts' },
       h('dt', null, 'Task status'), h('dd', null, statusLabel(task.status)),
       h('dt', null, 'Owner'), h('dd', null, task.owner),
       h('dt', null, 'Executor'), h('dd', null, automated ? 'Automation (no native Executor)' : task.executor ?? 'Unassigned'),
       h('dt', null, automated ? 'Definition' : 'Definition / ACK'),
       h('dd', null, automated ? `Definition v${task.revision}` : acknowledgementLabel(task.revision, task.acknowledged_revision)),
+      dependency ? h(React.Fragment, null,
+        h('dt', null, 'Blocked by'),
+        h('dd', null, dependency, h('ul', { className: 'tb-references' }, task.blocked_by.map((entry) =>
+          h('li', { key: entry.task_id }, `${entry.task_id} · ${statusLabel(entry.status)}`))))) : null,
     );
   }
 
@@ -537,11 +554,16 @@ export function activate(context) {
         className: 'tb-card-event',
         title: event === 'status_changed'
           ? 'An explicit Owner subscription matched a status change. This is not an Executor requirement update; current Task data is shown below.'
-          : 'Why this message was sent; current Task data is shown below.',
+          : event === 'ready' || event === 'blocker_cancelled'
+            ? 'A blocker of this Task reached a final state. Nothing was assigned or started; the Owner decides. Current Task data is shown below.'
+            : 'Why this message was sent; current Task data is shown below.',
       }, TASK_EVENTS[event]) : null,
       event === 'status_changed' ? h('span', { className: 'tb-card-meta' },
         'Owner subscription triggered · current state shown below') : null,
+      event === 'ready' || event === 'blocker_cancelled' ? h('span', { className: 'tb-card-meta' },
+        'Dependency notice to Owner · not assigned or started · current state shown below') : null,
       h('span', { className: 'tb-card-title' }, summary),
+      task && dependencyLabel(task.blocked_by, task.ready) ? h('span', { className: 'tb-card-meta' }, dependencyLabel(task.blocked_by, task.ready)) : null,
       task ? h(React.Fragment, null,
         task.kind === 'automation' ? h(React.Fragment, null,
           h('span', { className: 'tb-automation-badge' }, 'Automation'),

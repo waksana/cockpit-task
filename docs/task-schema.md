@@ -52,6 +52,8 @@ cancelled / automation 不恢复执行。Owner / Executor 字段记录
 | `outcome` | 成果 summary 与可选 references，保留所属 revision 与执行归属 |
 | `retro` | Agent 完成时显式提交的独立复盘文本或 null，与同次 outcome 关联，不代替成果或阻塞 |
 | `references` | `{label,target}` 数组；资料、成果或独立 Task 引用，不形成依赖 |
+| `blocked_by` | 最多 20 个同一 Owner 的 blocker Task UUID（schema v6 `task_dependencies`）；全部 done 前 `ready=false`，指派/启动返回 `TASK_NOT_READY`；仅待派发（todo、无 Executor、automation 未启动）时可整组替换，改变 `editable` 而非 revision；拒绝自身、环和新增已取消 blocker |
+| `dependency_notices` | schema v6 就绪/blocker 取消通知及投递证据，按依赖方、类型、blocker 与其生命周期唯一 |
 | `metadata` | 有界纯 JSON 对象，供补充工作资料；不作为凭据、不覆盖固定字段或触发工作 |
 | 取消记录 | 取消原因、作者、时间；独立于 description changelog 和 Executor activity |
 | `task_assignments` | schema v5 后首次指派的持久单调序号与 Task/Executor/作者/时间；不从时间戳推断顺序，不回填升级前指派 |
@@ -141,6 +143,14 @@ activity 只能引用固定 Executor 实际确认过的精确 revision，包括�
 完成或取消解除“单项未结束执行”的业务占用，但不证明 session 已原生空闲；
 再次指派仍检查能力、运行、队列、待决请求和后台工作。
 
+### Task 依赖与 schema v6
+
+schema v6 仅新建 `task_dependencies` 与 `dependency_notices` 两表，前向且不破坏既有数据；
+已安装的 `0.1.11` 不能打开 v6。blocker 真实转入 done/cancelled 时，同事务为仍待派发的
+依赖方写入通知：全部 blocker done 时 `ready`，blocker 取消时 `blocker_cancelled`，
+发给依赖方 Owner。就绪不改变状态、不指派、不启动；Owner 编辑从不发通知。
+blocker 重开后再次 done 属于新生命周期，可再次通知。
+
 ### 原 Executor 自助返工与 schema v5
 
 `task_reopen` 只用于用户明确授权的返工；自报 actor 必须等于记录的原 Executor，
@@ -219,7 +229,7 @@ Executor 已直接问用户的阻塞不由 Owner 重复转述。
 author 只是服务作者标签，不是 native session 或虚构 Executor 身份。
 
 普通更新静默；Executor 不给 Owner 发进度、问题或完成消息。
-首次 assigned、显式重要 updated 与订阅 status_changed 的引用 event
+首次 assigned、显式重要 updated、订阅 status_changed 与依赖 ready / blocker_cancelled 的引用 event
 仅为消息固定元数据，不改变 revision、ACK 或生命周期。格式见
 [引用契约](task-implementation.md#read-boundaries-and-reference)。
 

@@ -441,10 +441,36 @@ test('v2 migration preserves Agent outcomes and defaults while allowing null-Exe
     assert.equal(store.task(task.task_id).automation, null);
     assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items[0].summary, 'Legacy result');
     assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items[0].source, 'reported');
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 5);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 6);
     assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
   } finally {
     store?.close();
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('automation respects blocked_by: start waits for readiness and a finished blocker sends the ready notice', async () => {
+  const f = fixture();
+  try {
+    await f.register('dependency', 'console.log("done");');
+    const blocker = await f.create('dependency');
+    const created = await f.write('task_create', {
+      title: 'Dependent automation', description: 'Runs after the blocker', owner: 'owner',
+      automation: { script_id: 'dependency', parameters: {} }, blocked_by: [blocker],
+    });
+    assert.equal(created.error, null, JSON.stringify(created));
+    const dependent = created.result.task_id;
+    assert.equal((await f.change('task_automation_start', dependent)).error.code, 'TASK_NOT_READY');
+    assert.equal(f.store.automation.run(dependent).state, 'created');
+    await f.start(blocker);
+    assert.equal((await f.finished(blocker)).status, 'done');
+    await until(() => f.sent.length === 1);
+    assert.deepEqual(f.sent, [{ id: 'owner', text: `[Task ready](task:${dependent}?event=ready)` }]);
+    const [notice] = f.store.read({ view: 'dependency_notices', task_id: dependent }).items;
+    assert.equal(notice.event.source, 'automation');
+    assert.equal(f.store.task(dependent).status, 'todo', 'ready never starts automation');
+    await f.start(dependent);
+    assert.equal((await f.finished(dependent)).status, 'done');
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
 });

@@ -239,11 +239,11 @@ test('Task storage is private and a newer schema is rejected rather than overwri
     assert.equal(statSync(join(f.directory, 'task-board.sqlite')).mode & 0o777, 0o600);
     f.service.close();
     const future = new DatabaseSync(join(f.directory, 'task-board.sqlite'));
-    future.exec('PRAGMA user_version=6');
+    future.exec('PRAGMA user_version=7');
     future.close();
     assert.throws(() => new TaskStore(f.directory), error => error.code === 'SCHEMA_TOO_NEW');
     const unchanged = new DatabaseSync(join(f.directory, 'task-board.sqlite'));
-    try { assert.equal(unchanged.prepare('PRAGMA user_version').get().user_version, 6); }
+    try { assert.equal(unchanged.prepare('PRAGMA user_version').get().user_version, 7); }
     finally { unchanged.close(); }
   } finally { f.close(); }
 });

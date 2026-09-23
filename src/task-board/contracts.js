@@ -12,7 +12,7 @@ export class TaskError extends Error {
 
 export const LIMITS = Object.freeze({
   description: 24000, activity: 4000, outcome: 8000, retro: 2000, metadata: 8000,
-  references: 20, excerpt: 320, list: 50, history: 10,
+  references: 20, blockers: 20, excerpt: 320, list: 50, history: 10,
   page: 24000, selection: 48000, definitionPayload: 64000, reportPayload: 16000,
 });
 export const definitionFits = ({ description, references = [], metadata = {} }) =>
@@ -25,6 +25,9 @@ const revision = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 const reference = z.strictObject({ label: text(200), target: text(2000) });
 const references = z.array(reference).max(LIMITS.references)
   .refine(value => JSON.stringify(value).length <= 8000, 'References must fit within 8000 characters');
+const blockedBy = z.array(id).max(LIMITS.blockers)
+  .refine(values => new Set(values.map(value => value.toLowerCase())).size === values.length, 'Blocker Task IDs must be unique')
+  .describe('Complete set of Task IDs (same Owner, max 20) that must all be done before this Task can be assigned or started. Readiness gate only: never changes status, assigns or dispatches');
 // Validate JSON iteratively so cyclic, deep, exotic and non-finite JS inputs fail safely.
 function validMetadata(value) {
   const seen = new Set();
@@ -101,7 +104,7 @@ export const schemas = {
     ...['execution', 'definition'].map(taskRead),
     z.strictObject({ ...readActor, view: z.literal('changelog'), task_id: id, ...pagination, revision: revision.optional() })
       .refine(x => x.revision === undefined || (x.cursor === undefined && x.limit === undefined), 'A revision selector cannot be paginated'),
-    ...['activity', 'outcomes', 'subscriptions'].map(view => z.strictObject({ ...readActor, view: z.literal(view), task_id: id, ...pagination })),
+    ...['activity', 'outcomes', 'subscriptions', 'dependency_notices'].map(view => z.strictObject({ ...readActor, view: z.literal(view), task_id: id, ...pagination })),
     z.strictObject({
       ...readActor, view: z.literal('automation_log'), task_id: id,
       offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
@@ -111,7 +114,7 @@ export const schemas = {
   ]),
   task_create: z.strictObject({
     ...mutation, owner: session, title: text(240), description: text(LIMITS.description),
-    references: references.optional(), metadata: metadata.optional(),
+    references: references.optional(), metadata: metadata.optional(), blocked_by: blockedBy.optional(),
     automation: z.strictObject({ script_id: scriptId, parameters }).optional(),
   }).refine(definitionFits, 'Combined serialized description and materials exceed 64000 characters'),
   task_script_register: z.strictObject({ ...mutation, ...scriptSchema.shape })
@@ -128,7 +131,8 @@ export const schemas = {
   task_edit: z.strictObject({
     ...existing, revision, reason: text(2000), title: text(240).optional(),
     description: text(LIMITS.description).optional(), references: references.optional(), metadata: metadata.optional(),
-  }).refine(x => ['title', 'description', 'references', 'metadata'].some(key => x[key] !== undefined), 'An editable field is required'),
+    blocked_by: blockedBy.optional().describe('Replaces the complete blocker set (add/remove by listing the new set; [] clears). Only while the Task awaits dispatch'),
+  }).refine(x => ['title', 'description', 'references', 'metadata', 'blocked_by'].some(key => x[key] !== undefined), 'An editable field is required'),
   task_ack: z.strictObject({ ...existing, revision }),
   task_reopen: z.strictObject({
     ...existing, revision, description: text(LIMITS.description), reason: text(2000),
@@ -158,8 +162,8 @@ export const schemas = {
 // The MCP SDK publishes properties only for object roots, not discriminated unions.
 const readToolSchema = z.strictObject({
   ...readActor,
-  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'subscriptions', 'automation_log', 'operation']),
-  task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes, subscriptions and automation_log'),
+  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'subscriptions', 'dependency_notices', 'automation_log', 'operation']),
+  task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes, subscriptions, dependency_notices and automation_log'),
   include: readInclude.optional(),
   request_id: request.optional().describe('Required only for the operation view'),
   owner: session.optional().describe('List filter only'),

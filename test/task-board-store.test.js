@@ -173,7 +173,7 @@ test('selected overview returns only requested full latest records, distinguishi
   const context = read(['context']);
   assert.deepEqual(Object.keys(context).sort(), [
     'id', 'task_id', 'title', 'owner', 'executor', 'status', 'revision', 'acknowledged_revision',
-    'created_at', 'updated_at', 'write_context', 'kind',
+    'created_at', 'updated_at', 'write_context', 'kind', 'blocked_by', 'ready',
   ].sort());
   assert.equal(context.status, 'done');
   f.edit(context, { description: 'Revised after completion' });
@@ -250,13 +250,15 @@ test('selection does not load unrequested bodies or histories, including definit
   f.store.db.prepare = sql => { queries.push(sql); return prepare(sql); };
   f.store.read({ view: 'overview', task_id: task.task_id, include: ['context'] });
   f.store.definitionCheck({ task_id: task.task_id, actor_session_id: 'owner' });
-  assert.equal(queries.length, 2);
+  // Context includes the compact dependency projection: one bounded blocker-status query.
+  assert.equal(queries.length, 3);
+  assert.match(queries[1], /FROM task_dependencies d/);
   for (const query of queries) assert.doesNotMatch(query, /\*|description|refs|metadata|activities|outcomes|automation_runs|cancellation/);
   queries.length = 0;
   f.store.read({ view: 'overview', task_id: task.task_id, include: ['retro'] });
-  assert.equal(queries.length, 2);
-  assert.match(queries[1], /retro_recorded=1 ORDER BY seq DESC LIMIT 1/);
-  assert.doesNotMatch(queries[1], /\*|summary|refs/);
+  assert.equal(queries.length, 3);
+  assert.match(queries[2], /retro_recorded=1 ORDER BY seq DESC LIMIT 1/);
+  assert.doesNotMatch(queries[2], /\*|summary|refs/);
 });
 
 test('selection budget includes JSON escaping and fails explicitly without truncating valid definitions', t => {
@@ -791,7 +793,7 @@ test('v3 migration preserves historical rows and receipts without inventing a nu
   const tasks = f.store.db.prepare('SELECT * FROM tasks').all();
   const receipts = f.store.db.prepare('SELECT * FROM operations').all();
   f.restart();
-  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 5);
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 6);
   assert.deepEqual(f.store.db.prepare('SELECT * FROM tasks').all(), tasks);
   assert.deepEqual(f.store.db.prepare('SELECT * FROM operations').all(), receipts);
   assert.deepEqual(f.store.task(task.task_id).retro, { status: 'not_recorded' });

@@ -197,6 +197,42 @@ Pending, unknown, queued or accepted sends cannot use that path.
 Do not create a second Executor or resend to manufacture a successful receipt.
 An accepted message is not an ACK or evidence of actual work.
 
+## Task dependencies (blocked_by)
+
+`blocked_by` is the complete set of Task IDs (at most 20, same Owner) that must all
+be `done` before a Task is ready. Set it with `task_create`, or replace the whole set
+with `task_edit` while the Task awaits dispatch: unassigned `todo`, or automation not
+yet started; `[]` clears it. The service rejects an unknown Task, another Owner's Task
+(notices go to the dependent's Owner, who coordinates both), a cancelled blocker,
+self-dependency and cycles. Changes refresh `write_context` but not the description
+revision, and send nothing.
+
+Ready means every blocker is `done`. `task_assign` and `task_automation_start`
+reject `TASK_NOT_READY` otherwise, before any Executor check; there is no override.
+Readiness never changes status, assigns, starts or dispatches: the dependent stays
+unassigned `todo` and dispatch remains Owner's authorized judgment. Reads show
+`blocked_by` (each blocker's ID and status) and `ready` on list, overview, execution
+and selected `context`.
+
+When the last blocker of a Task still awaiting dispatch becomes `done`, the system
+sends one `[Task ready](task:<uuid>?event=ready)` card for the dependent to its Owner.
+When a blocker is cancelled, it sends one `[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)`
+card; the dependent stays not ready until Owner removes that blocker or cancels the
+dependent. Owner edits that make a Task ready send nothing. A blocker reopened and
+completed again can send a new ready card. There is no polling, automatic assignment,
+reminder or child-Task workflow. On either card, read the dependent (`include=["context"]`
+shows readiness; add groups only as the decision needs), reassess whether B is still
+needed and authorized, then dispatch or revise it. Inspect delivery with
+`task_read(view=dependency_notices)`; the same no-blind-resend rules as subscriptions apply.
+
+Follow-up recognized but not yet decided with the user may also be recorded as an
+unassigned planning Task `blocked_by` its prerequisites. Its description states plainly
+that it is a pending decision (what must be discussed, candidate items, links) and must
+not be dispatched as-is. On its ready card, discuss with the user, then either rewrite it
+into complete agreed requirements (splitting into further Tasks if needed) and dispatch,
+or cancel it with the user's decision as the reason. This is guidance only: no new
+status, kind or tool.
+
 ## One-shot status subscriptions
 
 Default to no subscription. Owner registers only when a future state enables a
@@ -213,19 +249,13 @@ or read a notice.
 An Executor's direct user question, even when blocked, stays in that session;
 Owner does not subscribe to relay it or turn it into an acceptance step.
 
-Sequenced follow-up is a typical necessary case. When the user has authorized
-"do B after A completes", subscribe to A's `done` after creating A and before
-`task_assign` or `task_automation_start`, not afterwards, so a fast completion cannot
-pass unnoticed; if A is already running when B is authorized, subscribe right away.
-When B depends on several prerequisites, subscribe to `done` on each unfinished
-prerequisite; one already done needs no subscription, and a registration rejected
-because A already reached `done` means A is complete. At most one subscription may
-wait per Task: if one is already waiting, withdraw it and register one covering both
-needs. If that ends on an earlier state while B is still needed, registering `done`
-is part of acting on that notice's planned follow-up, not automatic resubscription.
-On each notice, check the remaining prerequisites and dispatch B only when the
-last one completes. Private Owner notes, todos and plans trigger no reminder:
-without a subscription, a status-dependent follow-up waits until the user prompts it.
+Sequenced follow-up uses [Task dependencies](#task-dependencies-blocked_by), not
+per-prerequisite subscriptions. When the user has authorized "do B after A completes",
+create B immediately as an unassigned Task with `blocked_by` and its complete
+description; the system notifies Owner when B becomes ready. Keep one-shot
+subscriptions for other necessary follow-ups, such as a decision from a result.
+Private Owner notes, todos and plans trigger no reminder: without a dependency or
+subscription, a status-dependent follow-up waits until the user prompts it.
 
 Owner can explicitly register with `task_subscribe`, withdraw with `task_unsubscribe`,
 and inspect records with `task_read(view=subscriptions)`. Use current tool schemas
@@ -261,7 +291,8 @@ from notification delivery. The original `result`, including `subscription_ids`,
 is retained alongside `notifications` and an independent `notification_error`.
 A notification failure can set MCP `isError=true` while `error` remains null;
 saved Task status and outcome are not rolled back. Read the actual subscription
-facts with `task_read(view=subscriptions)`. Do not repeat a saved report, redo
+facts with `task_read(view=subscriptions)`; dependency cards appear as `notice_ids`
+and in `task_read(view=dependency_notices)` on the dependent Task. Do not repeat a saved report, redo
 delivery or manually send a replacement notice to Owner because notification failed.
 
 Preserve request identity and inspect subscription/operation records on uncertain

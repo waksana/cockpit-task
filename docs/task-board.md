@@ -16,6 +16,11 @@ cannot open schema v5, so switching back to its package is not a database rollba
 Validate migration on an isolated consistent copy before authorized deployment;
 never overwrite live data with a historical backup.
 
+Unreleased on main after 0.1.11: native Task dependencies (#64) add schema v6
+(`task_dependencies`, `dependency_notices`). The v5→v6 migration only creates new
+tables, but installed 0.1.11 cannot open schema v6; a separately authorized
+package must use a new version.
+
 ## Requirements
 
 Use Node.js 24 or later and a host with Module API v1, Web API v2/UI v1, module
@@ -62,8 +67,8 @@ For coding, Owner states requirements and references any existing Issue; it does
 not prepare or clean up branches/worktrees and does not implement code.
 
 One session can execute at most one unfinished Task, then be reused after
-completion/cancellation. Tasks are flat references: no child Tasks, dependency
-engine or reassignment. Only the original Executor may self-reopen an eligible
+completion/cancellation. Tasks are flat references: no child Tasks, workflow
+engine or reassignment; `blocked_by` is only a readiness gate. Only the original Executor may self-reopen an eligible
 done Agent Task for explicitly user-authorized rework; cancelled and automation
 Tasks never reopen. Review is optional unless the Task's
 requirements demand it; Executor can complete without a default Owner approval gate.
@@ -257,6 +262,8 @@ are allowed. Ordinary edits/reports stay silent without an explicit subscription
 | Entire automatic first dispatch | `[Task assigned to you](task:<uuid>?event=assigned)` |
 | Explicit important-update notice | `[Task updated](task:<uuid>?event=updated)` |
 | System notice from a status subscription | `[Task status updated](task:<uuid>?event=status_changed)` |
+| Dependent's blockers are all done | `[Task ready](task:<uuid>?event=ready)` |
+| A blocker of a waiting dependent was cancelled | `[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)` |
 
 Pass only the UUID to tools. Event values are exact lowercase URL metadata, not
 Task fields, commands or inferred states. Generic references have no event title;
@@ -301,6 +308,36 @@ Task results and notification_error are separate; failed delivery does not undo
 saved outcomes. Unknown sends are not automatically retried or manually duplicated.
 After HTTP is listening, onReady recovers only known-unattempted pending notices
 in a bounded pass. One-shot triggering does not guarantee exactly-once host delivery.
+
+### Task dependencies (blocked_by)
+
+For "do B after A", Owner creates B immediately as an unassigned Task with
+`blocked_by: [A, ...]` and its complete description instead of per-prerequisite
+subscriptions. `task_create` and `task_edit` accept at most 20 unique blocker UUIDs;
+edit replaces the whole set and is allowed only while B still awaits dispatch
+(todo, no Executor, and for automation no started run). Blockers must exist, have
+the same Owner and differ from B; newly added blockers cannot be cancelled and
+cycles are rejected. Blocker changes bump `editable`, not the definition revision.
+
+B is ready when every blocker is done. `task_assign` and `task_automation_start`
+reject `TASK_NOT_READY` otherwise, with no override. Readiness never changes
+status, assigns, starts or dispatches. Reads expose `blocked_by` (`task_id`,
+current `status`) and `ready` in overview/list context and on the classic board card.
+
+When the last blocker of a waiting dependent becomes done, the system enqueues one
+`event=ready` card for the dependent to its Owner; a cancelled blocker enqueues one
+`event=blocker_cancelled` card. Each notice is keyed by dependent, kind, blocker and
+blocker lifecycle, so a reopened blocker completing again may notify again. Owner
+edits never notify. Owner reassesses on the card, then dispatches, revises
+`blocked_by` or cancels B. `task_read(view=dependency_notices)` returns delivery
+records with the same recovery semantics as subscriptions. There is no polling,
+automatic assignment or workflow engine.
+
+Owner may also record recognized but undecided follow-up as an unassigned planning
+Task blocked by its prerequisites, plainly marked as a pending decision that must not
+be dispatched as-is. On ready, Owner discusses it with the user, then rewrites it into
+complete agreed requirements and dispatches, or cancels it with the user's decision.
+This is Owner guidance only: no new status, kind or tool.
 
 ## Module API and packaging
 

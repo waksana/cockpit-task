@@ -33,6 +33,11 @@ new schema; switching its package back is not a database rollback. Never overwri
 live data with a historical backup. Validate migration on an isolated consistent
 copy before separately authorized deployment.
 
+Native Task dependencies (#64) were merged after 0.1.11 without a version bump.
+They add schema v6 (`task_dependencies`, `dependency_notices`) through a
+non-destructive, table-only forward migration. Installed 0.1.11 cannot open
+schema v6, so the next packaged preparation needs its own new version.
+
 Keep the documented UI source pairing
 `9fd5204bda99a8bd65b2c5ef152cc47ce87837d5` and `uiSurfaceVersion: 1` as the UI
 support baseline, separate from backend resource preparation. Explicit preparation

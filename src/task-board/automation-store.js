@@ -111,6 +111,7 @@ export class AutomationStore {
     this.store.checkContext(task, input, true);
     this.store.currentRevision(task, input);
     if (task.status !== 'todo' || run.state !== 'created') fail('AUTOMATION_ALREADY_STARTED', 'An automation Task can be started once; never retry script side effects');
+    this.store.assertReady(task);
     this.db.prepare("UPDATE automation_runs SET state='queued',queued_at=?,revision=? WHERE task_id=?")
       .run(now(), task.revision, task.id);
     this.db.prepare('UPDATE tasks SET lifecycle=lifecycle+1,updated_at=? WHERE id=?').run(now(), task.id);
@@ -178,7 +179,8 @@ export class AutomationStore {
           JSON.stringify([{ label: 'Automation output (task_read automation_log)', target: `task:${taskId}` }]), at, run.run_id);
       this.db.prepare('UPDATE tasks SET status=?,lifecycle=lifecycle+?,updated_at=? WHERE id=?')
         .run(status, Number(task.status !== status), at, taskId);
-      return this.store.transitionSubscriptions(task, status, this.actor(run), at);
+      const actor = this.actor(run);
+      return [...this.store.transitionSubscriptions(task, status, actor, at), ...this.store.transitionDependents(task, status, actor, at)];
     };
     return this.db.isTransaction ? write() : this.store.transaction(write);
   }

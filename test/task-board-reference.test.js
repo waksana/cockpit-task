@@ -15,6 +15,8 @@ test('event references explain their purpose without copying the Task definition
   assert.equal(taskReference(id, 'assigned'), `[Task assigned to you](task:${id}?event=assigned)`);
   assert.equal(taskReference(id, 'updated'), `[Task updated](task:${id}?event=updated)`);
   assert.equal(taskReference(id, 'status_changed'), `[Task status updated](task:${id}?event=status_changed)`);
+  assert.equal(taskReference(id, 'ready'), `[Task ready](task:${id}?event=ready)`);
+  assert.equal(taskReference(id, 'blocker_cancelled'), `[Task blocker cancelled](task:${id}?event=blocker_cancelled)`);
   for (const invalid of ['assign', 'update', 'done', 'ASSIGNED', '', null, {}, '__proto__', 'updated&event=assigned']) {
     assert.throws(() => taskReference(id, invalid), /Invalid Task event/);
   }
@@ -23,7 +25,7 @@ test('event references explain their purpose without copying the Task definition
 test('one shared parser accepts only the canonical Task namespace and optional event', () => {
   const id = 'd10c0c92-3580-4cdd-85bf-d7fcf22ab3ff';
   assert.deepEqual(parseTaskTarget(`task:${id}`), { taskId: id, event: null });
-  for (const event of ['assigned', 'updated', 'status_changed']) {
+  for (const event of ['assigned', 'updated', 'status_changed', 'ready', 'blocker_cancelled']) {
     assert.deepEqual(parseTaskTarget(`task:${id.toUpperCase()}?event=${event}`), { taskId: id, event });
   }
   for (const target of [

@@ -6,7 +6,8 @@ const detail = (error, code) => ({
 });
 
 export async function deliverNotification({ store, host, id, stopped }) {
-  let subscription = store.getSubscription(id);
+  const channel = store.notificationChannel(id);
+  let subscription = channel.read();
   if (subscription.notification.status !== 'pending' || stopped()) return subscription;
   try {
     if (!await host.ownerExists(subscription.owner)) {
@@ -18,12 +19,12 @@ export async function deliverNotification({ store, host, id, stopped }) {
     // This read cannot send. Retain explicit known-unsent evidence rather than retrying the host.
     return store.finishNotification(id, 'pending', 'not_sent', detail(error, 'OWNER_UNAVAILABLE'));
   }
-  if (stopped()) return store.getSubscription(id);
+  if (stopped()) return channel.read();
   subscription = store.claimNotification(id);
-  if (!subscription) return store.getSubscription(id);
+  if (!subscription) return channel.read();
   let receipt;
   try {
-    receipt = await host.send(subscription.owner, taskReference(subscription.task_id, 'status_changed'));
+    receipt = await host.send(subscription.owner, taskReference(subscription.task_id, channel.event));
   } catch (error) {
     return store.finishNotification(id, 'unknown', 'unknown', detail(error, 'NOTIFICATION_UNCONFIRMED'));
   }
