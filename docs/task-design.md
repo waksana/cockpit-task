@@ -130,6 +130,8 @@ Executor 在开工、恢复、重要阶段之间、重要外部操作前和交�
 | 首次派单，由 `task_assign` 发送一次 | `[Task assigned to you](task:<uuid>?event=assigned)` |
 | Owner 明确的重要要求更新 | `[Task updated](task:<uuid>?event=updated)`，附读取/ACK 最新版要求 |
 | 显式一次性状态订阅，由系统通知 Owner | `[Task status updated](task:<uuid>?event=status_changed)` |
+| 依赖方的全部 blocker 已 done，由系统通知 Owner | `[Task ready](task:<uuid>?event=ready)` |
+| 待派发依赖方的 blocker 被取消，由系统通知 Owner | `[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)` |
 
 首次派单不复制 description，Owner 不重复发单。普通编辑与报告静默。
 只有 Owner 判断重要更新不能等待正常同步点时，才按

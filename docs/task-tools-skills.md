@@ -183,6 +183,8 @@ activity 不自动改状态，outcome 不自动 done。完成最新已确认约�
 | `[Task assigned to you](task:<uuid>?event=assigned)` | `task_assign` 的完整首次派单；Owner 不重复发送 |
 | `[Task updated](task:<uuid>?event=updated)` | Owner 明确的重要要求更新，附读取/ACK 最新版要求 |
 | `[Task status updated](task:<uuid>?event=status_changed)` | 系统按显式一次性订阅通知 Task.owner，不是 Executor 的 ACK 通知 |
+| `[Task ready](task:<uuid>?event=ready)` | `blocked_by` 全部 done 后系统通知依赖方 Owner；不代表已指派或启动 |
+| `[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)` | 待派发依赖方的 blocker 取消后系统通知 Owner 重新评估 |
 
 使用真实 UUID。event 由 URL 明确给出，只有上表小写值有效；不是 Task 类型、
 状态、命令或事件总线。卡片读取当前数据，消息原因保持不变。

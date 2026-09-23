@@ -22,6 +22,21 @@ operation receipts, subscriptions, assignment order, script registrations and au
 Executor to one unfinished Task. Subscription uniqueness permits one waiting
 subscription per Task Owner; Owner is fixed for the Task.
 
+Schema version 6 adds `task_dependencies(task_id, blocker_id, author, at)`, unique
+per pair, no self-edge, indexed by blocker, and `dependency_notices` with
+`UNIQUE(task_id, kind, blocker_id, blocker_lifecycle)` where kind is `ready` or
+`blocker_cancelled`, plus the same pending/unknown/accepted delivery columns as
+subscriptions. The v5→v6 migration only creates these tables; installed 0.1.11
+cannot open schema v6. Blocker sets are validated in the write transaction: at most
+20 unique ids, existing same-Owner Tasks, no self or newly added cancelled blocker,
+and no cycle (recursive CTE). Edits are allowed only while the dependent awaits
+dispatch and bump `editable`, not the revision. A blocker's committed transition
+into done/cancelled, in the same transaction, inserts notices for dependents still
+awaiting dispatch (`ready` only when all blockers are done). Binding and automation
+start reject `TASK_NOT_READY`; readiness never changes status or dispatches.
+`report`/`cancel`/automation finish return these as `notice_ids`, delivered and
+recovered through the same outbox path as `subscription_ids`.
+
 Schema version 5 adds `task_assignments`: `seq INTEGER PRIMARY KEY AUTOINCREMENT`,
 unique `task_id` referencing Tasks, and non-null `executor,author,at`, indexed by
 executor/seq. Each new first binding records its assignment in the same transaction.
@@ -197,7 +212,8 @@ Scripts must not daemonize/detach/escape the process group. This is same-user tr
 execution, not a sandbox or authentication. Immutable registration and script hash
 do not freeze interpreters, runtime, imports or dependencies. Optional subscriptions
 precede start only for concrete Owner follow-up; no automatic subscription, Agent
-monitoring loop, dependency workflow or production installation is introduced.
+monitoring loop, workflow engine or production installation is introduced;
+a `blocked_by` Task cannot start until every blocker is done.
 
 ## External operation receipts
 
@@ -298,7 +314,8 @@ The delivery record is a bounded durable outbox, not a second native queue or
 scheduler. A passive `session/get` lookup first checks the original Owner exists.
 Missing/unavailable Owners produce `not_sent` evidence; no replacement is created.
 A compare-and-set claim persists `unknown` before the non-idempotent host send.
-The only message is `[Task status updated](task:<uuid>?event=status_changed)`.
+The only message is `[Task status updated](task:<uuid>?event=status_changed)`
+(or, for a dependency notice, the dependent's `event=ready` / `event=blocker_cancelled` card).
 Accepted/queued responses update evidence; ambiguous or interrupted sends remain
 unknown and are never automatically retried. Busy Owner enqueue is normal and
 does not interrupt, clear messages or prove reading.
@@ -322,7 +339,7 @@ work records its outcome. There is no exactly-once guarantee for host prompt.
 
 Read views are fixed, not arbitrary projections:
 `list`, `overview`, `execution`, `definition`, `changelog`, `activity`, `outcomes`,
-`subscriptions`, `automation_log`, `operation`. Owner discovers through an explicit
+`subscriptions`, `dependency_notices`, `automation_log`, `operation`. Owner discovers through an explicit
 owner-filtered list and selects single-Task content by purpose; Executor reads full
 execution requirements at start/resumption and synchronization checkpoints.
 These are information choices, not ACLs.
@@ -386,6 +403,8 @@ checked against retained fields too, not merely the supplied patch.
 | Entire first assignment message | `[Task assigned to you](task:<uuid>?event=assigned)` |
 | Explicit important-update notice to Executor | `[Task updated](task:<uuid>?event=updated)` |
 | Explicit subscription's system notice to Owner | `[Task status updated](task:<uuid>?event=status_changed)` |
+| Dependent ready notice to Owner | `[Task ready](task:<uuid>?event=ready)` |
+| Dependent blocker-cancelled notice to Owner | `[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)` |
 
 IDs passed to tools are bare UUIDs. The parser accepts only the `task:` scheme,
 a UUID, and either no query or exactly one supported lowercase event form above.

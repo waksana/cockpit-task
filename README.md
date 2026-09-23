@@ -19,6 +19,12 @@ event 只说明这条消息的原因，不是 Task 状态；卡片仍读取当�
 登记时若已处于目标状态则明确失败，不创建订阅或补发消息；只有登记后第一次
 进入目标状态才触发，不重复订阅、不轮询、不打断 Owner 当前工作。
 
+“A 完成后做 B”时，Owner 立即以 `blocked_by` 创建未指派的 B 并写完整要求，
+不必为每个前置 Task 订阅。所有 blocker done 前 `task_assign` / `task_automation_start`
+返回 `TASK_NOT_READY`；就绪只发送 `[Task ready](task:<uuid>?event=ready)` 给 B 的 Owner，
+blocker 取消则发送 `[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)`，
+不自动改状态、指派或启动。blocker 须同一 Owner、无环、最多 20 个。
+
 默认 Agent Task 由一个 Executor 完整负责，可在内部使用 subagents。要求直接修改 Task，
 Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的版本。没有子任务树、
 改派或任意终态回退。用户明确授权返工时，符合条件的原 Executor 可自行
@@ -118,3 +124,5 @@ npm run package:module
 升级为 schema v5 是前向迁移，不回填历史指派；升级前已派单 Task 保持可读但均不可重开。
 已安装的 `0.1.9` 保持不可变，不能打开新 schema；切回旧包不等于数据库回退，
 不得用历史备份覆盖实时数据。部署前应在隔离的一致副本上验证迁移。
+main 上尚未发布的 Task 依赖（#64）新增 schema v6（仅新建表）；已安装的 `0.1.11`
+不能打开 v6，另行授权打包时须使用新版本。

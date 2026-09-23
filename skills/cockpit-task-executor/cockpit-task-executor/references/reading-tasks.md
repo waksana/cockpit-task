@@ -20,6 +20,7 @@ Without `include`, the single-Task overview retains its existing compact shape:
 | `kind`, `automation` | `agent` by default; automation runtime facts without an Executor or ACK obligation |
 | `owner`, `executor`, `status` | Coordination responsibility, assigned session or null, and declared lifecycle state |
 | `revision`, `acknowledged_revision` | Current definition versus actual Executor confirmation; null means no ACK |
+| `blocked_by`, `ready` | Each declared blocker's `task_id` and current `status`, and whether all are `done`; `[]`/true without dependencies. Ready is a dispatch gate, not a status or instruction |
 | `activity` | Latest activity or null, including its ID, revision, Executor, author, time and reported source |
 | `activity.text`, `activity.truncated` | Up to 320 characters of that actual activity, not a generated summary; expand activity if truncated and relevant |
 | `outcome` | `{available:false}` or latest outcome ID, revision, time, `available:true` and `current` |
@@ -48,7 +49,7 @@ This selects content groups, not arbitrary columns or a role-dependent projectio
 
 Every selected response includes compact current context: `id`, `task_id`, `title`,
 `owner`, `executor`, `status`, `revision`, `acknowledged_revision`, `created_at`,
-`updated_at`, `write_context`, `kind`. Context is always returned even if not explicit;
+`updated_at`, `write_context`, `kind`, `blocked_by`, `ready`. Context is always returned even if not explicit;
 `include=["context"]` returns only that context.
 
 | Group | Additional content |
@@ -118,6 +119,7 @@ Selecting `definition` or any other overview groups cannot replace that requirem
 | Complete text of one past definition | `changelog` with `revision` |
 | Whether a failed or uncertain request had an effect | `operation` with `request_id` |
 | Records for an explicit one-shot status subscription | `subscriptions` with `task_id` |
+| Ready/blocker-cancelled notices sent for a dependent Task | `dependency_notices` with the dependent's `task_id` |
 
 `definition` and `execution` currently return the same complete Task projection:
 identity, responsibility, status, revisions, timestamps, write context, description,
@@ -172,7 +174,8 @@ Follow its schema and returned pagination cursor; do not poll while waiting.
 A subscription/delivery record is not proof the Owner read a notice or the Task
 is now complete. Select the latest evidence needed for the planned decision.
 See [subscription handling](task-writes-and-recovery.md#one-shot-status-subscriptions)
-for the one-shot lifecycle and uncertain effects.
+for the one-shot lifecycle and uncertain effects. `dependency_notices` follows the
+same pagination and delivery-record meaning for [Task dependencies](task-writes-and-recovery.md#task-dependencies-blocked_by).
 
 List defaults to 20 items, maximum 50, with `status=unfinished` unless specified.
 Use an explicit terminal status or `all` when the question includes finished work;
