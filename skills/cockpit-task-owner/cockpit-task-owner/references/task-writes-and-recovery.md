@@ -160,6 +160,10 @@ effects; do not replace it with manual toggle/initialization choreography.
 `task_assign` checks an existing candidate's capabilities and availability without
 installing missing roles or interrupting a busy session.
 It binds the Task and sends one assigned reference; do not send it again manually.
+After binding it tries once to title an auto/default-named Executor session with the
+Task title; `operation.session_title` reports renamed, unchanged, skipped (custom name
+kept or host lacks provenance) or failure. That step never changes the assignment;
+do not rename or retry manually unless the user asks.
 The idle/empty checks and enqueue send are not atomic. A race may leave a queued
 or unconfirmed send; inspect the per-step receipt instead of assuming nothing sent.
 Role labels or earlier readiness are not permanent proof of current capability.

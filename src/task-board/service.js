@@ -63,6 +63,11 @@ export class TaskService {
                 bind: () => this.store.bindAssignment(input),
                 recheck: () => this.store.dispatchPreflight(input),
                 send: (id, text) => this.host.send(id, text),
+                ...(typeof this.host.nameState === 'function' && typeof this.host.rename === 'function' ? { retitle: {
+                  nameState: id => this.host.nameState(id),
+                  rename: (id, name) => this.host.rename(id, name),
+                  previous: () => this.store.moduleSessionTitle(input.executor, input.request_id),
+                } } : {}),
               }));
             } catch (error) {
               if (!(error instanceof TaskError) || error.code !== 'EXECUTOR_OPERATION_IN_PROGRESS') throw error;

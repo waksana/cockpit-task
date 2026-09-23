@@ -64,6 +64,15 @@ export function createHostAdapter(host) {
       };
     },
     send: (sessionId, text) => host.call('prompt', { sessionId, text, mode: 'enqueue' }),
+    async nameState(sessionId) {
+      const meta = await get(sessionId);
+      if (meta === null) throw new TaskError('SESSION_NOT_FOUND', 'The Executor session is no longer known to the host');
+      // Older hosts omit provenance; omission is unknown, never an auto-generated title.
+      if (!Object.hasOwn(meta, 'nativeName') || typeof meta.nativeNameUserSet !== 'boolean'
+        || (meta.nativeName !== null && typeof meta.nativeName !== 'string')) return null;
+      return { name: meta.nativeName, userSet: meta.nativeNameUserSet };
+    },
+    rename: (sessionId, name) => host.call('session/rename', { sessionId, name }),
     async observe(sessionId) {
       const meta = await get(sessionId);
       if (!meta) return {

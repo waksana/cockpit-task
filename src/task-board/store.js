@@ -562,6 +562,14 @@ export class TaskStore {
       return this.summary(task);
     });
   }
+  moduleSessionTitle(sessionId, excludeRequestId) {
+    // Only this module's own confirmed rename counts as module-set; the latest one wins.
+    const row = this.db.prepare(`SELECT json_extract(result,'$.operation.session_title.title') AS title FROM operations
+      WHERE tool='task_assign' AND request_id<>? AND json_extract(result,'$.operation.executor')=?
+        AND json_extract(result,'$.operation.session_title.status')='renamed'
+      ORDER BY updated_at DESC, rowid DESC LIMIT 1`).get(excludeRequestId, sessionId);
+    return typeof row?.title === 'string' ? row.title : null;
+  }
   preparationPreflight(sessionId) {
     const task = this.db.prepare("SELECT id FROM tasks WHERE executor=? AND status NOT IN ('done','cancelled')").get(sessionId);
     if (task) fail('EXECUTOR_OCCUPIED', 'Select an Executor without an unfinished Task; preparation does not repair an existing assignment');

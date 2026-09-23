@@ -135,7 +135,7 @@ Task auto-ACKs the new revision. Terminal definitions can be edited without reop
 | `task_automation_reconcile` | Clear a proven-safe process-group barrier; never rerun or mark done |
 | `task_session_create` | Create an Executor, optionally preparing explicitly selected native resources |
 | `task_session_prepare` | Prepare a loaded idle Executor with no unfinished Task; no creation or dispatch |
-| `task_assign` | Check an existing Executor, bind once and send one assigned reference |
+| `task_assign` | Check an existing Executor, bind once, best-effort set its default/auto session title to the Task title, and send one assigned reference |
 | `task_edit` | Replace the complete description or edit title/materials |
 | `task_ack` | Confirm the current definition separately from status |
 | `task_report` | Explicit activity, status and/or outcome; Agent done requires a new outcome and explicit retro text or null |
