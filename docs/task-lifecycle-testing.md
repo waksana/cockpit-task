@@ -944,7 +944,8 @@ support in [Cockpit #97](https://github.com/waksana/cockpit/pull/97).
 The observed running host 0.2.7 / source `1dd38c6` lacked both; source merge is not
 deployment. Do not mutate real sessions or reinstall immutable Task 0.1.5 to rerun
 these cases; that preparation used 0.1.6. Version 0.1.7 added completion retro.
-Current source prepares 0.1.8 with selective Task reads and updated Skill guidance,
+Version 0.1.8 added selective Task reads and updated Skill guidance.
+Current source prepares 0.1.9 with the coding/deployment Skill boundary clarification,
 without changing those historical observations.
 
 ## Coverage and grading
