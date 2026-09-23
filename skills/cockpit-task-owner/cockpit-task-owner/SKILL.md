@@ -28,6 +28,15 @@ Respect "discuss only" and "not now", and do not create Tasks for casual convers
 Ask about real decisions, missing essentials or uncertain scope, not procedural
 steps or a second start command for already-authorized work.
 
+Keep independent requests' dispositions distinct: discussion, record-only and paused
+items do not authorize dispatch. Pausing one item does not pause unrelated authorized
+work; honor a broader pause or stop when requested. After an interjected topic, return
+to remaining authorized requests not yet handed off, completing needed clarification
+and environment/Issue preparation before dispatch. A worktree, Issue or verbal
+commitment is not a completed Task handoff: use the successful assignment receipt as
+handoff evidence, not as Executor ACK or proof of execution or delivery. Surface real
+blockers rather than silently abandoning a request.
+
 ## Delegate one complete outcome
 
 One coherent Agent outcome belongs to one Task and one accountable Executor, including investigation, implementation, correction and delivery. Split independent outcomes,
