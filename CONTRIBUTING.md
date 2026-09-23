@@ -18,25 +18,24 @@ Synchronize `package.json`, `cockpit.module.json`, both root version entries in
 `package-lock.json`, the embedded MCP server version, tests and current-source
 documentation. Preserve historical release facts. If fresh main already prepares
 the appropriate undelivered version, reuse it rather than repeating its bump:
-the current 0.1.11 preparation includes Owner sequential subscription follow-up
-(#53) and Executor session titles (#55), superseding installed 0.1.10; that
-installation remains immutable. Version 0.1.10 introduced Owner request
-follow-through (#45), immediate important-update notices (#47) and Agent reopen
-(#49). Version 0.1.9 introduced the coding/deployment Skill boundary clarification.
-Session-title results use the existing operations JSON; 0.1.11 adds no schema
-migration. Hosts without native name provenance safely skip the title step.
+the current 0.1.12 preparation packages the native Task dependency work and
+github-coding Skill updates merged after 0.1.11 (#59, #61, #63, #65). Native Task
+dependencies add
+schema v6 (`task_dependencies`, `dependency_notices`) through a non-destructive,
+table-only forward migration. Schema v6 is roll-forward only: installed 0.1.11
+cannot open v6 data, and switching its package back is not a database rollback.
+Never overwrite live data with a historical backup. Validate migration on an
+isolated consistent copy before separately authorized deployment.
 
-This preparation opens older supported databases with a forward migration to
-schema v5. It deliberately does not backfill assignment records: all pre-upgrade
-assigned Tasks remain readable but cannot reopen. Installed 0.1.9 cannot open the
-new schema; switching its package back is not a database rollback. Never overwrite
-live data with a historical backup. Validate migration on an isolated consistent
-copy before separately authorized deployment.
-
-Native Task dependencies (#64) were merged after 0.1.11 without a version bump.
-They add schema v6 (`task_dependencies`, `dependency_notices`) through a
-non-destructive, table-only forward migration. Installed 0.1.11 cannot open
-schema v6, so the next packaged preparation needs its own new version.
+Version 0.1.11 includes Owner sequential subscription follow-up (#53) and
+Executor session titles (#55), superseding installed 0.1.10; that installation
+remains immutable. Session-title results use the existing operations JSON and add
+no schema migration. Hosts without native name provenance safely skip the title
+step. Version 0.1.10 introduced Owner request follow-through (#45), immediate
+important-update notices (#47) and Agent reopen (#49). Version 0.1.9 introduced
+the coding/deployment Skill boundary clarification. Schema v5 deliberately does
+not backfill assignment records: all pre-upgrade assigned Tasks remain readable
+but cannot reopen, and installed 0.1.9 cannot open schema v5.
 
 Keep the documented UI source pairing
 `9fd5204bda99a8bd65b2c5ef152cc47ce87837d5` and `uiSurfaceVersion: 1` as the UI

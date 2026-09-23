@@ -8,7 +8,7 @@ See the [MCP contract](task-mcp-contract.md) for input/result shapes, the
 ## Module and data
 
 The module ID and MCP server key are `cockpit-task`, display name Task, version
-`0.1.11` (source preparation; no deployment implied). Its manifest is [cockpit.module.json](../cockpit.module.json).
+`0.1.12` (source preparation; no deployment implied). Its manifest is [cockpit.module.json](../cockpit.module.json).
 `src/task-board/`, `web/task-board/` and the database filename `task-board.sqlite`
 are current internal paths. Task runs inside Cockpit, not a standalone service.
 
@@ -26,8 +26,9 @@ Schema version 6 adds `task_dependencies(task_id, blocker_id, author, at)`, uniq
 per pair, no self-edge, indexed by blocker, and `dependency_notices` with
 `UNIQUE(task_id, kind, blocker_id, blocker_lifecycle)` where kind is `ready` or
 `blocker_cancelled`, plus the same pending/unknown/accepted delivery columns as
-subscriptions. The v5→v6 migration only creates these tables; installed 0.1.11
-cannot open schema v6. Blocker sets are validated in the write transaction: at most
+subscriptions. The v5→v6 migration only creates these tables; installed 0.1.12
+opens schema v6, but installed 0.1.11 cannot. Schema v6 is roll-forward only.
+Blocker sets are validated in the write transaction: at most
 20 unique ids, existing same-Owner Tasks, no self or newly added cancelled blocker,
 and no cycle (recursive CTE). Edits are allowed only while the dependent awaits
 dispatch and bump `editable`, not the revision. A blocker's committed transition
