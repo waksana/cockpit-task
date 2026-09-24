@@ -93,7 +93,7 @@ export function createMcpRoutes({ execute, schemas, signal, report }) {
           // Caller identity comes only from host-injected invocation metadata, never from arguments.
           const result = await execute(name, params.arguments, {
             signal: AbortSignal.any([request.signal, extra.signal, lifetime.signal, signal]),
-            invocation: invocationFromMeta(params._meta),
+            invocation: invocationFromMeta(params._meta), external: true,
           });
           return {
             content: [{ type: 'text', text: JSON.stringify(result) }],

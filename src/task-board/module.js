@@ -23,7 +23,7 @@ export function activate(context) {
   const json = async (name, request) => {
     // Module HTTP callers are the signed-in user (Web board, operators), never a native session.
     const body = await execute(name, request.body, {
-      signal: AbortSignal.any([request.signal, signal]), actor: 'user',
+      signal: AbortSignal.any([request.signal, signal]), actor: 'user', external: true,
     });
     return { status: body.error?.status ?? (body.error ? 409 : body.notification_error ? 502 : 200), body };
   };
@@ -39,7 +39,7 @@ export function activate(context) {
         method: 'GET', path: '/tasks/:id/native',
         async handler(request) {
           const task = await execute('task_read', { view: 'overview', task_id: request.params.id }, {
-            signal: AbortSignal.any([request.signal, signal]), actor: 'user',
+            signal: AbortSignal.any([request.signal, signal]), actor: 'user', external: true,
           });
           const unavailable = (sessionId, error) => ({
             source: 'native', session_id: sessionId, loaded: null, available: false,

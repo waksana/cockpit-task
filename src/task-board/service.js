@@ -17,28 +17,32 @@ export class TaskService {
   }
 
   // actor is the calling session: the host-injected MCP invocation, or 'user' for the module HTTP API.
-  async execute(name, rawInput, { signal, actor, invocation } = {}) {
+  // external marks untrusted MCP/HTTP input: identity then comes only from these options.
+  async execute(name, rawInput, { signal, actor, invocation, external = false } = {}) {
     if (this.closing) return {
       result: null, error: { code: 'MODULE_CLOSING', message: 'Task is closing', status: 503 },
       definition_check: { status: 'unavailable', error: { code: 'MODULE_CLOSING', message: 'Task storage is closing' } },
     };
     this.active++;
     try {
-      return await this.run(name, rawInput, signal, invocation?.sessionId ?? actor, invocation);
+      return await this.run(name, rawInput, signal, invocation?.sessionId ?? actor, invocation, external);
     } finally {
       this.active--;
       this.finishClose();
     }
   }
 
-  async run(name, rawInput, signal, actor, invocation) {
+  async run(name, rawInput, signal, actor, invocation, external) {
     let input;
     let outcome;
     try {
       const { actor: inputActor, invocation: inputInvocation, ...publicInput } =
         rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput) ? rawInput : {};
-      const effectiveInvocation = invocation ?? inputInvocation;
-      const effectiveActor = effectiveInvocation?.sessionId ?? actor ?? inputActor;
+      if (external && (inputActor !== undefined || inputInvocation !== undefined)) {
+        throw new TaskError('INVALID_INPUT', 'Caller identity comes only from host invocation metadata; actor and invocation are not tool arguments and nothing was done', 400);
+      }
+      const effectiveInvocation = external ? invocation : invocation ?? inputInvocation;
+      const effectiveActor = external ? effectiveInvocation?.sessionId ?? actor : effectiveInvocation?.sessionId ?? actor ?? inputActor;
       if (typeof effectiveActor !== 'string' || !effectiveActor) {
         throw new TaskError('INVOCATION_REQUIRED', 'Task tools need the calling session from host MCP invocation metadata (_meta["cockpit/invocation"]); this host did not provide it and nothing was done', 400);
       }

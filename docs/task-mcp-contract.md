@@ -68,7 +68,7 @@ orchestrator 判断重要更新不能等待正常同步时，可明确进行一�
 
 ## 2. 共用输入约定
 
-表中 `?` 表示可选；对象中的固定字段严格校验，不把未知顶层字段默默丢弃。字符串与聚合读取上限见本节。MCP 调用的调用者身份不再是工具参数：宿主必须在每次调用的 `_meta["cockpit/invocation"]` 中注入 `sessionId`（以及 `runtimeSessionId`、`subagent`、`agentName` 等可用信息）。缺少该 metadata 时，读取和写入都以 `INVOCATION_REQUIRED`（400）拒绝且不写入。subagent 调用归因到其 containing session；完整 invocation 保存在操作回执中。模块 HTTP 路由没有 session 身份，固定以 `user` 作为 actor。
+表中 `?` 表示可选；对象中的固定字段严格校验，不把未知顶层字段默默丢弃。字符串与聚合读取上限见本节。MCP 调用的调用者身份不再是工具参数：宿主必须在每次调用的 `_meta["cockpit/invocation"]` 中注入 `sessionId`（以及 `runtimeSessionId`、`subagent`、`agentName` 等可用信息）。缺少该 metadata 时，读取和写入都以 `INVOCATION_REQUIRED`（400）拒绝且不写入。subagent 调用归因到其 containing session；完整 invocation 保存在操作回执中。模块 HTTP 路由没有 session 身份，固定以 `user` 作为 actor。MCP 参数或 HTTP body 中出现 `actor` / `invocation` 字段时以 `INVALID_INPUT`（400）拒绝且不写入，不能借此冒充其他 session。
 
 | 名称 | 含义 |
 | --- | --- |

@@ -100,7 +100,7 @@ on an otherwise compatible older host.
 
 ## Business context, not authentication
 
-MCP calls require host-injected `_meta["cockpit/invocation"].sessionId`; missing metadata returns `INVOCATION_REQUIRED` before reads or writes touch storage. The service derives `actor` from that session ID, not from tool input. Browser/module HTTP routes have no native session and use actor `user`. Reads use the caller to check its currently assigned Task as well as any explicit target. Actor is attribution, not an automatic list filter or credential.
+MCP calls require host-injected `_meta["cockpit/invocation"].sessionId`; missing metadata returns `INVOCATION_REQUIRED` before reads or writes touch storage. The service derives `actor` from that session ID, not from tool input: MCP and module HTTP calls are marked external, and an `actor` or `invocation` field in their arguments/body is rejected with `INVALID_INPUT` before any effect. Browser/module HTTP routes have no native session and use actor `user`. Reads use the caller to check its currently assigned Task as well as any explicit target. Actor is attribution, not an automatic list filter or credential.
 
 Role assembly determines the available tool subset, not a per-Task ACL.
 ACK history records the fixed assignee as `confirmed_for` and the reported actor
