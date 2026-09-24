@@ -30,7 +30,7 @@ Task 提供十七个工具，模块 ID 与 MCP key 为 `cockpit-task`。
 | `task_cancel` | 是 | 是 | Agent 不停止 session；automation 请求终止进程组，不回滚；仅匹配订阅时通知 |
 | `task_subscribe` | 是 | 否 | 显式登记未来状态的一次性 Owner 通知，当前已匹配则失败 |
 | `task_unsubscribe` | 是 | 否 | 取消仍在等待的订阅，不撤回已触发或发送的通知 |
-| `task_retro_handle` | 是 | 否 | Owner 记录所建 Task 最新含发现 retro 的处理结果（fixed / followup / watching / dismissed），不发消息、不改状态 |
+| `task_retro_handle` | 是 | 否 | Owner 记录所建 Task 有发现的已记录 retro（通常为最新）的处理结果（fixed / followup / watching / dismissed），不发消息、不改状态 |
 
 唯一的 `node` 角色注入全部十七个工具；表中两列表示节点相对某个 Task 的关系（读取以
 `actor_role` 返回）通常使用的工具，不是逐 Task 权限表。具有工具即可操作其他 Task，

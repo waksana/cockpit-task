@@ -190,7 +190,7 @@ Task auto-ACKs the new revision. Terminal definitions can be edited without reop
 | `task_cancel` | Cancel Agent without stopping its session; request automation termination, never rollback |
 | `task_subscribe` | Optional one-shot Owner wait for explicit target statuses |
 | `task_unsubscribe` | Cancel a still-waiting subscription |
-| `task_retro_handle` | Owner records how the latest retro with findings was handled: fixed, followup (terminal), watching or dismissed |
+| `task_retro_handle` | Owner records how a recorded retro with findings (normally the latest) was handled: fixed, followup (terminal), watching or dismissed |
 
 Owner receives read/create/session_create/session_prepare/assign/edit/cancel/subscribe/unsubscribe/retro_handle
 plus script_read/script_register/automation_start/automation_reconcile;

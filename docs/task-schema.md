@@ -221,7 +221,7 @@ has_findings 仅表示文本非 null，不代表质量；
 
 schema v8 仅新建追加式 `retro_handlings` 表（`id,task_id,outcome_id,status,note,refs,author,at`），
 既有 retro 均视为未处理，不回填；只能向前滚动，打开过 v8 的数据库不能再由 v7 包打开。
-`task_retro_handle` 仅接受 Task.owner 对最新已记录、文本非 null 的 retro（按 outcome_id）写入
+`task_retro_handle` 仅接受 Task.owner 对该 Task 任一已记录、文本非 null 的 retro（按 outcome_id，通常为最新）写入
 `fixed` / `followup` / `watching` / `dismissed` 与 note；followup 必须带引用且为终态，
 后续完成后不回头更新，也不再通知。reopen 后再次 done 的新 retro 需重新处理，旧处理留在历史。
 有发现的 retro 对象附 `handling`：`{status:'unhandled'}` 或最新 `{id,status,author,at,note,references}`；
