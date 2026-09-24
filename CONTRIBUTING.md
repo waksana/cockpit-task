@@ -38,9 +38,9 @@ without that host support every tool, including reads, returns
 `INVOCATION_REQUIRED` before writing. Old `request_id` replays can conflict after
 upgrade because request fingerprints now include the host-supplied caller.
 
-Schema v8 (retro handling, #80) is source not yet in any package: the next
-package needs a fresh version, and v8 is roll-forward only, so installed 0.1.13
-refuses v8 data.
+Schema v8 (retro handling, #80) is packaged together with schema v9 in 0.2.0.
+Both migrations are roll-forward only, so installed 0.1.13 refuses the upgraded
+data.
 
 Version 0.1.12, released as v0.1.12, packages the native Task dependency work and
 github-coding Skill updates merged after 0.1.11 (#59, #61, #63, #65). Native Task

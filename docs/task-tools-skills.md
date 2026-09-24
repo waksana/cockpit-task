@@ -26,6 +26,9 @@ Task 提供一个树节点角色 `node` 与一个合并 Skill
 session 修改宿主角色的工具，指派也不补能力。调用者身份来自宿主 invocation，只作归因；服务拒绝自我指派（`SELF_ASSIGNMENT`）
 和沿祖先链的回环指派（`DELEGATION_CYCLE`）。`DELEGATION_OWNER_MISMATCH` 已删除，
 因为 `orchestrator` 不再是输入字段。
+0.2.0 的工具调用者由配套宿主通过 `_meta["cockpit/invocation"]` 提供，
+不再接受调用者填写的 `actor_session_id`；缺少 metadata 时明确返回
+`INVOCATION_REQUIRED`。
 
 Skill 结构为一个 [SKILL.md](../skills/cockpit-task-tree/cockpit-task-tree/SKILL.md) 操作手册，覆盖作为节点完成自己的 Task、编排 Subtask、读取当前事实、写入安全、通知与恢复；仅保留 [automation reference](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md) 说明可信脚本 Task。工具字段、错误码、视图和分页以 MCP 工具描述为准。
 

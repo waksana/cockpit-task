@@ -8,7 +8,7 @@ See the [MCP contract](task-mcp-contract.md) for input/result shapes, the
 ## Module and data
 
 The module ID and MCP server key are `cockpit-task`, display name Task, version
-`0.1.13` (source preparation; no deployment implied). Its manifest is [cockpit.module.json](../cockpit.module.json).
+`0.2.0` (source preparation; no deployment implied). Its manifest is [cockpit.module.json](../cockpit.module.json).
 `src/task-board/`, `web/task-board/` and the database filename `task-board.sqlite`
 are current internal paths. Task runs inside Cockpit, not a standalone service.
 
@@ -56,7 +56,7 @@ recovered through the same outbox path as `subscription_ids`.
 
 Schema version 9 renames vocabulary in place: tasks.owner→orchestrator, tasks.executor→assignee; activities/outcomes/task_assignments.executor→assignee; subscriptions.owner→subscriber; dependency_notices/child_notices.owner→orchestrator; subscriptions.actor_session_id→author. It drops legacy occupancy/waiting indexes and creates `assignee_occupancy`, `task_assignments_assignee` and `subscriptions_waiting_subscriber`; it adds `operations.invocation` and creates `assignee_notices(kind)` with `assignee_notices_task` / `assignee_notices_pending`. Notification event JSON is migrated from `actor_session_id` to `actor`, and saved `task_assign` operation input/result JSON moves `executor` to `assignee`. The migration is roll-forward only; older installed modules reject user_version 9 with `SCHEMA_TOO_NEW`.
 
-Schema version 8 (source only, not yet packaged) adds append-only
+Schema version 8, packaged in 0.2.0 with schema v9, adds append-only
 `retro_handlings(id, task_id, outcome_id REFERENCES outcomes(id), status, note, refs, author, at)`
 with status fixed/followup/watching/dismissed, indexed by outcome and Task. The v7→v8
 migration only creates the table; existing retros read as unhandled and nothing is

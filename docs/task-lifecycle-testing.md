@@ -1139,7 +1139,7 @@ prepared orchestrator sequential subscription follow-up (#53) and assignee sessi
 titles (#55), without changing those historical observations or adding a schema
 migration. Version 0.1.12 added native Task dependencies and schema v6; the v5→v6
 migration only creates dependency tables and is roll-forward only, so installed
-0.1.11 cannot open v6. Current source/package 0.1.13 adds schema v7 lineage columns
+0.1.11 cannot open v6. Version 0.1.13 adds schema v7 lineage columns
 and Subtask notices through a roll-forward-only migration that installed 0.1.12
 cannot open. Schema v5 migrates forward without assignment backfill; all
 pre-upgrade assigned Tasks remain readable but cannot reopen. Old 0.1.9 cannot
