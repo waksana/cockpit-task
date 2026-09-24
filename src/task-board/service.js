@@ -182,7 +182,7 @@ export class TaskService {
     if (this.closing || signal?.aborted) return Promise.resolve();
     if (this.recovery) return this.recovery;
     // Fixed high-water marks bound this startup pass. New transitions deliver themselves.
-    const sources = ['subscriptions', 'dependency_notices']
+    const sources = ['subscriptions', 'dependency_notices', 'child_notices']
       .map(table => ({ table, through: this.store.pendingNotificationBoundary(table) })).filter(source => source.through);
     if (!sources.length) return Promise.resolve();
     this.active++;

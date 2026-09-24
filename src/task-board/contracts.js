@@ -104,7 +104,7 @@ export const schemas = {
     ...['execution', 'definition'].map(taskRead),
     z.strictObject({ ...readActor, view: z.literal('changelog'), task_id: id, ...pagination, revision: revision.optional() })
       .refine(x => x.revision === undefined || (x.cursor === undefined && x.limit === undefined), 'A revision selector cannot be paginated'),
-    ...['activity', 'outcomes', 'subscriptions', 'dependency_notices'].map(view => z.strictObject({ ...readActor, view: z.literal(view), task_id: id, ...pagination })),
+    ...['activity', 'outcomes', 'subscriptions', 'dependency_notices', 'child_notices'].map(view => z.strictObject({ ...readActor, view: z.literal(view), task_id: id, ...pagination })),
     z.strictObject({
       ...readActor, view: z.literal('automation_log'), task_id: id,
       offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
@@ -162,8 +162,8 @@ export const schemas = {
 // The MCP SDK publishes properties only for object roots, not discriminated unions.
 const readToolSchema = z.strictObject({
   ...readActor,
-  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'subscriptions', 'dependency_notices', 'automation_log', 'operation']),
-  task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes, subscriptions, dependency_notices and automation_log'),
+  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'subscriptions', 'dependency_notices', 'child_notices', 'automation_log', 'operation']),
+  task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes, subscriptions, dependency_notices, child_notices and automation_log'),
   include: readInclude.optional(),
   request_id: request.optional().describe('Required only for the operation view'),
   owner: session.optional().describe('List filter only'),

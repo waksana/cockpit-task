@@ -1,11 +1,15 @@
 const idPattern = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 const taskId = new RegExp(`^${idPattern}$`);
+// Card labels name the recipient's role for that Task; link targets stay unchanged.
 export const TASK_EVENTS = Object.freeze({
-  assigned: 'Task assigned to you',
-  updated: 'Task updated',
-  status_changed: 'Task status updated',
-  ready: 'Task ready',
-  blocker_cancelled: 'Task blocker cancelled',
+  assigned: 'As Executor: Task assigned to you',
+  updated: 'As Executor: Task updated',
+  status_changed: 'As Owner: Task status updated',
+  ready: 'As Owner: Task ready',
+  blocker_cancelled: 'As Owner: Task blocker cancelled',
+  child_done: 'As Owner: child Task done',
+  child_blocked: 'As Owner: child Task blocked',
+  child_cancelled: 'As Owner: child Task cancelled',
 });
 const taskTarget = new RegExp(`^task:(${idPattern})(?:\\?event=(${Object.keys(TASK_EVENTS).join('|')}))?$`);
 

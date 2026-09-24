@@ -112,7 +112,7 @@ test('actual transitions consume once, address only stored Owner, and retain eve
   assert.equal(first.notification_error, null);
   assert.deepEqual(first.result.subscription_ids, [subscription.subscription_id]);
   assert.equal(first.notifications[0].notification.status, 'accepted');
-  assert.deepEqual(f.sent, [{ owner: 'task-owner', text: `[Task status updated](task:${task.task_id}?event=status_changed)` }]);
+  assert.deepEqual(f.sent, [{ owner: 'task-owner', text: `[As Owner: Task status updated](task:${task.task_id}?event=status_changed)` }]);
   assert.deepEqual(f.reads, ['task-owner']);
   assert.deepEqual((await f.service.execute('task_report', input)).result, first.result);
   await f.service.execute('task_report', f.reportRequest(task, { status: 'blocked' }));
@@ -390,7 +390,7 @@ test('service-ready hook recovers without inbound traffic; activation and ordina
     await Promise.all([module.onReady(), module.onReady()]);
     assert.deepEqual(calls.map(call => call.name), ['session/get', 'prompt']);
     assert.deepEqual(calls.at(-1).body, {
-      sessionId: 'task-owner', text: `[Task status updated](task:${task.task_id}?event=status_changed)`, mode: 'enqueue',
+      sessionId: 'task-owner', text: `[As Owner: Task status updated](task:${task.task_id}?event=status_changed)`, mode: 'enqueue',
     });
     await module.onReady();
     assert.equal(calls.length, 2);
@@ -527,7 +527,7 @@ test('HTTP exposes notification failure separately from persisted cancellation a
     assert.equal(response.body.notifications[0].notification.status, 'unknown');
     assert.deepEqual(calls.map(call => call.name), ['session/get', 'prompt']);
     assert.deepEqual(calls[1].body, {
-      sessionId: 'task-owner', text: `[Task status updated](task:${task.task_id}?event=status_changed)`, mode: 'enqueue',
+      sessionId: 'task-owner', text: `[As Owner: Task status updated](task:${task.task_id}?event=status_changed)`, mode: 'enqueue',
     });
   } finally { module.dispose(); }
 });

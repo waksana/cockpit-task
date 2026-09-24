@@ -6,35 +6,47 @@
   "backend": "src/task-board/module.js",
   "frontend": {
     "entry": "web/task-board/index.js",
-    "styles": ["web/task-board/style.css"],
-    "assets": ["web/task-board/index.js", "web/task-board/style.css", "src/task-board/reference.js"]
+    "styles": [
+      "web/task-board/style.css"
+    ],
+    "assets": [
+      "web/task-board/index.js",
+      "web/task-board/style.css",
+      "src/task-board/reference.js"
+    ]
   },
   "roles": [
     {
-      "id": "owner",
-      "name": "Owner",
-      "description": "Coordinate independent Tasks and explicitly assign capable Executors.",
-      "instructions": "roles/task-owner.md",
-      "skillDirectories": ["skills/cockpit-task-owner", "skills/github-coding"],
+      "id": "node",
+      "name": "Task node",
+      "description": "Deliver your assigned Task directly or through child Tasks you own; without a Task, stay available and delegate through Tasks.",
+      "instructions": "roles/task-node.md",
+      "skillDirectories": [
+        "skills/cockpit-task-tree",
+        "skills/github-coding"
+      ],
       "mcpServers": {
         "cockpit-task": {
           "type": "http",
           "path": "/mcp",
-          "tools": ["task_read", "task_create", "task_script_register", "task_script_read", "task_automation_start", "task_automation_reconcile", "task_session_create", "task_session_prepare", "task_assign", "task_edit", "task_cancel", "task_subscribe", "task_unsubscribe"]
-        }
-      }
-    },
-    {
-      "id": "executor",
-      "name": "Executor",
-      "description": "Deliver an assigned Task, synchronizing its definition and reporting work.",
-      "instructions": "roles/task-executor.md",
-      "skillDirectories": ["skills/cockpit-task-executor", "skills/github-coding"],
-      "mcpServers": {
-        "cockpit-task": {
-          "type": "http",
-          "path": "/mcp",
-          "tools": ["task_read", "task_edit", "task_ack", "task_reopen", "task_report", "task_cancel"]
+          "tools": [
+            "task_read",
+            "task_create",
+            "task_script_register",
+            "task_script_read",
+            "task_automation_start",
+            "task_automation_reconcile",
+            "task_session_create",
+            "task_session_prepare",
+            "task_assign",
+            "task_edit",
+            "task_cancel",
+            "task_subscribe",
+            "task_unsubscribe",
+            "task_ack",
+            "task_reopen",
+            "task_report"
+          ]
         }
       }
     }

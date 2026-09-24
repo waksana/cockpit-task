@@ -18,7 +18,7 @@ const canonical = value => {
 const hash = value => createHash('sha256').update(canonical(value)).digest('hex');
 const fail = (code, message, status = 409, result = null) => { throw new TaskError(code, message, status, result); };
 const notificationTable = table => {
-  if (!['subscriptions', 'dependency_notices'].includes(table)) throw new Error('Unknown notification table');
+  if (!['subscriptions', 'dependency_notices', 'child_notices'].includes(table)) throw new Error('Unknown notification table');
   return table;
 };
 function decode(value, code) {
@@ -166,6 +166,19 @@ export class TaskStore {
       if (!taskColumns.has('depth')) this.db.exec('ALTER TABLE tasks ADD COLUMN depth INTEGER NOT NULL DEFAULT 1 CHECK(depth >= 1)');
       this.db.exec(`
         CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_task_id,seq) WHERE parent_task_id IS NOT NULL;
+        CREATE TABLE IF NOT EXISTS child_notices (
+          seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+          task_id TEXT NOT NULL REFERENCES tasks(id), parent_task_id TEXT NOT NULL REFERENCES tasks(id),
+          child_lifecycle INTEGER NOT NULL, owner TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('done','blocked','cancelled')),
+          event TEXT NOT NULL, created_at TEXT NOT NULL,
+          delivery_status TEXT NOT NULL DEFAULT 'pending'
+            CHECK(delivery_status IN ('pending','unknown','accepted','queued','not_sent')),
+          attempted_at TEXT, completed_at TEXT, delivery_error TEXT,
+          UNIQUE(task_id, status, child_lifecycle)
+        );
+        CREATE INDEX IF NOT EXISTS child_notices_task ON child_notices(task_id,seq);
+        CREATE INDEX IF NOT EXISTS child_notices_pending ON child_notices(seq) WHERE delivery_status='pending';
         PRAGMA user_version=7;
         COMMIT;
       `);
@@ -213,14 +226,49 @@ export class TaskStore {
       ...this.dependencies(row.id),
     };
   }
-  delegationParent(owner) {
-    // The creating Owner's own unfinished Agent assignment is the parent; occupancy guarantees at most one.
-    const parent = this.db.prepare("SELECT id,depth FROM tasks WHERE executor=? AND kind='agent' AND status NOT IN ('done','cancelled')").get(owner);
+  currentAssignment(session) {
+    // Occupancy guarantees at most one unfinished Agent assignment per session.
+    return this.db.prepare("SELECT id,depth FROM tasks WHERE executor=? AND kind='agent' AND status NOT IN ('done','cancelled')").get(session) ?? null;
+  }
+  delegationParent(owner, actor) {
+    // A child can only be created by the session executing its parent, as that child's Owner.
+    const parent = this.currentAssignment(owner);
+    const own = actor === owner ? parent : this.currentAssignment(actor);
+    if (parent && actor !== owner) {
+      fail('DELEGATION_OWNER_MISMATCH', `Session ${owner} is executing Task ${parent.id}; only that session can create its child Tasks, as their Owner`);
+    }
+    if (own && actor !== owner) {
+      fail('DELEGATION_OWNER_MISMATCH', `You are executing Task ${own.id}; Tasks you create are its child Tasks, so owner must be your own session`);
+    }
     if (!parent) return { parent_task_id: null, depth: 1 };
     if (parent.depth >= LIMITS.delegationDepth) {
       fail('DELEGATION_DEPTH_EXCEEDED', `Owner is executing Task ${parent.id} at delegation level ${parent.depth}; child Tasks are limited to ${LIMITS.delegationDepth} levels. Deliver this level directly, or ask the user how to restructure the work`);
     }
     return { parent_task_id: parent.id, depth: parent.depth + 1 };
+  }
+  lineage(row) {
+    const ancestors = [];
+    for (let id = row.parent_task_id; id && ancestors.length < LIMITS.delegationDepth; ) {
+      const ancestor = this.db.prepare('SELECT id,owner,executor,parent_task_id FROM tasks WHERE id=?').get(id);
+      if (!ancestor) break;
+      ancestors.push(ancestor);
+      id = ancestor.parent_task_id;
+    }
+    return ancestors;
+  }
+  assertAssignable(row, executor) {
+    if (executor === row.owner) {
+      fail('SELF_ASSIGNMENT', 'A Task cannot be assigned to its own Owner; assign another session. Only a node that already holds a Task, or on explicit user instruction, does the work itself');
+    }
+    const loop = this.lineage(row).find(ancestor => ancestor.owner === executor || ancestor.executor === executor);
+    if (loop) {
+      fail('DELEGATION_CYCLE', `Session ${executor} already owns or executes ancestor Task ${loop.id}; assign child Tasks to a session outside their lineage`);
+    }
+  }
+  actorRole(row, actor) {
+    if (!actor) return undefined;
+    const owner = row.owner === actor, executor = row.executor === actor;
+    return owner && executor ? 'owner_and_executor' : executor ? 'executor' : owner ? 'owner' : 'none';
   }
   dependencies(taskId) {
     const blocked_by = this.db.prepare(`SELECT d.blocker_id AS task_id, t.status FROM task_dependencies d
@@ -381,7 +429,7 @@ export class TaskStore {
   create(input) {
     if (input.automation) this.automation.assertPlatform();
     const id = randomUUID(), at = now();
-    const { parent_task_id, depth } = this.delegationParent(input.owner);
+    const { parent_task_id, depth } = this.delegationParent(input.owner, input.actor_session_id);
     this.db.prepare('INSERT INTO tasks(id,title,description,owner,refs,metadata,created_at,updated_at,parent_task_id,depth) VALUES(?,?,?,?,?,?,?,?,?,?)')
       .run(id, input.title, input.description, input.owner, JSON.stringify(input.references || []), JSON.stringify(input.metadata || {}), at, at, parent_task_id, depth);
     this.recordDefinition(this.row(id), 'Initial definition', input.actor_session_id, at);
@@ -506,7 +554,7 @@ export class TaskStore {
         this.db.prepare('UPDATE tasks SET status=?,lifecycle=lifecycle+? WHERE id=?').run(input.status, Number(input.status !== row.status), row.id);
         fields.task_status = { status: 'saved', value: input.status };
         subscription_ids = this.transitionSubscriptions(row, input.status, input, at);
-        notice_ids = this.transitionDependents(row, input.status, input, at);
+        notice_ids = [...this.transitionDependents(row, input.status, input, at), ...this.transitionChild(row, input.status, input, at, subscription_ids)];
       }
     }
     if (input.activity || (!stale && (input.status || input.outcome))) {
@@ -531,7 +579,7 @@ export class TaskStore {
     this.db.prepare("UPDATE tasks SET status='cancelled',lifecycle=lifecycle+1,cancellation=?,updated_at=? WHERE id=?")
       .run(JSON.stringify(cancellation), cancellation.at, row.id);
     const subscription_ids = this.transitionSubscriptions(row, 'cancelled', input, cancellation.at);
-    const notice_ids = this.transitionDependents(row, 'cancelled', input, cancellation.at);
+    const notice_ids = [...this.transitionDependents(row, 'cancelled', input, cancellation.at), ...this.transitionChild(row, 'cancelled', input, cancellation.at, subscription_ids)];
     if (row.kind === 'automation') this.automation.cancel(row.id);
     return {
       result: {
@@ -621,6 +669,33 @@ export class TaskStore {
     }
     return ids;
   }
+  transitionChild(row, status, input, at, triggered = []) {
+    // A child's done/blocked/cancelled transition wakes its Owner (the parent's Executor) while the parent is unfinished.
+    if (!row.parent_task_id || status === row.status || !['done', 'blocked', 'cancelled'].includes(status)) return [];
+    if (triggered.length) return [];
+    const parent = this.row(row.parent_task_id);
+    if (terminal(parent.status) || parent.executor !== row.owner) return [];
+    const child = this.row(row.id);
+    const id = randomUUID();
+    const event = {
+      event_id: randomUUID(), parent_task_id: parent.id, from_status: row.status, status, request_id: input.request_id, at,
+      actor_session_id: input.actor_session_id,
+      ...(input.source === 'automation' ? { source: 'automation', run_id: input.run_id } : {}),
+    };
+    const inserted = this.db.prepare(`INSERT OR IGNORE INTO child_notices(id,task_id,parent_task_id,child_lifecycle,owner,status,event,created_at)
+      VALUES(?,?,?,?,?,?,?,?)`).run(id, row.id, parent.id, child.lifecycle, row.owner, status, JSON.stringify(event), at);
+    return inserted.changes ? [id] : [];
+  }
+  childNotice(row) {
+    return {
+      notice_id: row.id, task_id: row.task_id, parent_task_id: row.parent_task_id, owner: row.owner,
+      kind: `child_${row.status}`, status: row.status, event: JSON.parse(row.event), created_at: row.created_at,
+      notification: {
+        status: row.delivery_status, attempted_at: row.attempted_at, completed_at: row.completed_at,
+        error: row.delivery_error ? JSON.parse(row.delivery_error) : null,
+      },
+    };
+  }
   notice(row) {
     return {
       notice_id: row.id, task_id: row.task_id, blocker_id: row.blocker_id, owner: row.owner, kind: row.kind,
@@ -640,6 +715,11 @@ export class TaskStore {
     // Subscriptions and dependency notices share one durable delivery discipline.
     if (this.db.prepare('SELECT 1 FROM subscriptions WHERE id=?').get(id)) {
       return { table: 'subscriptions', event: 'status_changed', read: () => this.getSubscription(id) };
+    }
+    const child = this.db.prepare('SELECT * FROM child_notices WHERE id=?').get(id);
+    if (child) {
+      const read = () => this.childNotice(this.db.prepare('SELECT * FROM child_notices WHERE id=?').get(id));
+      return { table: 'child_notices', event: `child_${child.status}`, read };
     }
     const notice = this.getNotice(id);
     return { table: 'dependency_notices', event: notice.kind, read: () => this.getNotice(id) };
@@ -692,6 +772,7 @@ export class TaskStore {
         this.db.prepare('UPDATE operations SET resumed_by=? WHERE request_id=?').run(input.request_id, input.resume_request_id);
       } else {
         if (row.executor || row.status !== 'todo') fail('ASSIGNMENT_CONFLICT', 'Only an unassigned todo can be assigned');
+        this.assertAssignable(row, input.executor);
         this.assertReady(row);
         try {
           this.db.prepare('UPDATE tasks SET executor=?,lifecycle=lifecycle+1,updated_at=? WHERE id=?')
@@ -836,7 +917,10 @@ export class TaskStore {
   }
   read(rawInput) {
     const input = parseInput('task_read', rawInput);
-    if (input.include) return this.transaction(() => this.selected(input), { readOnly: true });
+    const actor = input.actor_session_id;
+    // Role is derived from Task facts relative to the reading session, never from memory.
+    const withRole = item => actor && item?.owner !== undefined ? { ...item, actor_role: this.actorRole(item, actor) } : item;
+    if (input.include) return withRole(this.transaction(() => this.selected(input), { readOnly: true }));
     if (input.view === 'operation') return this.operation(input.request_id);
     if (input.view === 'list') {
       const { owner, executor, parent_task_id: parent, query, status = 'unfinished' } = input;
@@ -850,19 +934,19 @@ export class TaskStore {
       if (query) { clauses.push('instr(lower(title), lower(?)) > 0'); values.push(query); }
       const limit = input.limit ?? 20;
       const rows = this.db.prepare(`SELECT * FROM tasks WHERE ${clauses.join(' AND ')} ORDER BY seq DESC LIMIT ?`).all(...values, limit + 1);
-      return this.page(rows, limit, scope, row => this.overview(row, false));
+      return this.page(rows, limit, scope, row => withRole(this.overview(row, false)));
     }
     const row = this.row(input.task_id);
     if (input.view === 'automation_log') return this.automation.log(input);
-    if (input.view === 'subscriptions' || input.view === 'dependency_notices') {
+    if (['subscriptions', 'dependency_notices', 'child_notices'].includes(input.view)) {
       const scope = hash({ view: input.view, task_id: row.id });
       const limit = input.limit ?? 5;
       const rows = this.db.prepare(`SELECT * FROM ${notificationTable(input.view)} WHERE task_id=? AND seq < ? ORDER BY seq DESC LIMIT ?`)
         .all(row.id, this.cursor(input, scope), limit + 1);
-      return this.page(rows, limit, scope, entry => input.view === 'subscriptions' ? this.subscription(entry) : this.notice(entry), { task_id: row.id });
+      return this.page(rows, limit, scope, entry => ({ subscriptions: this.subscription, dependency_notices: this.notice, child_notices: this.childNotice })[input.view].call(this, entry), { task_id: row.id });
     }
-    if (input.view === 'overview') return this.overview(row);
-    if (input.view === 'execution' || input.view === 'definition') return this.task(row.id);
+    if (input.view === 'overview') return withRole(this.overview(row));
+    if (input.view === 'execution' || input.view === 'definition') return withRole(this.task(row.id));
     if (input.view === 'changelog' && input.revision !== undefined) {
       const entry = this.db.prepare('SELECT revision,description,reason,author,at FROM definitions WHERE task_id=? AND revision=?').get(row.id, input.revision);
       if (!entry) fail('REVISION_NOT_FOUND', 'Definition revision does not exist', 404);

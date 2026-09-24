@@ -18,7 +18,7 @@ Synchronize `package.json`, `cockpit.module.json`, both root version entries in
 `package-lock.json`, the embedded MCP server version, tests and current-source
 documentation. Preserve historical release facts. If fresh main already prepares
 the appropriate undelivered version, reuse it rather than repeating its bump:
-the current 0.1.12 preparation packages the native Task dependency work and
+0.1.12, released as v0.1.12, packages the native Task dependency work and
 github-coding Skill updates merged after 0.1.11 (#59, #61, #63, #65). Native Task
 dependencies add
 schema v6 (`task_dependencies`, `dependency_notices`) through a non-destructive,
@@ -27,8 +27,10 @@ cannot open v6 data, and switching its package back is not a database rollback.
 Never overwrite live data with a historical backup. Validate migration on an
 isolated consistent copy before separately authorized deployment.
 The long-lived `experiment/hierarchical-delegation` branch (#66; PRs target it and do not close #66) adds per-Task
-hierarchical delegation and schema v7 (nullable `tasks.parent_task_id`, `tasks.depth`)
-through a column-only forward migration; existing Tasks stay top-level. Schema v7 is
+hierarchical delegation and schema v7 (nullable `tasks.parent_task_id`, `tasks.depth`
+and a new `child_notices` table) through a forward migration that only adds columns
+and a table; existing Tasks stay top-level. It replaces the Owner/Executor roles with
+one `node` role and one merged `cockpit-task-tree` Skill. Schema v7 is
 roll-forward only: installed 0.1.12 cannot open v7 data. The branch has no version
 bump or deployment and must stay cleanly mergeable into main.
 
@@ -53,3 +55,5 @@ Verify the final merged
 CI artifact before authorized installation. Never delete installed directories
 or force installer bypasses to reuse a version. Merge does not authorize tags,
 Releases, deployment or restart; those require separate authorization.
+
+After a joint deployment with the host, tag and release the accepted commit per Cockpit's [release after a joint deployment](https://github.com/waksana/cockpit/blob/main/docs/releasing.md#release-after-acceptance) policy.

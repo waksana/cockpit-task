@@ -155,7 +155,7 @@ test('only the last blocker becoming done sends one idempotent ready notice to t
   assert.equal(last.result.result.notice_ids.length, 1);
   assert.equal(last.result.notifications[0].notification.status, 'accepted');
   const ownerCards = () => f.sent.filter(entry => entry.session === 'owner');
-  assert.deepEqual(ownerCards(), [{ session: 'owner', text: `[Task ready](task:${d.task_id}?event=ready)` }]);
+  assert.deepEqual(ownerCards(), [{ session: 'owner', text: `[As Owner: Task ready](task:${d.task_id}?event=ready)` }]);
   const [notice] = f.notices(d.task_id);
   assert.equal(notice.kind, 'ready');
   assert.equal(notice.owner, 'owner');
@@ -182,7 +182,7 @@ test('a cancelled blocker notifies the Owner once and keeps the dependent not re
   const cancelled = await f.cancel(a.task_id);
   assert.equal(cancelled.error, null);
   assert.equal(cancelled.result.notice_ids.length, 1);
-  assert.deepEqual(f.sent, [{ session: 'owner', text: `[Task blocker cancelled](task:${d.task_id}?event=blocker_cancelled)` }]);
+  assert.deepEqual(f.sent, [{ session: 'owner', text: `[As Owner: Task blocker cancelled](task:${d.task_id}?event=blocker_cancelled)` }]);
   assert.equal((await f.cancel(a.task_id)).result.status, 'unchanged');
   await f.done(b.task_id);
   assert.equal(f.sent.filter(entry => entry.session === 'owner').length, 1, 'no ready notice while a blocker is cancelled');
@@ -225,7 +225,7 @@ test('a pending notice survives restart and is recovered exactly once', async t 
   f.restart();
   await f.service.recoverNotifications();
   await f.service.recoverNotifications();
-  assert.deepEqual(f.sent, [{ session: 'owner', text: `[Task ready](task:${d.task_id}?event=ready)` }]);
+  assert.deepEqual(f.sent, [{ session: 'owner', text: `[As Owner: Task ready](task:${d.task_id}?event=ready)` }]);
   assert.equal(f.notices(d.task_id)[0].notification.status, 'accepted');
 });
 

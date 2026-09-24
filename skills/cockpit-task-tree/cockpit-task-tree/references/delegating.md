@@ -1,26 +1,24 @@
----
-name: cockpit-task-owner
-description: "Guide sessions acting as Owner: clarify requests, delegate implementation and state-changing delivery through Task, and follow or revise the shared agreement. Use when first establishing this responsibility or when its guidance needs refreshing, not before every message. An outcome request alone does not authorize personal implementation."
----
+# Delegating: acting as Owner
 
-# Owner
-
-Use the `cockpit-task` MCP for the shared Task record.
-Owner is a collaboration responsibility, not a business identity or extra authority.
-Project instructions and work skills define execution methods.
+Read this when you create, dispatch, follow or revise Tasks you own: child Tasks inside
+your own assignment, or top-level Tasks when you have no Task (see the tree-node
+principle in [SKILL.md](../SKILL.md)). For a given Task you are its Owner when its
+`owner` is your session. Owner is a collaboration responsibility, not a business
+identity or extra authority. Project instructions and work skills define execution methods.
 
 ## Coordinate by default; delegate delivery
 
-Your default responsibility is clarification, delegation and follow-through.
+Without a Task of your own, your default responsibility is clarification, delegation and follow-through.
+With a Task, the same Owner rules apply to each child Task you create for it.
 Bounded read-only investigation, answers and option comparisons are yours to provide.
 For default Agent Tasks, delegate implementation and state-changing delivery through Task to an independent
 Executor, not your own tools or subagents: this keeps delivery responsibility clear.
 A result request is not permission for personal implementation, even for small work.
 
 Personal execution requires an explicit request to execute personally or an actual
-assignment as a capable Executor. Dual-role selection alone is neither assignment
-nor permission to take over another Executor's work. Unavailable delegation is a
-blocker to explain, not an exception.
+assignment to you as Executor. Holding the node role alone is neither assignment
+nor permission to take over another Executor's work, including a child you delegated.
+Unavailable delegation is a blocker to explain, not an exception.
 
 Distinguish discussion, investigation, recording an idea and authorizing execution.
 Investigation does not authorize changes; recording does not authorize dispatch.
@@ -68,7 +66,7 @@ Skill enabled is not body loaded; Executor loads relevant bodies when first need
 
 ## Child Tasks: delegate from your own assignment
 
-Roles are per Task: Executor for your assignment, Owner (this Skill) for child Tasks you create
+Roles are per Task: Executor for your assignment, Owner (this reference) for child Tasks you create
 for it. Delegation follows scope, not a preset lead identity: split only for several independent
 outcomes, item-by-item trade-off discussion with the user, or follow-up detail that would crowd
 your context; deliver a coherent result directly, leaning toward delegation as load grows.
@@ -76,14 +74,14 @@ A child is more specific than its parent, never passed down unchanged, and withi
 authorized scope; ask the user before anything outside it. Assign children to other sessions,
 never implement them yourself, and integrate their outcomes before reporting your Task done.
 The service records lineage and caps it at 3 levels; pending-decision Tasks go to a new session
-([delegating child Tasks](references/task-writes-and-recovery.md#delegating-child-tasks)).
+([delegating child Tasks](task-writes-and-recovery.md#delegating-child-tasks)).
 
 ## Known scripts, not arbitrary automation
 
 Agent remains the default. Owner may choose an automation Task only for an authorized, trusted repeatable known script, not to bypass delegation for arbitrary work.
-Read [automation](references/automation.md) when choosing this path: discover/register, snapshot typed inputs, optionally subscribe for concrete follow-up, then explicitly start.
+Read [automation](automation.md) when choosing this path: discover/register, snapshot typed inputs, optionally subscribe for concrete follow-up, then explicitly start.
 No Executor, ACK, session slot, child Tasks or workflow engine; no automatic rerun.
-Only Owner gets `task_script_read`, `task_script_register`, `task_automation_start` and `task_automation_reconcile`; reconciliation clears a proven-safe barrier, never delivers work.
+`task_script_read`, `task_script_register`, `task_automation_start` and `task_automation_reconcile` are Owner work, used only under this guidance; reconciliation clears a proven-safe barrier, never delivers work.
 
 ## Coding work
 
@@ -113,7 +111,7 @@ and an explicit important-update handoff when normal checkpoints cannot wait.
 Ordinary edits/reports are silent without an explicit status subscription;
 `task_edit` does not send an updated notice. Subscriptions do not restore default
 progress/final notifications or permit Executor-to-Owner messages.
-For the exceptional handoff, read [important updates](references/important-updates.md)
+For the exceptional handoff, read [important updates](important-updates.md)
 before sending one `immediate` notice; leave queued messages and ongoing work intact,
 without starting a monitoring or conversation loop.
 
@@ -123,17 +121,20 @@ result or arranging another authorized independent Task. Merely knowing progress
 or confirming completion, including repeated reporting, is not a reason to subscribe. Judge the need yourself;
 the user need not explicitly request a subscription. Do not invent follow-up work,
 split a complete outcome or add an approval gate to justify a wait.
+For child Tasks of your own assignment, do not subscribe to done/blocked/cancelled: the
+service already sends one `child_done`, `child_blocked` or `child_cancelled` card per such
+transition ([Task links](task-links.md)). Follow each child until its result is integrated.
 
 Owner may explicitly subscribe to specified Task states only for that necessary
 follow-up. Choose the fewest target states that enable it; withdraw a still-waiting
 subscription if the follow-up is no longer needed. For authorized "do B after A" work, create B at once as an unassigned Task with `blocked_by`
-and a complete description instead of subscribing; private notes never wake you. On its `event=ready` or `event=blocker_cancelled` card, reassess before dispatching or revising B; an undecided follow-up may be a pending-decision planning Task, dispatched to a new session that discusses it with the user before delivering, delegating or cancelling ([dependencies](references/task-writes-and-recovery.md#task-dependencies-blocked_by)).
+and a complete description instead of subscribing; private notes never wake you. On its `event=ready` or `event=blocker_cancelled` card, reassess before dispatching or revising B; an undecided follow-up may be a pending-decision planning Task, dispatched to a new session that discusses it with the user before delivering, delegating or cancelling ([dependencies](task-writes-and-recovery.md#task-dependencies-blocked_by)).
 The first real matching transition ends the subscription; already matching at registration means failure, not an immediate notice.
-On `[Task status updated](task:<uuid>?event=status_changed)`, read only necessary
+On `[As Owner: Task status updated](task:<uuid>?event=status_changed)`, read only necessary
 latest content in one bounded call where possible and reassess the planned follow-up;
 act only if it is still needed and authorized.
 The card is not proof of complete delivery or an Executor definition-ACK instruction. Do not automatically resubscribe, poll or hold this turn open waiting.
-See [subscription handling](references/task-writes-and-recovery.md#one-shot-status-subscriptions)
+See [subscription handling](task-writes-and-recovery.md#one-shot-status-subscriptions)
 for registration, withdrawal and uncertain delivery.
 
 ## Follow bounded evidence
@@ -150,7 +151,7 @@ Omitting `include` retains the legacy compact overview, not complete result text
 
 Read `definition` before editing requirements; use histories only for a historical
 question. Avoid a fixed overview-then-outcomes sequence, guessing outcomes then
-activity, or reading every group. See [Task views and fields](references/reading-tasks.md)
+activity, or reading every group. See [Task views and fields](reading-tasks.md)
 for complete selected records, provenance, size errors and bounded alternatives.
 Trust complete delivery unless the Task requires review; preserve partial results
 and unexecuted boundaries. When asked, summarize active, waiting, complete or unknown
@@ -167,7 +168,7 @@ not quality or thought. Retro does not replace outcome/blockers or authorize
 improvements, scope expansion or dispatch. No mandatory Owner review, new
 notification, subscription or completion gate is added.
 
-## Preserve state; reuse stable guidance
+## Preserve state
 
 Use actual Task/session IDs, stable mutation request IDs and fresh returned
 `write_context` where required; inspect errors and `definition_check` as well as the result.
@@ -175,12 +176,10 @@ Unknown effects do not justify a blind retry or replacement Task/session; preser
 request identity and known effects. Cancel only on an explicit decision: record changes
 do not stop Agent native work or undo external effects; automation cancellation requests termination, not rollback. Do not reassign a bound
 Task or impersonate Executor. Prefer eligible original-Executor `task_reopen` for user-authorized done Agent rework, not replacement/redispatch;
-see [rework eligibility](references/task-writes-and-recovery.md#original-executor-rework-after-done). Cancelled/automation/ineligible work needs a new authorized Task.
+see [rework eligibility](task-writes-and-recovery.md#original-executor-rework-after-done). Cancelled/automation/ineligible work needs a new authorized Task.
 
-Reuse this Skill while it remains in context; reload for missing/changed guidance
-or an unclear rule, not a new message. This never replaces fresh Task state or ACK.
 Use tool schemas for arguments; consult
-[Task writes and recovery](references/task-writes-and-recovery.md) for unfamiliar
+[Task writes and recovery](task-writes-and-recovery.md) for unfamiliar
 write rules, conflicts or uncertain effects, and
-[Task links](references/task-links.md) for link syntax or unfamiliar notices.
+[Task links](task-links.md) for link syntax or unfamiliar notices.
 Load only the reference needed, not the whole set.

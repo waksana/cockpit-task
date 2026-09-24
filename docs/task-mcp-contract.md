@@ -12,7 +12,7 @@ Task 提供十六个工具，模块 ID 与 MCP key 为 `cockpit-task`。
 不是默认最终通知、监工或依赖调度。模块只维护 Owner / Executor 两份角色技能，
 另随包提供独立的 `github-coding` 工作 Skill，不改变 Task 工具或引入业务类型。
 
-| 工具 | Owner | Executor | 职责 |
+| 工具 | 作为 Owner | 作为 Executor | 职责 |
 | --- | --- | --- | --- |
 | `task_read` | 是 | 是 | 按角色关注点读取，说明、历史、成果与操作结果按需展开 |
 | `task_create` | 是 | 否 | 只登记，不指派或创建 session |
@@ -31,11 +31,12 @@ Task 提供十六个工具，模块 ID 与 MCP key 为 `cockpit-task`。
 | `task_subscribe` | 是 | 否 | 显式登记未来状态的一次性 Owner 通知，当前已匹配则失败 |
 | `task_unsubscribe` | 是 | 否 | 取消仍在等待的订阅，不撤回已触发或发送的通知 |
 
-表中角色表示宿主注入的工具集合，不是逐 Task 权限表。具有工具即可操作其他 Task，
+唯一的 `node` 角色注入全部十六个工具；表中两列表示节点相对某个 Task 的关系（读取以
+`actor_role` 返回）通常使用的工具，不是逐 Task 权限表。具有工具即可操作其他 Task，
 owner / executor 用于责任、筛选和追溯，不作为 ACL。版本、状态、逐版 ACK、
 幂等、固定绑定与单 session 单项未结束执行等数据检查仍适用于所有调用者。
 
-Executor 子集没有创建 Task、脚本登记、start/reconcile 或订阅工具。
+执行 Task 本身不授予创建、脚本登记、start/reconcile 或订阅的判断；这些是委派子 Task 时的 Owner 工作。
 默认 Agent Task 保持原指派协议；automation 不接受 assign/ack/report，不伪造 Executor、
 ACK 或 session 占用。Owner 只为可信可重复已知脚本选择 automation，不把任意工作脚本化。
 宿主负责已有 session 的角色管理；
@@ -43,10 +44,9 @@ Task 自身不暴露角色变更，指派不追加角色、Skill 或 MCP。
 已绑定 Executor 不可替换；done Agent 仅有 `task_reopen` 窄例外，
 cancelled / automation 不恢复执行。
 
-同一模块可以选择多个角色。仅选 Executor 时使用上表 Executor 列；
-同时选 Owner / Executor 时工具取并集，共享工具只注册一次，两份 Skill 按委派和执行场景配合。
-`task_session_create` 只为新 session 选择 Executor，不隐式选中两种角色。
-角色变化或多选不等于实际承接，也不放宽执行占用限制。
+模块只提供一个角色 `node`，合并 Skill `cockpit-task-tree` 按执行与委派等类别组织参考。
+原 `owner` / `executor` 角色已删除且无别名。`task_session_create` 为新 session 选择 `node`。
+持有角色不等于实际承接，也不放宽执行占用限制。
 
 ### 普通更新不发消息，重要更新由 Owner 单次即时提醒
 
@@ -54,13 +54,13 @@ cancelled / automation 不恢复执行。
 Owner 判断重要更新不能等待正常同步时，可明确进行一次重要更新交接。
 
 - Owner 按 Skill 先保存完整 Task 要求，核对仍为同一未结束指派且最新版未 ACK；已对齐则不重复通知。
-- 通过已有 `cockpit_send_prompt` 的 `mode:"immediate"` 一次发送 `[Task updated](task:<uuid>?event=updated)` 和读取完整 execution / ACK 最新 revision 的要求，不复制完整 description。
+- 通过已有 `cockpit_send_prompt` 的 `mode:"immediate"` 一次发送 `[As Executor: Task updated](task:<uuid>?event=updated)` 和读取完整 execution / ACK 最新 revision 的要求，不复制完整 description。
 - immediate 向运行中的当前轮次插入消息，不新开一轮、不整理或重放队列、不为通知中断工作；它不能回答待决 ask/plan/elicitation。接受不等于消费或 ACK；失败/未知只作有界核对，不盲重试或自动升级为中断。
 - 首次指派先检查 idle / 空 queue，已知忙碌则不发送、不主动中断；检查与 enqueue 发送之间存在竞态，queued / unconfirmed 必须保留真实分步结果，不承诺绝不入队或盲重发。
 - 不通过后台巡查、定时发送或 Task 自建消息队列触发该行为，不宣称是原子排他保证。
 
 这是 Owner Skill 指导的例外流程，不是 Task 工具、自动推进或后台循环。
-完整边界与模板见 [Owner 随包参考](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)，
+完整边界与模板见 [Owner 随包参考](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md)，
 公开接入见[宿主契约](task-host-contract.md)。
 task_edit、definition_check 和 ACK 差异都不自动触发队列清理、中断或消息发送。
 
@@ -114,6 +114,7 @@ Executor 开始、恢复及执行要求同步仍读完整 `execution`，不能�
 | `outcomes` | `task_id`、`limit?`、`cursor?` | 保留的成果页，区分对应定义版本和执行归属 |
 | `subscriptions` | `task_id`、`limit?`、`cursor?` | 有界订阅历史、匹配状态及投递事实，不扫描 Owner 聊天 |
 | `dependency_notices` | 依赖方 `task_id`、`limit?`、`cursor?` | 该 Task 的 ready / blocker_cancelled 通知及投递事实，分页同 subscriptions |
+| `child_notices` | 子 `task_id`、`limit?`、`cursor?` | 该子 Task 发给其 Owner 的 child_done / child_blocked / child_cancelled 通知及投递事实，分页同 subscriptions |
 | `automation_log` | `task_id`、`offset?`、`limit?` | automation 合并 stdout/stderr 的有界保留页与明确遗漏计数 |
 | `operation` | `request_id` | 某次明确操作的结果，特别是指派步骤 |
 
@@ -230,9 +231,12 @@ blocker 必须存在、与本 Task 同一 Owner、不是自身、不是已取消
 `blocked_by:[{task_id,status}]` 与 `ready`（全部 blocker done 或无 blocker 时为 true）。
 未就绪时 `task_assign` 与 `task_automation_start` 返回 `TASK_NOT_READY`，没有覆盖参数。
 `task_create` 的 `owner` 若正在执行未完成的 Agent Task，服务自动记录其为新 Task 的 `parent_task_id`，`depth` 为父级加一（顶层为 1）；父 Task 已在第 3 层时返回 `DELEGATION_DEPTH_EXCEEDED` 且不保存。context 返回 `parent_task_id` 与 `depth`；`list` 可用 `parent_task_id` 读取直接子 Task。谱系不影响就绪。
+传入 `actor_session_id` 的读取（list 项、overview、execution、definition 及 include 读取）附 `actor_role`：`executor`、`owner`、`owner_and_executor` 或 `none`，由 Task 事实推导，不是权限。
+创建时，actor 正执行未完成 Agent Task 而 `owner` 不是自己，或 `owner` 正执行而 actor 不是它本身，返回 `DELEGATION_OWNER_MISMATCH` 且不保存。指派时 executor 等于 owner 返回 `SELF_ASSIGNMENT`；executor 是任一祖先 Task 的 Owner 或 Executor 返回 `DELEGATION_CYCLE`。
+子 Task 真实转入 done、blocked 或 cancelled 且父 Task 未结束、父 Task 的 Executor 即子 Task 的 Owner 时，系统向该 Owner 发送一次 `[As Owner: child Task done](task:<uuid>?event=child_done)`（或 `[As Owner: child Task blocked](task:<uuid>?event=child_blocked)`、`[As Owner: child Task cancelled](task:<uuid>?event=child_cancelled)`），无需订阅；引用指向子 Task。按子 Task、状态与生命周期唯一，每次转换一张；同一转换已触发订阅时不重复。投递规则同 subscriptions，id 附在 `notice_ids`。
 就绪不改变状态、不指派、不启动。仍待派发（todo、无 Executor；automation 尚未启动）的依赖方在
-最后一个 blocker 真实转入 done 时，系统向其 Owner 发送一次 `[Task ready](task:<uuid>?event=ready)`；
-blocker 被取消时发送一次 `[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)`。
+最后一个 blocker 真实转入 done 时，系统向其 Owner 发送一次 `[As Owner: Task ready](task:<uuid>?event=ready)`；
+blocker 被取消时发送一次 `[As Owner: Task blocker cancelled](task:<uuid>?event=blocker_cancelled)`。
 引用指向依赖方。通知按依赖方、类型、blocker 与 blocker 生命周期唯一，重开后再次 done 可再通知；
 Owner 编辑从不发通知。投递与 subscriptions 使用相同证据与恢复规则，触发写入的 result 附 `notice_ids`。
 
@@ -286,7 +290,7 @@ Linux 内核进程组探测 `kill(-pgid,0)` 必须返回 `ESRCH`、证明记录�
 关闭服务不总能证明退出，blocked+barrier 是正确的保守结果。
 它不杀恢复进程、不重跑、不把 blocked 改为 done、不宣称回滚或成功。
 任何再次执行必须新授权、新 Task。完整操作示例见
-[Owner 自动化参考](../skills/cockpit-task-owner/cockpit-task-owner/references/automation.md)。
+[Owner 自动化参考](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md)。
 
 ### task_session_create
 
@@ -296,9 +300,9 @@ session、装配 Task 指导与工具并显式检查能力。不要求 Owner 手
 
 完整输入：`actor_session_id, request_id, cwd, skills?, mcp_servers?`。
 可选资源选择见下节；不接受 `work_skills`、任意角色或宿主配置透传。
-Executor 角色仍通过既有 skillDirectories 发现协作 Skill 及共享 `github-coding`。
+`node` 角色仍通过既有 skillDirectories 发现 `cockpit-task-tree` 及共享 `github-coding`。
 模块调用 `session/new`，输入为
-`{cwd,roles:[{moduleId:"cockpit-task",roleId:"owner"},{moduleId:"cockpit-task",roleId:"executor"}]}`，使新 session 可交付自己的 Task，也可为其委派子 Task；就绪检查仍针对 Executor 能力。
+`{cwd,roles:[{moduleId:"cockpit-task",roleId:"node"}]}`，使新 session 可交付自己的 Task，也可为其委派子 Task；就绪检查针对 `node` 角色的执行能力。
 省略两个资源字段时保留原创建行为和回执，即使宿主没有新的准备能力也不受影响。
 显式提供任一字段（包括空数组）则请求资源准备：在创建前检查宿主支持标记，
 创建后走与 `task_session_prepare` 相同的准备路径，再检查最终 Executor 能力及空闲状态。
@@ -315,7 +319,7 @@ Executor 角色仍通过既有 skillDirectories 发现协作 Skill 及共享 `gi
 
 完整输入：`actor_session_id, request_id, session_id, skills?, mcp_servers?`。
 这是 Owner 对已选 Executor 的显式准备，不接受 `task_id` 或修复已绑定 Task 的模式。
-目标必须已加载、原生空闲、Executor 角色已实际应用且无待重载角色；
+目标必须已加载、原生空闲、`node` 角色已实际应用且无待重载角色；
 任何未结束 Task 的 Executor 都须排除，即使 native 显示 idle。
 完成/取消后的 session 可重新选择，但仍须满足这些条件；不强制优先复用或新建。
 
@@ -405,7 +409,7 @@ Executor 首次需要时自行加载相关 Skill 正文，不继承 Owner 的上
 确认所选 session 及执行能力可用
   → 首次绑定 Task 的 Executor，ACK 仍为空，等待明确确认和开始执行
   → 尽力把 Executor 原生会话标题设为 Task 标题（独立步骤，不影响指派结果）
-  → 确认 idle / 空 queue 后仅发送一次 [Task assigned to you](task:<uuid>?event=assigned)
+  → 确认 idle / 空 queue 后仅发送一次 [As Executor: Task assigned to you](task:<uuid>?event=assigned)
 ```
 
 <a id="assign-session-title"></a>
@@ -436,7 +440,7 @@ Task 类型或状态，也不是命令或调度机制。工具的能力检查、
 列表角色标签不代表当前能力就绪。无论来源，指派工具都负责重新检查，
 不把此前创建成功或宿主角色记录当作永久就绪证明。
 
-已有 session 缺少 Executor 角色指导、Skill 或工具时，绑定和发送前返回
+已有 session 缺少 `node` 角色指导、Skill 或工具时（包括仅有已删除的 owner/executor 角色），绑定和发送前返回
 `CAPABILITY_UNAVAILABLE` 及缺失项，不追加角色、启用 MCP、重载或自动新建替代者。
 完成或取消后 session 可复用，但不得同时承担两项未结束 Task。
 
@@ -651,7 +655,7 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 
 输出 `result` 为本地变更效果和 `subscription` 完整记录。recipient 固定取 Task.owner，不取 actor。登记本身不发送消息、不 ACK、不改变 Task 状态、定义或 write_context。首次成功进入任意目标状态时，状态提交、订阅消费、事件事实和 pending 投递记录同事务保存。相同状态报告、activity、edit、ACK 和被拒绝的状态请求不触发；没有订阅时保持静默。一次消费后不自动续订。
 
-触发后系统只发送 `[Task status updated](task:<uuid>?event=status_changed)`，通过宿主 enqueue 新 prompt；busy Owner 的 queued 是正常结果，不中断、不清队列。卡片读取最新数据，不承诺展示触发时状态，也不要求 Owner ACK。原始触发事实通过 subscriptions 读取。
+触发后系统只发送 `[As Owner: Task status updated](task:<uuid>?event=status_changed)`，通过宿主 enqueue 新 prompt；busy Owner 的 queued 是正常结果，不中断、不清队列。卡片读取最新数据，不承诺展示触发时状态，也不要求 Owner ACK。原始触发事实通过 subscriptions 读取。
 
 ### task_unsubscribe
 
@@ -698,6 +702,9 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 | `TASK_STATE_CONFLICT` | 读取当前生命周期状态，不用普通报告恢复已结束任务 |
 | `EXECUTOR_OCCUPIED` | 由 Owner 选择其他安排，不抢占或自动新建 |
 | `DELEGATION_DEPTH_EXCEEDED` | Owner 正执行的父 Task 已达 3 层委派上限，未保存；直接交付本层或询问用户如何重构 |
+| `DELEGATION_OWNER_MISMATCH` | 执行中节点替他人建 Task，或替执行中节点建 Task，未保存；由执行中节点自己作为 owner 创建子 Task |
+| `SELF_ASSIGNMENT` | executor 与 owner 相同，未指派；指派给其他 session。仅已持有 Task 的节点或用户明确要求时才亲自完成，根节点仍默认委派 |
+| `DELEGATION_CYCLE` | executor 是祖先 Task 的 Owner 或 Executor，未指派；选择谱系外的 session |
 | `TASK_NOT_READY` | `blocked_by` 尚有未 done 的 blocker；等待 ready 通知或修订 blocker，不绕过 |
 | `DEPENDENCY_LOCKED` / `DEPENDENCY_SELF` / `DEPENDENCY_CYCLE` | 已派发后不能改 blocker，或 blocker 为自身/成环 |
 | `BLOCKER_NOT_FOUND` / `BLOCKER_OWNER_MISMATCH` / `BLOCKER_CANCELLED` | 新增 blocker 不存在、Owner 不同或已取消 |
@@ -732,9 +739,9 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 
 ## 5. 正常调用示例
 
-以下为调用顺序，省略的共用字段仍为实际输入必填。通用引用仍为 `[Task](task:<uuid>)`，例如 `[Task](task:de33dc0a-2f93-4c5a-b14e-87111940d520)`。整条首次派单消息则为 `[Task assigned to you](task:<uuid>?event=assigned)`，不附 description。
+以下为调用顺序，省略的共用字段仍为实际输入必填。通用引用仍为 `[Task](task:<uuid>)`，例如 `[Task](task:de33dc0a-2f93-4c5a-b14e-87111940d520)`。整条首次派单消息则为 `[As Executor: Task assigned to you](task:<uuid>?event=assigned)`，不附 description。
 
-只有小写 `assigned` / `updated` / `status_changed` / `ready` / `blocker_cancelled` 是有效 event。消息原因固定不变，卡片仍读取最新
+只有小写 `assigned` / `updated` / `status_changed` / `ready` / `blocker_cancelled` / `child_done` / `child_blocked` / `child_cancelled` 是有效 event。卡片标签带 “As Executor:” / “As Owner:” 前缀；旧的无前缀标签仍被识别。消息原因固定不变，卡片仍读取最新
 Task；renderer 只看 URL 中的显式 event，不从 label 或 Task status 推断。
 通用引用及历史消息不显示事件标题，保持兼容；未知 event、畸形 query 不认领，
 不能丢弃 query 后冒充通用引用。不使用可能被识别为文件的相对 `task/<id>` 路径。
@@ -767,7 +774,7 @@ Executor:
 
 重要更新由 Owner 按 Skill 保存 Task，核对同一未结束指派及未 ACK 的最新 revision 后，
 通过已有 `cockpit_send_prompt` 的 `mode:"immediate"` 一次发送
-`[Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新版要求。
+`[As Executor: Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新版要求。
 不整理或重放队列、不为通知中断工作，不重复未知发送；受理不是 ACK。普通 task_edit 不发送通知。
 
 ## 6. 传输与启动边界

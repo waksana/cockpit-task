@@ -21,6 +21,7 @@ Without `include`, the single-Task overview retains its existing compact shape:
 | `kind`, `automation` | `agent` by default; automation runtime facts without an Executor or ACK obligation |
 | `owner`, `executor`, `status` | Coordination responsibility, assigned session or null, and declared lifecycle state |
 | `revision`, `acknowledged_revision` | Current definition versus actual Executor confirmation; null means no ACK |
+| `actor_role` | Present when you pass `actor_session_id`: your role for this Task from its facts, `executor` (executor is you), `owner` (owner is you) or `none`. Derive your role from this, not memory |
 | `parent_task_id`, `depth` | Delegation lineage fixed at creation: the parent Task whose Executor created this Task, or null for top-level; `depth` 1–3. Not a readiness gate or authority |
 | `blocked_by`, `ready` | Each declared blocker's `task_id` and current `status`, and whether all are `done`; `[]`/true without dependencies. Ready is a dispatch gate, not a status or instruction |
 | `activity` | Latest activity or null, including its ID, revision, Executor, author, time and reported source |
@@ -51,7 +52,8 @@ This selects content groups, not arbitrary columns or a role-dependent projectio
 
 Every selected response includes compact current context: `id`, `task_id`, `title`,
 `owner`, `executor`, `status`, `revision`, `acknowledged_revision`, `created_at`,
-`updated_at`, `write_context`, `kind`, `parent_task_id`, `depth`, `blocked_by`, `ready`. Context is always returned even if not explicit;
+`updated_at`, `write_context`, `kind`, `parent_task_id`, `depth`, `blocked_by`, `ready`, plus `actor_role` when
+`actor_session_id` is given. Context is always returned even if not explicit;
 `include=["context"]` returns only that context.
 
 | Group | Additional content |
@@ -122,6 +124,7 @@ Selecting `definition` or any other overview groups cannot replace that requirem
 | Whether a failed or uncertain request had an effect | `operation` with `request_id` |
 | Records for an explicit one-shot status subscription | `subscriptions` with `task_id` |
 | Ready/blocker-cancelled notices sent for a dependent Task | `dependency_notices` with the dependent's `task_id` |
+| Done/blocked/cancelled notices sent for a child Task | `child_notices` with the child's `task_id` |
 
 `definition` and `execution` currently return the same complete Task projection:
 identity, responsibility, status, revisions, timestamps, write context, description,
@@ -177,7 +180,8 @@ A subscription/delivery record is not proof the Owner read a notice or the Task
 is now complete. Select the latest evidence needed for the planned decision.
 See [subscription handling](task-writes-and-recovery.md#one-shot-status-subscriptions)
 for the one-shot lifecycle and uncertain effects. `dependency_notices` follows the
-same pagination and delivery-record meaning for [Task dependencies](task-writes-and-recovery.md#task-dependencies-blocked_by).
+same pagination and delivery-record meaning for [Task dependencies](task-writes-and-recovery.md#task-dependencies-blocked_by),
+and `child_notices` for [child Tasks](task-writes-and-recovery.md#delegating-child-tasks).
 
 List defaults to 20 items, maximum 50, with `status=unfinished` unless specified.
 Use an explicit terminal status or `all` when the question includes finished work;
