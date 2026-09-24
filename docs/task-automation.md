@@ -1,9 +1,9 @@
 # Lightweight automation Tasks
 
-Agent is the default: one independent Executor delivers a complete authorized
-outcome. Owner may instead choose automation for an already known, trusted,
+Agent is the default: one independent assignee delivers a complete authorized
+outcome. orchestrator may instead choose automation for an already known, trusted,
 repeatable local script. This is not arbitrary task-to-script conversion, a
-workflow/dependency engine, a scheduler, or permission to invent child Tasks outside
+workflow/dependency engine, a scheduler, or permission to invent Subtasks outside
 authorized delegation scope.
 Registration, Task creation, optional subscription and execution are separate.
 
@@ -25,7 +25,7 @@ ordinary Agent Tasks are unaffected.
    configuration, SHA256 and typed inputs. Omit `automation` for an Agent Task.
    Creation never runs code. Script selection/input snapshots are never editable.
 4. Default to no subscription. Only if a future state enables a concrete necessary
-   authorized Owner action, register a
+   authorized orchestrator action, register a
    one-shot subscription **before start**. Prefer `done` / `blocked`, adding
    `cancelled` only when necessary. There is no automatic subscription.
 5. Explicitly call `task_automation_start` with actor, stable request ID, Task ID,
@@ -33,7 +33,7 @@ ordinary Agent Tasks are unaffected.
    service's persistent single queue, not in an Agent session.
 
 All required arguments and real JSON examples are in the independently packaged
-[Owner reference](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md).
+[orchestrator reference](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md).
 Exact schemas and bounds are in the [MCP contract](task-mcp-contract.md).
 
 Execution uses `executable [...argv, script_path, ...typedStrings]` with no shell.
@@ -45,10 +45,10 @@ script behavior safe.
 
 ## Records and results
 
-Reads expose `kind=agent|automation`; automation has no Executor, fabricated ACK,
+Reads expose `kind=agent|automation`; automation has no assignee, fabricated ACK,
 assignment prompt or session occupancy. `task_assign`, `task_ack` and `task_report`
-reject automation. Owner alone receives the four script/start/reconcile tools;
-Executor retains existing read/edit/cancel access, not create/start or child-Task authority.
+reject automation. orchestrator alone receives the four script/start/reconcile tools;
+assignee retains existing read/edit/cancel access, not create/start or Subtask authority.
 Definitions and editable materials freeze in `queued`, `starting`, `running`.
 
 Run states are `created`, `queued`, `starting`, `running`, `succeeded`, `failed`,
@@ -58,9 +58,9 @@ failure/interruption writes `blocked` plus an outcome (cancellation remains canc
 No Agent reporting or polling is involved. An available outcome is evidence, not
 proof of every intended external effect: read its content and execution boundary.
 Automatic subscription transitions record `event.source='automation'`,
-`event.run_id` and `actor_session_id:null`. Service outcomes have `executor:null`,
+`event.run_id` and `actor:null`. Service outcomes have `assignee:null`,
 `source:'automation'` and `author:'automation:<run_id>'`. That author is a service
-label, not a native session to inspect, contact or treat as an Executor.
+label, not a native session to inspect, contact or treat as an assignee.
 
 Default Task overview/list carry runtime facts in `automation`; `definition` / `execution`
 also carry the immutable `script` / `parameters` snapshot. Runtime facts include
@@ -116,8 +116,8 @@ Do not put secrets in Task inputs or retained output.
 
 Current source/package version is **0.1.13**, retaining completion retro for Agent Tasks,
 selective Task reads, the coding/deployment Skill boundary clarification,
-Owner request follow-through (#45), immediate important-update notices (#47),
-Agent reopen (#49), Owner sequential subscription follow-up (#53), Executor
+orchestrator request follow-through (#45), immediate important-update notices (#47),
+Agent reopen (#49), orchestrator sequential subscription follow-up (#53), assignee
 session titles (#55), native Task dependencies and github-coding Skill updates,
 and adding per-Task hierarchical delegation and the tree-node model from #71/#72/#74
 via #75. Schema v7 is roll-forward only; installed 0.1.12 cannot open v7.

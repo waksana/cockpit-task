@@ -267,8 +267,8 @@ test('coding scope distinguishes repository changes from deployment and keeps mi
   assert.match(executorCoding, /set up your own isolated environment, deliver through the authorized review\/PR\/merge boundary and clean up after merge; nobody prepares or cleans it for you/);
   assert.match(executorCoding, /Ask the user, not your orchestrator, before scope changes/);
   const board = prose(readFileSync(join(root, 'docs/task-board.md'), 'utf8'));
-  assert.match(board, /If changes outside the agreed scope emerge, Executor asks the user first; once authorized it sets up that Issue and worktree within the same Task/);
-  assert.match(board, /Owner has no routine cleanup duty/);
+  assert.match(board, /If changes outside the agreed scope emerge, assignee asks the user first; once authorized it sets up that Issue and worktree within the same Task/);
+  assert.match(board, /orchestrator has no routine cleanup duty/);
   assert.doesNotMatch(board, /Owner prepares clean current mainline|preparing the isolated environment and safe post-merge cleanup are Owner coordination/);
   assert.match(owner, /Mixed delivery stays one Task/);
   assert.match(owner, /default delegation responsibility/);

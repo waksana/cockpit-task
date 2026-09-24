@@ -26,6 +26,18 @@ the package back is not a database rollback. Never overwrite live data with a
 historical backup. Validate migration on an isolated consistent copy before
 separately authorized deployment.
 
+The current vocabulary refactor for Issue #82 is schema v9 and a one-shot
+switch with no aliases: `owner` becomes `orchestrator`, `executor` becomes
+`assignee`, and tool inputs/results, error codes, operation receipts, Web and
+docs move together. Schema v9 renames columns/indexes in place, adds
+`operations.invocation`, migrates event JSON `actor_session_id` to `actor`, and
+is roll-forward only: installed 0.1.13 and older modules refuse v9 data with
+`SCHEMA_TOO_NEW`. Deploy it only jointly with a Cockpit build that injects
+`_meta["cockpit/invocation"].sessionId` into MCP calls (waksana/cockpit#205);
+without that host support every tool, including reads, returns
+`INVOCATION_REQUIRED` before writing. Old `request_id` replays can conflict after
+upgrade because request fingerprints now include the host-supplied caller.
+
 Schema v8 (retro handling, #80) is source not yet in any package: the next
 package needs a fresh version, and v8 is roll-forward only, so installed 0.1.13
 refuses v8 data.
@@ -37,11 +49,11 @@ non-destructive, table-only forward migration. Schema v6 is roll-forward only:
 installed 0.1.11 cannot open v6 data, and switching its package back is not a
 database rollback.
 
-Version 0.1.11 includes Owner sequential subscription follow-up (#53) and
-Executor session titles (#55), superseding installed 0.1.10; that installation
+Version 0.1.11 includes orchestrator sequential subscription follow-up (#53) and
+assignee session titles (#55), superseding installed 0.1.10; that installation
 remains immutable. Session-title results use the existing operations JSON and add
 no schema migration. Hosts without native name provenance safely skip the title
-step. Version 0.1.10 introduced Owner request follow-through (#45), immediate
+step. Version 0.1.10 introduced orchestrator request follow-through (#45), immediate
 important-update notices (#47) and Agent reopen (#49). Version 0.1.9 introduced
 the coding/deployment Skill boundary clarification. Schema v5 deliberately does
 not backfill assignment records: all pre-upgrade assigned Tasks remain readable
