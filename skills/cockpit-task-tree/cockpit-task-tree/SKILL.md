@@ -65,7 +65,8 @@ identity, a subagent acts for its session, and the service authorizes each write
 - Verify each result against your Task's requirements. Errors and empty results are not
   results; revise or add a Subtask for gaps. Integrate, fold your Subtasks' retros into your
   own retro, and only then complete your Task.
-- Without a Task (the root), you dispatch this way but do not follow progress.
+- Without a Task (the root), you dispatch this way but do not follow progress, so give work
+  that needs integration to one top-level Task and let its assignee split it.
 
 **R4 Report work outside your Task upward.**
 - If it blocks you, report `blocked` and state what must happen first, including any user
@@ -112,7 +113,8 @@ Task's transitions reach the root only through its own subscription.
 - **F2 `[Task assigned]`.** Read the full Task and ACK. Do it or split it (R3). Ask the user
   real decisions and revise your Task (R1, R2). Report status; finish with outcome and retro.
 - **F3 `[Task updated]`.** Read the full Task, ACK the latest revision, continue by the
-  current agreement.
+  current agreement, and address every changed requirement in your outcome, including why
+  one does not apply.
 - **F4 `[Task cancelled]`.** Read the cancellation, stop affected work, report nothing more.
 - **F5 Subtask cards.** `done`: read the outcome, verify and integrate; handle anything
   reported upward (R4). `blocked`: read the reason; do not repeat a user question it is

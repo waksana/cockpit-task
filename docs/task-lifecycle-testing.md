@@ -1047,7 +1047,9 @@ service, the real `~/.copilot` or `~/.cockpit`, or existing sessions.
    `pnpm install` and `pnpm build` there.
 2. Package this module from the branch under test (`npm pack` in the module worktree) and
    record the tarball digest printed by the install step.
-3. Create a scratch root such as `/tmp/tree-trial` with `home/`, `ws/` and `bin/`.
+3. Create a scratch root such as `/tmp/tree-trial` with `home/`, `ws/` and `bin/`. If `/tmp` is
+   unavailable, use another scratch directory outside every repository checkout (never inside
+   the shared main checkout or a worktree), and substitute it in every path below.
    Every host command must run under `env -i`, because an agent shell usually carries
    `COCKPIT_HOME`, `COCKPIT_PORT`, `COCKPIT_WEB_DIR`, `COPILOT_AGENT_SESSION_ID` and
    `COPILOT_CLI` from the live service and would otherwise point the trial host at it:
