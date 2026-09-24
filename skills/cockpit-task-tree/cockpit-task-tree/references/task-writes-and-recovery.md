@@ -285,8 +285,9 @@ The service rejects role confusion before any effect:
 - `DELEGATION_OWNER_MISMATCH`: a session executing an unfinished Agent Task creates Tasks
   only with itself as `owner` (they are its children), and no other session can create a
   Task owned by a session that is executing one;
-- `SELF_ASSIGNMENT`: a Task is never assigned to its own Owner; do small work directly
-  without a Task instead;
+- `SELF_ASSIGNMENT`: a Task is never assigned to its own Owner; assign another session.
+  Doing the work yourself without a Task fits only a node that already holds a Task, or
+  an explicit user instruction, never a root node's default delegation;
 - `DELEGATION_CYCLE`: a child is never assigned to a session that owns or executes one of
   its ancestor Tasks, so work cannot loop back up the lineage.
 

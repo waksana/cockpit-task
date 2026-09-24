@@ -703,7 +703,7 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 | `EXECUTOR_OCCUPIED` | 由 Owner 选择其他安排，不抢占或自动新建 |
 | `DELEGATION_DEPTH_EXCEEDED` | Owner 正执行的父 Task 已达 3 层委派上限，未保存；直接交付本层或询问用户如何重构 |
 | `DELEGATION_OWNER_MISMATCH` | 执行中节点替他人建 Task，或替执行中节点建 Task，未保存；由执行中节点自己作为 owner 创建子 Task |
-| `SELF_ASSIGNMENT` | executor 与 owner 相同，未指派；亲自完成自己的 Task，或为子 Task 选择其他 session |
+| `SELF_ASSIGNMENT` | executor 与 owner 相同，未指派；指派给其他 session。仅已持有 Task 的节点或用户明确要求时才亲自完成，根节点仍默认委派 |
 | `DELEGATION_CYCLE` | executor 是祖先 Task 的 Owner 或 Executor，未指派；选择谱系外的 session |
 | `TASK_NOT_READY` | `blocked_by` 尚有未 done 的 blocker；等待 ready 通知或修订 blocker，不绕过 |
 | `DEPENDENCY_LOCKED` / `DEPENDENCY_SELF` / `DEPENDENCY_CYCLE` | 已派发后不能改 blocker，或 blocker 为自身/成环 |

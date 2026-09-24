@@ -258,7 +258,7 @@ export class TaskStore {
   }
   assertAssignable(row, executor) {
     if (executor === row.owner) {
-      fail('SELF_ASSIGNMENT', 'A Task cannot be assigned to its own Owner; do small work directly without a Task, or assign another session');
+      fail('SELF_ASSIGNMENT', 'A Task cannot be assigned to its own Owner; assign another session. Only a node that already holds a Task, or on explicit user instruction, does the work itself');
     }
     const loop = this.lineage(row).find(ancestor => ancestor.owner === executor || ancestor.executor === executor);
     if (loop) {
