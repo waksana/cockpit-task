@@ -106,8 +106,10 @@ test('reopen rejects mismatched/missing actor, state, stale revision and editabl
   const f = fixture(t), assigned = f.assign(f.create());
   rejects(() => f.reopen(assigned), 'TASK_STATE_CONFLICT');
   const completed = f.done(assigned);
-  rejects(() => f.reopen(completed, { actor: 'orchestrator' }), 'ASSIGNEE_MISMATCH');
-  rejects(() => f.reopen(completed, { actor: undefined }), 'ASSIGNEE_MISMATCH');
+  const g = fixture(t);
+  assert.equal(g.reopen(g.done(g.assign(g.create())), { actor: 'orchestrator' }).revision, 2);
+  rejects(() => f.reopen(completed, { actor: 'someone-else' }), 'ORCHESTRATOR_OR_ASSIGNEE_REQUIRED');
+  rejects(() => f.reopen(completed, { actor: undefined }), 'ORCHESTRATOR_OR_ASSIGNEE_REQUIRED');
   rejects(() => f.reopen(completed, { revision: 2 }), 'DESCRIPTION_UPDATED');
   rejects(() => f.reopen(completed, { write_context: assigned.write_context }), 'TASK_STATE_CONFLICT');
   const edited = f.store.executeLocal('task_edit', f.input(completed, { reason: 'Rename', title: 'Changed' }));
@@ -128,9 +130,9 @@ test('reopen rejects mismatched/missing actor, state, stale revision and editabl
 test('automation and unassigned done records cannot reopen or gain an Assignee', t => {
   const f = fixture(t), task = f.create();
   f.store.db.prepare("UPDATE tasks SET status='done',kind='automation' WHERE id=?").run(task.task_id);
-  rejects(() => f.reopen(task), 'AUTOMATION_MANAGED');
+  rejects(() => f.reopen(task, { actor: 'orchestrator' }), 'AUTOMATION_MANAGED');
   f.store.db.prepare("UPDATE tasks SET kind='agent' WHERE id=?").run(task.task_id);
-  rejects(() => f.reopen(task), 'ASSIGNEE_MISMATCH');
+  rejects(() => f.reopen(task, { actor: 'orchestrator' }), 'REOPEN_NOT_ELIGIBLE');
   assert.equal(f.store.task(task.task_id).assignee, null);
 });
 
@@ -283,7 +285,7 @@ test('service checks ready original Assignee but permits its running turn; repla
 test('service rejects wrong attribution before host observation and unavailable readiness without mutation', async t => {
   const f = fixture(t), completed = f.done(f.assign(f.create()));
   const service = new TaskService(f.store, { inspect: () => assert.fail('Mismatched actor must not inspect another session') });
-  assert.equal((await service.execute('task_reopen', f.reopenInput(completed, { actor: 'someone-else' }))).error.code, 'ASSIGNEE_MISMATCH');
+  assert.equal((await service.execute('task_reopen', f.reopenInput(completed, { actor: 'someone-else' }))).error.code, 'ORCHESTRATOR_OR_ASSIGNEE_REQUIRED');
   service.host.inspect = async () => ({ ready: false, node: true, idle: true });
   assert.equal((await service.execute('task_reopen', f.reopenInput(completed))).error.code, 'CAPABILITY_UNAVAILABLE');
   assert.equal(f.store.task(completed.task_id).revision, 1);

@@ -87,13 +87,13 @@ test('the Orchestrator records fixed, followup, watching and dismissed handling 
   assert.equal(outcomes[0].retro.handling.status, 'dismissed');
 });
 
-test('only the Orchestrator may handle a recorded retro that has findings', async t => {
+test('any caller may handle a recorded retro that has findings', async t => {
   const f = fixture(t);
   const id = await f.start('orchestrator', 'worker');
   const outcomeId = await f.finish('worker', id, 'Finding');
   const code = async (result, expected) => assert.equal((await result).error?.code, expected);
-  await code(f.handle('worker', id, outcomeId, { status: 'fixed', note: 'I fixed my own finding' }), 'ORCHESTRATOR_REQUIRED');
-  await code(f.handle('someone', id, outcomeId, { status: 'fixed', note: 'x' }), 'ORCHESTRATOR_REQUIRED');
+  assert.equal((await f.handle('worker', id, outcomeId, { status: 'fixed', note: 'I fixed my own finding' })).error, null);
+  assert.equal((await f.handle('someone', id, outcomeId, { status: 'dismissed', note: 'Reviewed by another session' })).error, null);
   await code(f.handle('orchestrator', id, randomUUID(), { status: 'fixed', note: 'x' }), 'RETRO_NOT_FOUND');
   await code(f.handle('orchestrator', id, outcomeId, { status: 'followup', note: 'x' }), 'INVALID_INPUT');
   await code(f.handle('orchestrator', id, outcomeId, { status: 'done', note: 'x' }), 'INVALID_INPUT');

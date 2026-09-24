@@ -108,6 +108,7 @@ export class AutomationStore {
   start(input) {
     this.assertPlatform();
     const task = this.store.row(input.task_id), run = this.run(task.id);
+    this.store.authorize(task, input.actor, ['orchestrator']);
     this.store.checkContext(task, input, true);
     this.store.currentRevision(task, input);
     if (task.status !== 'todo' || run.state !== 'created') fail('AUTOMATION_ALREADY_STARTED', 'An automation Task can be started once; never retry script side effects');
@@ -203,6 +204,7 @@ export class AutomationStore {
   }
   reconcile(input, groupAlive) {
     const task = this.store.row(input.task_id), run = this.run(task.id);
+    this.store.authorize(task, input.actor, ['orchestrator']);
     this.store.checkContext(task, input);
     if (!run.barrier || ['starting', 'running'].includes(run.state)) {
       fail('RECONCILE_NOT_READY', 'Only an interrupted or finished run with a termination barrier can be reconciled');

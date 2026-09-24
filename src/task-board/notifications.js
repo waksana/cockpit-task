@@ -1,4 +1,4 @@
-import { taskReference, updateNoticeText } from './reference.js';
+import { taskReference, assigneeNoticeText } from './reference.js';
 
 const detail = (error, code) => ({
   code,
@@ -27,7 +27,7 @@ export async function deliverNotification({ store, host, id, stopped }) {
   let receipt;
   try {
     receipt = channel.mode === 'immediate'
-      ? await host.send(subscription[recipient], updateNoticeText(subscription.task_id), { mode: 'immediate' })
+      ? await host.send(subscription[recipient], assigneeNoticeText(subscription.task_id, subscription.kind), { mode: 'immediate' })
       : await host.send(subscription[recipient], taskReference(subscription.task_id, channel.event));
   } catch (error) {
     return store.finishNotification(id, 'unknown', 'unknown', detail(error, 'NOTIFICATION_UNCONFIRMED'));

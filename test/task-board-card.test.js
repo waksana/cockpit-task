@@ -182,16 +182,16 @@ test('card event headings come from the message and survive loading, failure and
   const heading = card => card.children.find(child => child?.props?.className === 'tb-card-event');
   assert.equal(render('assigned').props.className, 'ck-button tb-card');
   assert.deepEqual(heading(render('assigned')).children, ['Task assigned']);
-  assert.deepEqual(heading(render('status_changed')).children, ['Subtask status changed']);
+  assert.deepEqual(heading(render('status_changed')).children, ['Subscribed Task status changed']);
   snapshot = { phase: 'ready', data: { ...result, status: 'done', revision: 4 }, error: null };
   assert.deepEqual(heading(render('assigned', 'Task updated')).children, ['Task assigned']);
   assert.deepEqual(heading(render('updated', 'Task assigned')).children, ['Task updated']);
   const notification = render('status_changed', 'Task updated');
-  assert.deepEqual(heading(notification).children, ['Subtask status changed']);
+  assert.deepEqual(heading(notification).children, ['Subscribed Task status changed']);
   assert.match(heading(notification).props.title, /not a requirement update for its assignee/);
   assert.ok(notification.children.some(child => child?.children?.includes('Orchestrator subscription triggered · current state shown below')));
   snapshot = { phase: 'ready', data: { ...result, status: 'in_progress', revision: 5 }, error: null };
-  assert.deepEqual(heading(render('status_changed')).children, ['Subtask status changed']);
+  assert.deepEqual(heading(render('status_changed')).children, ['Subscribed Task status changed']);
   assert.equal(heading(render(null, 'Task updated')), undefined);
   const ready = render('ready');
   assert.deepEqual(heading(ready).children, ['Subtask ready']);
@@ -211,7 +211,7 @@ test('card event headings come from the message and survive loading, failure and
   assert.equal(render(null).children.some(child => String(child?.children?.[0] ?? '').startsWith('Blocked by')), false);
   snapshot = { phase: 'missing', data: null, error: new Error('Missing Task') };
   assert.deepEqual(heading(render('updated')).children, ['Task updated']);
-  assert.deepEqual(heading(render('status_changed')).children, ['Subtask status changed']);
+  assert.deepEqual(heading(render('status_changed')).children, ['Subscribed Task status changed']);
 });
 
 test('HTTP reads use the scoped POST contract, without reported actor or chat requests', async () => {

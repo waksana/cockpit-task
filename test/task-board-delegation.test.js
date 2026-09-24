@@ -266,7 +266,7 @@ test('child notices yield to a same-transition subscription and stop once the pa
   const done = await f.report('worker', child, { status: 'done', outcome: { summary: 'Delivered' }, retro: null });
   assert.equal(done.result.subscription_ids.length, 1);
   assert.equal(done.result.notice_ids, undefined);
-  assert.deepEqual(f.cards('lead'), [`[Subtask status changed](task:${child}?event=status_changed)`]);
+  assert.deepEqual(f.cards('lead'), [`[Subscribed Task status changed](task:${child}?event=status_changed)`]);
   assert.equal(f.childNotices(child).length, 0);
 
   const late = await f.start('lead', 'helper');

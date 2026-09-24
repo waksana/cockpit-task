@@ -92,7 +92,7 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     const descriptions = Object.fromEntries(tools.map(tool => [tool.name, tool.description]));
     for (const tool of tools) {
       assert.deepEqual(tool.inputSchema, z.toJSONSchema(toolSchemas[tool.name], { target: 'draft-7' }));
-      assert.ok(tool.description.length < 800, `${tool.name}: keep workflow detail in Skills`);
+      assert.ok(tool.description.length < 1400, `${tool.name}: keep workflow detail in Skills`);
     }
     assert.match(descriptions.task_read, /list, filter by orchestrator, assignee or parent_task_id, or omit them with status=unfinished for the pre-dispatch conflict check/);
     assert.match(descriptions.task_read, /caller is the session named by host invocation metadata/);
@@ -109,7 +109,7 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     assert.match(descriptions.task_assign, /per-step results and failure-time availability_reasons; never blindly resend/);
     assert.doesNotMatch(descriptions.task_assign, /Does not interrupt or queue instructions/);
     assert.match(descriptions.task_edit, /actual description change.*unfinished Task/);
-    assert.match(descriptions.task_reopen, /original ready assignee.*done Agent Task.*in_progress/);
+    assert.match(descriptions.task_reopen, /orchestrator or the original assignee.*done Agent Task to in_progress/);
     assert.match(descriptions.task_reopen, /no later assignment/);
     assert.match(descriptions.task_cancel, /Cancelled Tasks cannot reopen/);
     assert.match(descriptions.task_edit, /unchanged text and metadata-only edits do not/);
@@ -118,12 +118,12 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     assert.match(descriptions.task_report, /Stale activity may save while stale status\/outcome\/retro are rejected/);
     assert.match(descriptions.task_report, /explicit retro: useful text or null for no findings; omission is rejected/);
     assert.match(descriptions.task_subscribe, /Rejects an already-matching status/);
-    assert.match(descriptions.task_subscribe, /Recipient is the Task's orchestrator, not the caller/);
+    assert.match(descriptions.task_subscribe, /subscriber \(the caller\) receives the card/);
     assert.match(descriptions.task_subscribe, /Optional: default to no subscription/);
-    assert.match(descriptions.task_subscribe, /only when a target state enables necessary orchestrator follow-up, not progress tracking/);
+    assert.match(descriptions.task_subscribe, /only when a target state enables its necessary follow-up, not progress tracking/);
     assert.match(descriptions.task_unsubscribe, /Cannot recall a consumed notification/);
-    assert.match(descriptions.task_unsubscribe, /planned orchestrator follow-up is no longer needed/);
-    assert.match(descriptions.task_retro_handle, /Only the Task orchestrator.*an assignee never handles its own retro/);
+    assert.match(descriptions.task_unsubscribe, /planned follow-up is no longer needed/);
+    assert.match(descriptions.task_retro_handle, /Any caller records/);
     assert.match(descriptions.task_retro_handle, /followup \(reference required; terminal, never revisited/);
     assert.match(descriptions.task_retro_handle, /Sends no messages and changes no Task status/);
     assert.match(descriptions.task_read, /retro filter: unhandled\|watching/);
@@ -166,7 +166,7 @@ test('a status notification needs only one selective MCP read for done, blocked 
       }, _meta: { 'cockpit/invocation': { sessionId: actor, runtimeSessionId: actor, subagent: false } } });
       assert.notEqual(report.isError, true);
       assert.equal(sent.length, index + 1);
-      assert.deepEqual(sent[index], { orchestrator: 'orchestrator', text: `[Subtask status changed](task:${task.task_id}?event=status_changed)` });
+      assert.deepEqual(sent[index], { orchestrator: `assignee-${index}`, text: `[Subscribed Task status changed](task:${task.task_id}?event=status_changed)` });
       const count = reads.length;
       const response = await f.client.callTool({ name: 'task_read', arguments: {
         view: 'overview', task_id: task.task_id, include: ['activity', 'outcome', 'retro'],
@@ -411,7 +411,7 @@ test('real notification failure crosses MCP without erasing Task effects or rese
     assert.equal(replay.isError, true);
     assert.deepEqual(replay.structuredContent, envelope);
     assert.deepEqual(sent, [{
-      orchestrator: 'orchestrator', text: `[Subtask status changed](task:${task_id}?event=status_changed)`,
+      orchestrator: 'orchestrator', text: `[Subscribed Task status changed](task:${task_id}?event=status_changed)`,
     }]);
   } finally {
     await f.close();

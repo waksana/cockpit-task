@@ -23,7 +23,7 @@ function fixture(t, overrides = {}) {
   const call = (name, input) => service.execute(name, { actor: 'orchestrator', request_id: randomUUID(), ...input });
   const context = id => ({ task_id: id, write_context: store.task(id).write_context });
   const f = {
-    root, sent, inspected, errors, call,
+    root, sent, inspected, errors, call, context,
     get store() { return store; }, get service() { return service; },
     async create(fields = {}) {
       const result = await call('task_create', { title: 'Synthetic', description: 'Synthetic requirements', ...fields });
@@ -93,7 +93,7 @@ test('create and edit validate blockers: existence, cross-orchestrator, not canc
   assert.deepEqual(ids(upper), [a.task_id]);
 });
 
-test('edit replaces the set, bumps only the materials context and locks once dispatched', async t => {
+test('edit replaces the set, bumps only the materials context and may update an assigned Task', async t => {
   const f = fixture(t);
   const a = await f.create(), b = await f.create(), d = await f.create({ blocked_by: [a.task_id] });
   const before = f.store.task(d.task_id);
@@ -116,9 +116,11 @@ test('edit replaces the set, bumps only the materials context and locks once dis
   const cleared = await f.edit(d.task_id, { blocked_by: [] });
   assert.deepEqual(cleared.result.blocked_by, []);
   assert.equal(cleared.result.ready, true);
-  assert.equal((await f.assign(d.task_id)).error, null);
-  assert.equal((await f.edit(d.task_id, { blocked_by: [a.task_id] })).error.code, 'DEPENDENCY_LOCKED');
-  assert.equal(f.notices(d.task_id).length, 0, 'Orchestrator edits never send notices');
+  assert.equal((await f.assign(d.task_id, 'assignee')).error, null);
+  const assignedEdit = await f.edit(d.task_id, { blocked_by: [a.task_id] });
+  assert.equal(assignedEdit.error, null);
+  assert.deepEqual(ids(assignedEdit.result), [a.task_id]);
+  assert.equal(f.store.read({ view: 'assignee_notices', task_id: d.task_id }).items.length, 1);
 });
 
 test('assigning a not-ready Task is rejected before reservation or Assignee inspection', async t => {
@@ -188,7 +190,21 @@ test('cross-orchestrator blockers are accepted and ready notices go to the depen
   assert.equal(f.store.task(dependent.task_id).orchestrator, 'dependent-orchestrator');
   assert.deepEqual(dependent.blocked_by, [{ task_id: blocker.task_id, status: 'todo' }]);
   f.sent.length = 0;
-  await f.done(blocker.task_id);
+  const assignee = `assignee-${randomUUID()}`;
+  const assign = await f.service.execute('task_assign', {
+    actor: 'blocker-orchestrator', request_id: randomUUID(), ...f.context(blocker.task_id),
+    revision: f.store.task(blocker.task_id).revision, assignee,
+  });
+  assert.equal(assign.error, null, JSON.stringify(assign.error));
+  assert.equal((await f.service.execute('task_ack', {
+    actor: assignee, request_id: randomUUID(), ...f.context(blocker.task_id),
+    revision: f.store.task(blocker.task_id).revision,
+  })).error, null);
+  assert.equal((await f.service.execute('task_report', {
+    actor: assignee, request_id: randomUUID(), ...f.context(blocker.task_id),
+    revision: f.store.task(blocker.task_id).revision,
+    status: 'done', outcome: { summary: 'Delivered' }, retro: null,
+  })).error, null);
   assert.deepEqual(f.sent.filter(entry => entry.session === 'dependent-orchestrator'), [
     { session: 'dependent-orchestrator', text: `[Subtask ready](task:${dependent.task_id}?event=ready)` },
   ]);
@@ -212,6 +228,49 @@ test('a cancelled blocker notifies the Orchestrator once and keeps the dependent
   await f.edit(d.task_id, { blocked_by: [b.task_id] });
   assert.equal(f.store.task(d.task_id).ready, true);
   assert.equal((await f.assign(d.task_id)).error, null);
+});
+
+test('assigned dependents receive update notices for blocker edits, readiness and cancellation', async t => {
+  const f = fixture(t);
+  const blocker = await f.create();
+  const dependent = await f.create();
+  assert.equal((await f.assign(dependent.task_id, 'dependent-worker')).error, null);
+  assert.equal((await f.service.execute('task_ack', {
+    actor: 'dependent-worker', request_id: randomUUID(), ...f.context(dependent.task_id),
+    revision: f.store.task(dependent.task_id).revision,
+  })).error, null);
+  assert.equal((await f.service.execute('task_report', {
+    actor: 'dependent-worker', request_id: randomUUID(), ...f.context(dependent.task_id),
+    revision: f.store.task(dependent.task_id).revision, status: 'in_progress',
+  })).error, null);
+  f.sent.length = 0;
+
+  const edited = await f.edit(dependent.task_id, { blocked_by: [blocker.task_id] });
+  assert.equal(edited.error, null, JSON.stringify(edited.error));
+  assert.equal(edited.result.notice_ids.length, 1);
+  assert.deepEqual(f.sent.map(entry => entry.session), ['dependent-worker']);
+  assert.match(f.sent[0].text, new RegExp(`^\\[Task updated\\]\\(task:${dependent.task_id}\\?event=updated\\)\\n`));
+
+  f.sent.length = 0;
+  const done = await f.done(blocker.task_id);
+  assert.equal(done.result.result.notice_ids.length, 1);
+  const readyUpdates = f.sent.filter(entry => entry.text.startsWith('[Task updated]'));
+  assert.deepEqual(readyUpdates.map(entry => entry.session), ['dependent-worker']);
+  assert.equal(f.sent.some(entry => entry.text.startsWith('[Subtask ready]')), false);
+  assert.equal(f.store.read({ view: 'dependency_notices', task_id: dependent.task_id }).items.length, 0);
+
+  const cancelledBlocker = await f.create();
+  const dependent2 = await f.create();
+  assert.equal((await f.assign(dependent2.task_id, 'dependent-worker-2')).error, null);
+  f.sent.length = 0;
+  assert.equal((await f.edit(dependent2.task_id, { blocked_by: [cancelledBlocker.task_id] })).error, null);
+  f.sent.length = 0;
+  const cancelled = await f.cancel(cancelledBlocker.task_id);
+  assert.equal(cancelled.error, null, JSON.stringify(cancelled.error));
+  const cancelUpdates = f.sent.filter(entry => entry.text.startsWith('[Task updated]'));
+  assert.deepEqual(cancelUpdates.map(entry => entry.session), ['dependent-worker-2']);
+  assert.match(cancelUpdates[0].text, new RegExp(`^\\[Task updated\\]\\(task:${dependent2.task_id}\\?event=updated\\)\\n`));
+  assert.equal(f.sent.some(entry => entry.text.startsWith('[Subtask blocker cancelled]')), false);
 });
 
 test('list, overview, execution and selected context project blockers and readiness compactly', async t => {

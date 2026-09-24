@@ -53,6 +53,7 @@ export class TaskService {
         if (row.kind === 'automation') throw new TaskError('AUTOMATION_MANAGED', 'Automation Tasks cannot be assigned to an Agent');
         // Reject before reserving or inspecting the assignee, so a busy target cannot mask role
         // confusion as unavailability; binding rechecks inside its transaction.
+        if (!this.store.receipt(name, input)) this.store.authorize(row, input.actor, ['orchestrator']);
         if (!input.resume_request_id && !this.store.receipt(name, input)) {
           this.store.assertAssignable(row, input.assignee);
           this.store.assertReady(row);
@@ -105,9 +106,9 @@ export class TaskService {
         let validationError;
         if (name === 'task_reopen' && !this.store.receipt(name, input)) {
           try {
-            this.store.reopenCandidate(input);
-            const capability = await this.host.inspect(input.actor);
-            // Self-continuation is performed by a running assignee, not an idle dispatch target.
+            const candidate = this.store.reopenCandidate(input);
+            // Whoever reopens, the original assignee continues the work and needs Node capability.
+            const capability = await this.host.inspect(candidate.assignee);
             if (!capability.ready || !capability.node) {
               throw new TaskError('CAPABILITY_UNAVAILABLE', 'The original assignee must have loaded, ready Node capability');
             }
@@ -197,14 +198,14 @@ export class TaskService {
     if (this.closing || signal?.aborted) return Promise.resolve();
     if (this.recovery) return this.recovery;
     // Fixed high-water marks bound this startup pass. New transitions deliver themselves.
-    // Immediate update notices are only meaningful during their edit request; one left pending by
+    // Immediate assignee notices are only meaningful during their request; one left pending by
     // a restart is recorded as not sent rather than interrupting the assignee later.
-    for (let seq = 0, through = this.store.pendingNotificationBoundary('update_notices'); through;) {
-      const batch = this.store.pendingNotifications(seq, through, 20, 'update_notices');
+    for (let seq = 0, through = this.store.pendingNotificationBoundary('assignee_notices'); through;) {
+      const batch = this.store.pendingNotifications(seq, through, 20, 'assignee_notices');
       if (!batch.length) break;
       for (const entry of batch) {
         this.store.finishNotification(entry.id, 'pending', 'not_sent', {
-          code: 'UPDATE_NOTICE_EXPIRED', message: 'The module restarted before this update notice was sent; it was not sent. Edit again with notify_assignee if the assignee still needs it',
+          code: 'ASSIGNEE_NOTICE_EXPIRED', message: 'The module restarted before this assignee notice was sent; it was not sent. The assignee still meets the change through definition_check or the Task status at its next read',
         });
         seq = entry.seq;
       }

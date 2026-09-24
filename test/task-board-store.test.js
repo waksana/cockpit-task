@@ -295,18 +295,20 @@ test('notification-sized selection fits large legal activity, outcome and retro 
   assert.ok(JSON.stringify(selected).length < LIMITS.selection);
 });
 
-test('ACK is separate from activity/status and reported actor is not an ACL', t => {
+test('ACK and report require the assignee and remain separate from activity/status', t => {
   const f = fixture(t), task = f.bind(f.create());
-  const ack = f.store.executeLocal('task_ack', f.input(task, { actor: 'other-session' }));
+  rejects(() => f.store.executeLocal('task_ack', f.input(task, { actor: 'other-session' })), 'ASSIGNEE_REQUIRED');
+  const ack = f.store.executeLocal('task_ack', f.input(task, { actor: 'assignee' }));
   assert.equal(ack.task_status, 'todo');
   assert.equal(ack.acknowledged_revision, 1);
   assert.equal(f.store.read({ view: 'activity', task_id: task.id }).items.length, 0);
   assert.equal(f.store.read({ view: 'changelog', task_id: task.id }).items.length, 1);
   assert.equal(f.ack(task).status, 'unchanged');
-  const activity = f.report(task, { actor: 'cross-task-actor', activity: { text: 'Working' } });
+  rejects(() => f.report(task, { actor: 'cross-task-actor', activity: { text: 'Working' } }), 'ASSIGNEE_REQUIRED');
+  const activity = f.report(task, { activity: { text: 'Working' } });
   assert.equal(activity.activity.status, 'saved');
   const entry = f.store.read({ view: 'activity', task_id: task.id }).items[0];
-  assert.equal(entry.author, 'cross-task-actor');
+  assert.equal(entry.author, 'assignee');
   assert.equal(entry.assignee, 'assignee');
   assert.equal(entry.source, 'reported');
 });
@@ -591,7 +593,7 @@ test('definition check covers related Task and actors current Task; missing defi
 
 test('failed business receipts are final and cannot later become newly applied effects', t => {
   const f = fixture(t), task = f.bind(f.create());
-  const report = f.input(task, { activity: { text: 'Not acknowledged yet' } });
+  const report = f.input(task, { actor: 'assignee', activity: { text: 'Not acknowledged yet' } });
   rejects(() => f.store.executeLocal('task_report', report), 'ACK_REQUIRED');
   f.ack(task);
   rejects(() => f.store.executeLocal('task_report', report), 'ACK_REQUIRED');
@@ -737,7 +739,7 @@ test('completion transaction rolls back outcome, retro, activity and subscriptio
   f.store.executeLocal('task_subscribe', subscriptionInput);
   f.store.db.exec(`CREATE TRIGGER fail_completion BEFORE UPDATE OF status ON tasks
     WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT, 'synthetic completion failure'); END`);
-  const request = f.input(task, { status: 'done', outcome: { summary: 'Delivered' }, retro: 'A useful finding', activity: { text: 'Final work' } });
+  const request = f.input(task, { actor: 'assignee', status: 'done', outcome: { summary: 'Delivered' }, retro: 'A useful finding', activity: { text: 'Final work' } });
   assert.throws(() => f.store.executeLocal('task_report', request), /synthetic completion failure/);
   assert.equal(f.store.task(task.task_id).status, 'todo');
   assert.deepEqual(f.store.task(task.task_id).retro, { status: 'not_recorded' });
@@ -757,10 +759,10 @@ test('competing stores preserve one completion and reject changed lifecycle or u
   f.ack(task);
   const other = new TaskStore(f.directory);
   t.after(() => other.close());
-  const input = f.input(task, { ...fields, retro: 'Winner retrospective' });
+  const input = f.input(task, { actor: 'assignee', ...fields, retro: 'Winner retrospective' });
   f.store.executeLocal('task_report', input);
   assert.equal(other.task(task.task_id).retro.text, input.retro);
-  rejects(() => other.executeLocal('task_report', f.input(task, fields)), 'TASK_STATE_CONFLICT');
+  rejects(() => other.executeLocal('task_report', f.input(task, { actor: 'assignee', ...fields })), 'TASK_STATE_CONFLICT');
   assert.equal(other.read({ view: 'outcomes', task_id: task.task_id }).items.length, 1);
 });
 
@@ -918,7 +920,7 @@ test('v8 migration renames Task vocabulary, events and assignment receipts', t =
   assert.equal(execution.assignee, 'old-executor');
   assert.equal(execution.actor_role, 'assignee');
   const subscription = store.read({ view: 'subscriptions', task_id: taskId }).items[0];
-  assert.equal(subscription.orchestrator, 'old-owner');
+  assert.equal(subscription.subscriber, 'old-owner');
   assert.equal(subscription.author, 'old-executor');
   assert.equal(subscription.event.actor, 'old-executor');
   assert.equal('actor_session_id' in subscription.event, false);
