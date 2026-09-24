@@ -510,7 +510,7 @@ test('HTTP exposes notification failure separately from persisted cancellation a
   try {
     const response = await module.routes.find(route => route.path === '/tools/:name').handler({
       params: { name: 'task_cancel' }, signal: controller.signal,
-      body: { actor: 'actor', request_id: randomUUID(), task_id: task.task_id, write_context: task.write_context, reason: 'stop' },
+      body: { request_id: randomUUID(), task_id: task.task_id, write_context: task.write_context, reason: 'stop' },
     });
     assert.equal(response.status, 502);
     assert.equal(response.body.error, null);

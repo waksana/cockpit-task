@@ -158,11 +158,12 @@ test('a status notification needs only one selective MCP read for done, blocked 
       const { revision, ...subscription } = base;
       store.executeLocal('task_subscribe', { ...subscription, request_id: `subscribe-${index}`, statuses: [status] });
       const text = `${'Full activity. '.repeat(80)}${status === 'blocked' ? 'Asked the user directly; no Orchestrator relay needed.' : 'Delivered.'}`;
+      const { actor, ...reportBase } = base;
       const report = await f.client.callTool({ name: 'task_report', arguments: {
-        ...base, request_id: `report-${index}`, status, activity: { text },
+        ...reportBase, request_id: `report-${index}`, status, activity: { text },
         ...(hasOutcome ? { outcome: { summary: `Result ${index}` } } : {}),
         ...(status === 'done' ? { retro: null } : {}),
-      } });
+      }, _meta: { 'cockpit/invocation': { sessionId: actor, runtimeSessionId: actor, subagent: false } } });
       assert.notEqual(report.isError, true);
       assert.equal(sent.length, index + 1);
       assert.deepEqual(sent[index], { orchestrator: 'orchestrator', text: `[Subtask status changed](task:${task.task_id}?event=status_changed)` });
@@ -189,7 +190,7 @@ test('a status notification needs only one selective MCP read for done, blocked 
       for (const invalid of [{ include: ['outcome', 'outcome'] }, { view: 'execution', include: ['outcome'] }, { include: ['summary'] }]) {
         const rejected = await f.client.callTool({ name: 'task_read', arguments: {
           view: 'overview', task_id: task.task_id, ...invalid,
-        } });
+        }, _meta: { 'cockpit/invocation': { sessionId: actor, runtimeSessionId: actor, subagent: false } } });
         assert.equal(rejected.isError, true);
         assert.equal(rejected.structuredContent.error.code, 'INVALID_INPUT');
         assert.equal(rejected.structuredContent.definition_check.status, 'checked');
@@ -234,18 +235,20 @@ test('real MCP completion never defaults missing retro and persists text or null
       const task = store.bindAssignment(assign);
       const base = { actor: 'assignee', task_id: task.task_id, revision: 1, write_context: task.write_context };
       store.executeLocal('task_ack', { ...base, request_id: `ack-${retro}` });
-      const request = { ...base, request_id: `done-${retro}`, status: 'done', outcome: { summary: 'Delivered' } };
+      const { actor, ...requestBase } = base;
+      const meta = { _meta: { 'cockpit/invocation': { sessionId: actor, runtimeSessionId: actor, subagent: false } } };
+      const request = { ...requestBase, request_id: `done-${retro}`, status: 'done', outcome: { summary: 'Delivered' } };
       for (const value of [undefined, '', ' \t', 0, {}, [], 'r'.repeat(2001)]) {
-        const response = await f.client.callTool({ name: 'task_report', arguments: { ...request, ...(value === undefined ? {} : { retro: value }) } });
+        const response = await f.client.callTool({ name: 'task_report', arguments: { ...request, ...(value === undefined ? {} : { retro: value }) }, ...meta });
         assert.equal(response.isError, true);
         assert.equal(response.structuredContent.error.code, 'INVALID_INPUT');
         assert.equal(response.structuredContent.definition_check.tasks[0].needs_ack, false);
       }
       assert.equal(store.task(task.task_id).status, 'todo');
       assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items.length, 0);
-      const completed = await f.client.callTool({ name: 'task_report', arguments: { ...request, retro } });
+      const completed = await f.client.callTool({ name: 'task_report', arguments: { ...request, retro }, ...meta });
       assert.notEqual(completed.isError, true);
-      const replay = await f.client.callTool({ name: 'task_report', arguments: { ...request, retro } });
+      const replay = await f.client.callTool({ name: 'task_report', arguments: { ...request, retro }, ...meta });
       assert.deepEqual(replay.structuredContent.result, completed.structuredContent.result);
       const read = await f.client.callTool({ name: 'task_read', arguments: { view: 'execution', task_id: task.task_id } });
       assert.equal(read.structuredContent.result.retro.text, retro);

@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { activate } from '../src/task-board/module.js';
 import { createHostAdapter } from '../src/task-board/host.js';
 import { TOOL_NAMES } from '../src/task-board/contracts.js';
+import { TaskStore } from '../src/task-board/store.js';
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'task-board-module-'));
@@ -63,6 +64,20 @@ function fixture() {
         signal: controller.signal,
       });
     },
+    seedAssigned({ title = 'Seeded', description = 'Synthetic only', orchestrator = 'orchestrator', assignee = 'user' } = {}) {
+      const store = new TaskStore(root);
+      try {
+        const created = store.executeLocal('task_create', {
+          actor: orchestrator, request_id: `seed-create-${++request}`, title, description,
+        });
+        const assignment = {
+          actor: orchestrator, request_id: `seed-assign-${++request}`, task_id: created.task_id,
+          revision: 1, write_context: created.write_context, assignee,
+        };
+        store.reserveOperation('task_assign', assignment);
+        return store.bindAssignment(assignment);
+      } finally { store.close(); }
+    },
     restart() { module.dispose(); module = activate(context); },
     close() { module.dispose(); rmSync(root, { recursive: true, force: true }); },
   };
@@ -72,11 +87,9 @@ test('HTTP completion requires explicit valid retro with atomic effects and dura
   const f = fixture();
   try {
     for (const retro of [null, 'A useful automation candidate.']) {
-      const create = await f.write('task_create', { title: 'Retro', description: 'Synthetic only' });
-      const id = create.body.result.task_id;
-      let task = (await f.read(id)).body.result;
-      await f.write('task_assign', { task_id: id, revision: 1, assignee: 'user', write_context: task.write_context });
-      task = (await f.read(id)).body.result;
+      const seeded = f.seedAssigned({ title: 'Retro' });
+      const id = seeded.task_id;
+      const task = (await f.read(id)).body.result;
       const base = { task_id: id, revision: 1, write_context: task.write_context };
       await f.write('task_ack', base);
       const report = { ...base, status: 'done', outcome: { summary: 'Delivered' }, activity: { text: 'Final activity' } };
@@ -119,26 +132,29 @@ test('HTTP tool calls reject body identity fields and create Tasks as the signed
 test('HTTP reopen checks real host readiness while the Assignee is running and does not dispatch', async () => {
   const f = fixture();
   try {
-    const created = (await f.write('task_create', { title: 'Reopen', description: 'Agreement' })).body.result;
-    await f.write('task_assign', { task_id: created.task_id, revision: 1, write_context: created.write_context, assignee: 'user' });
-    const task = (await f.read(created.task_id)).body.result;
+    const seeded = f.seedAssigned({ title: 'Reopen', description: 'Agreement' });
+    const task = (await f.read(seeded.task_id)).body.result;
     const base = { task_id: task.id, revision: 1, write_context: task.write_context };
     await f.write('task_ack', base);
     const completed = (await f.write('task_report', { ...base, status: 'done', outcome: { summary: 'Original result' }, retro: null })).body.result;
-    f.meta = { ...f.meta, status: 'running', nativeProcessing: true, activeOperations: 1 };
+    f.meta = { ...f.meta, sessionId: 'user', status: 'running', nativeProcessing: true, activeOperations: 1 };
+    f.capability = {
+      sessionId: 'user', ready: true, loaded: true, roles: [], reasons: [],
+      rolesNeedReload: false, appliedRoles: [{ moduleId: 'cockpit-task', roleId: 'node' }],
+    };
     const before = f.calls.length, invalidations = f.invalidations;
     const reopened = await f.write('task_reopen', {
       ...base, write_context: completed.write_context, description: 'Revised agreement', reason: 'Explicit user request',
     });
-    assert.equal(reopened.status, 409);
-    assert.equal(reopened.body.error.code, 'ASSIGNEE_MISMATCH');
-    assert.deepEqual(f.calls.slice(before).map(call => call.name), []);
-    assert.equal(f.invalidations, invalidations);
+    assert.equal(reopened.status, 200, JSON.stringify(reopened.body));
+    assert.equal(reopened.body.result.task_status, 'in_progress');
+    assert.deepEqual(f.calls.slice(before).map(call => call.name), ['roles/readiness', 'session/get']);
+    assert.equal(f.invalidations, invalidations + 1);
     f.restart();
     const current = (await f.read(task.id)).body.result;
-    assert.equal(current.description, 'Agreement');
-    assert.equal(current.retro.current, true);
-    assert.equal((await f.read(task.id, 'outcomes')).body.result.items[0].current, true);
+    assert.equal(current.description, 'Revised agreement');
+    assert.equal(current.retro.current, false);
+    assert.equal((await f.read(task.id, 'outcomes')).body.result.items[0].current, false);
     assert.deepEqual(f.errors, []);
   } finally { f.close(); }
 });
@@ -146,11 +162,9 @@ test('HTTP reopen checks real host readiness while the Assignee is running and d
 test('HTTP selective reads preserve legacy defaults, errors, revision checks and exact chosen groups', async () => {
   const f = fixture();
   try {
-    const create = await f.write('task_create', { title: 'Selective HTTP', description: 'Synthetic only' });
-    const id = create.body.result.task_id;
-    let task = (await f.read(id)).body.result;
-    await f.write('task_assign', { task_id: id, revision: 1, assignee: 'user', write_context: task.write_context });
-    task = (await f.read(id)).body.result;
+    const seeded = f.seedAssigned({ title: 'Selective HTTP' });
+    const id = seeded.task_id;
+    const task = (await f.read(id)).body.result;
     const base = { task_id: id, revision: 1, write_context: task.write_context };
     const fresh = await f.read(id, 'overview', { include: ['activity', 'outcome', 'retro'] });
     assert.equal(fresh.status, 200);
