@@ -160,8 +160,7 @@ retry modified input with the same request ID. Exact replay of a valid new
 request retains its original saved result without duplicate effects.
 Retro shares that outcome's revision, assignee, author, reported source, time and ID.
 The service guarantees submission/persistence, not reflection or content quality.
-No new notifications, service gates or dispatch follow from retro (orchestrator
-handling via `task_retro_handle` is Skill guidance, not a service gate); automation
+No new notifications, service gates or dispatch follow from retro. The Task tree Skill tells a node to fold Subtask retros into its own retro before done; `task_retro_handle` remains an optional record tool open to any caller, with no prescribed timing. Automation
 keeps its service outcome path with retro not applicable.
 
 Terminal Tasks reject execution reports and ACK. Their definition/history remain
@@ -187,8 +186,7 @@ inside the local mutation transaction, including after the host observation, so 
 concurrent assignment or definition change cannot slip past an earlier check.
 
 Atomically increment revision even for identical description, record the full
-definition/reason/author/time, invoke the existing ACK helper for self-confirmation,
-set in_progress and advance lifecycle context with the receipt. Histories and
+definition/reason/author/time, set in_progress and advance lifecycle context with the receipt. Original-assignee reopen invokes the existing ACK helper for self-confirmation and sends no notice; orchestrator/Web-user reopen does not ACK and records an assignee `[Task updated]` notice. Histories and
 references remain; old outcome/retro becomes current:false, and old ACK/outcome
 cannot deliver the new revision. Subsequent done again needs a new outcome and
 explicit retro text or null. No mandatory activity log or round state machine.
@@ -243,7 +241,7 @@ a `blocked_by` Task cannot start until every blocker is done.
 
 ## Invocation metadata
 
-For official MCP transport calls, `mcp.js` copies `_meta["cockpit/invocation"]` into the business service. `service.js` rejects absent metadata with `INVOCATION_REQUIRED` (400), derives `actor` from `sessionId`, attributes subagent calls to that containing session, and stores the complete invocation JSON on the operation receipt. `task_read(view=operation)` exposes both `actor` and `invocation`. Module HTTP calls bypass MCP metadata and run as actor `user`, so Tasks created there have `orchestrator="user"`; notices for them normally record `ORCHESTRATOR_NOT_FOUND` because no native session named `user` exists.
+For official MCP transport calls, `mcp.js` copies `_meta["cockpit/invocation"]` into the business service. `service.js` rejects absent metadata with `INVOCATION_REQUIRED` (400), derives `actor` from `sessionId`, attributes subagent calls to that containing session, and stores the complete invocation JSON on the operation receipt. `task_read(view=operation)` exposes both `actor` and `invocation`. Module HTTP calls bypass MCP metadata and run as actor `user`, so Tasks created there have `orchestrator="user"`. Dependency and Subtask notices to that orchestrator normally record `ORCHESTRATOR_NOT_FOUND`; a `user` subscription routes to the same `user` recipient and records `SUBSCRIBER_NOT_FOUND`; subscriptions from real sessions deliver to those sessions normally.
 
 ## External operation receipts
 
@@ -365,7 +363,7 @@ runtime is started and HTTP is listening so resumed sessions can connect MCP.
 Activation, pre-listen agent events and inbound reads do not trigger it.
 Recovery uses bounded batches through a fixed high-water mark without waiting
 for new Task traffic. Waiting subscriptions survive restart; only known-unattempted
-pending subscription/dependency/child notices recover. At service start, the module captures a high-water boundary for `assignee_notices`; only pending rows left by an earlier process before that boundary expire as `ASSIGNEE_NOTICE_EXPIRED` and are not delivered late. Assignee notices created after this process starts follow the normal send path. Unknown,
+pending subscription/dependency/child notices recover. In the `TaskService` constructor, before any request is accepted, the module captures a high-water boundary for `assignee_notices` and synchronously expires pending rows left by an earlier process before that boundary as `ASSIGNEE_NOTICE_EXPIRED`; even replay of the original request cannot deliver them late. Assignee notices created after this process starts follow the normal send path. Unknown,
 accepted, queued and known failed attempts do not replay. Shutdown prevents new
 claims and keeps storage open until in-flight work records its outcome. There is
 no exactly-once guarantee for host prompt.

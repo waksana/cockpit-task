@@ -14,8 +14,22 @@ export class TaskService {
     this.closed = false;
     this.sessionOperations = new Set();
     this.automation = new AutomationRunner(this);
-    // Only assignee notices left pending by an earlier process expire; live requests keep theirs.
-    this.expiredNoticeBoundary = store.pendingNotificationBoundary('assignee_notices');
+    this.expireEarlierAssigneeNotices();
+  }
+
+  // Immediate assignee notices are only meaningful during their own request. Ones left pending by an
+  // earlier process expire before this service accepts any request, so a replay can never send them late.
+  expireEarlierAssigneeNotices() {
+    for (let seq = 0, through = this.store.pendingNotificationBoundary('assignee_notices'); through;) {
+      const batch = this.store.pendingNotifications(seq, through, 20, 'assignee_notices');
+      if (!batch.length) break;
+      for (const entry of batch) {
+        this.store.finishNotification(entry.id, 'pending', 'not_sent', {
+          code: 'ASSIGNEE_NOTICE_EXPIRED', message: 'The module restarted before this assignee notice was sent; it was not sent. The assignee still meets the change through definition_check or the Task status at its next read',
+        });
+        seq = entry.seq;
+      }
+    }
   }
 
   // actor is the calling session: the host-injected MCP invocation, or 'user' for the module HTTP API.
@@ -200,20 +214,6 @@ export class TaskService {
     if (this.closing || signal?.aborted) return Promise.resolve();
     if (this.recovery) return this.recovery;
     // Fixed high-water marks bound this startup pass. New transitions deliver themselves.
-    // Immediate assignee notices are only meaningful during their request; one left pending by
-    // a restart is recorded as not sent rather than interrupting the assignee later.
-    const expireThrough = this.expiredNoticeBoundary;
-    this.expiredNoticeBoundary = 0;
-    for (let seq = 0, through = expireThrough; through;) {
-      const batch = this.store.pendingNotifications(seq, through, 20, 'assignee_notices');
-      if (!batch.length) break;
-      for (const entry of batch) {
-        this.store.finishNotification(entry.id, 'pending', 'not_sent', {
-          code: 'ASSIGNEE_NOTICE_EXPIRED', message: 'The module restarted before this assignee notice was sent; it was not sent. The assignee still meets the change through definition_check or the Task status at its next read',
-        });
-        seq = entry.seq;
-      }
-    }
     const sources = ['subscriptions', 'dependency_notices', 'child_notices']
       .map(table => ({ table, through: this.store.pendingNotificationBoundary(table) })).filter(source => source.through);
     if (!sources.length) return Promise.resolve();

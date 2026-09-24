@@ -179,7 +179,7 @@ activity 不自动改状态，outcome 不自动 done。完成最新已确认约�
 或 Skill/MCP 发现、契约、能力验证缺口。区分观察、假设及外部等待，不编造耗时；
 无有用发现传 null，不要求多段模板或凑字数。复盘最多 2,000 字符，不代替成果和阻塞，
 不授权改进或扩大范围；服务不新增通知、派单或完成门槛；
-orchestrator 按 Task tree Skill 用 `task_retro_handle` 处理有发现的 retro（有Subtask 的 assignee 在 done 前，根节点仅在用户问起时）。
+有 Subtask 的节点在自己 done 前把 Subtask retro 折入自己的 retro。`task_retro_handle` 只是可选记录工具，任意调用者可用，Skill 不规定使用时机。
 服务保证提交和持久化，不保证思考或质量；automation 无 Agent 复盘。
 仅工作本身需要时使用 in_review，不等待默认 orchestrator 审批。
 

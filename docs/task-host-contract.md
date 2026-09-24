@@ -214,7 +214,7 @@ Task 普通 HTTP API 和 HTTP MCP 共用业务服务及 SQLite。宿主只负责
 
 MCP `POST /mcp` 的每个 tool call 必须携带 host-injected `_meta["cockpit/invocation"]`，至少包含 `sessionId`，并可包含 `runtimeSessionId`、`subagent`、`agentName`。Task 不信任工具输入中的身份字段；缺少 invocation 时 `INVOCATION_REQUIRED`（400）且不写入，包括 reads。subagent 调用归因到 containing session，完整 invocation 存入 operation receipt，供 `task_read(view=operation)` 返回 `actor` 和 `invocation`。request fingerprint 覆盖工具、已验证输入和派生 actor，不覆盖完整 invocation。该契约来自 waksana/cockpit#205，因此本模块必须与包含该宿主能力的 Cockpit 联合部署。
 
-模块 HTTP 路由（`POST /read`、`POST /tools/:name`、`GET /tasks/:id/native`）没有 native session 身份，固定以 actor `user` 执行。通过 HTTP 创建的 Task 因而 `orchestrator="user"`；后续订阅、依赖或 Subtask 通知会尝试查找名为 `user` 的 session，通常记录 `ORCHESTRATOR_NOT_FOUND` / not_sent，Web board 只应读取。
+模块 HTTP 路由（`POST /read`、`POST /tools/:name`、`GET /tasks/:id/native`）没有 native session 身份，固定以 actor `user` 执行。通过 HTTP 创建的 Task 因而 `orchestrator="user"`；后续依赖或 Subtask 通知会尝试查找名为 `user` 的 orchestrator session，通常记录 `ORCHESTRATOR_NOT_FOUND` / not_sent。`user` 自己登记的 subscription 也路由到 `user`，通常记录 `SUBSCRIBER_NOT_FOUND`；真实 session 登记的 subscription 正常发给该 session。Web board 只应读取。
 
 模块使用官方 `WebStandardStreamableHTTPServerTransport`，将公开 headers/body/signal
 转换为 Web Request，以 parsedBody 传递 JSON，保留响应状态/headers，
@@ -242,8 +242,9 @@ HTTP request ID、协议 session ID 与持久 request_id 的业务幂等是不�
 `agent/status:up` 或 inbound read 都不能启动恢复。
 Task 的 service-ready v1 检查在数据库打开/升级前执行。
 
-Task 回调按固定 high-water mark 分批恢复持久 `pending` 通知，不等新业务流量。
-先被动检查原 orchestrator 存在，再持久 claim 为 unknown 后发送；不创建替代 orchestrator。
+Assignee notice expiry happens earlier: `TaskService` construction synchronously expires pending assignee notices left by a previous process before accepting any request, so replay cannot send them late.
+Task 回调按固定 high-water mark 分批恢复其余持久 `pending` 通知，不等新业务流量。
+先被动检查原接收者存在，再持久 claim 为 unknown 后发送；不创建替代接收者。
 unknown、accepted、queued 和已记录 not_sent 失败不自动再试，
 宿主 prompt 没有幂等键，因此不承诺外部 exactly-once。
 这是通用生命周期回调，不是宿主 Task 事件总线或消息调度器。

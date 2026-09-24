@@ -40,9 +40,9 @@ blocker 取消则发送 `[Subtask blocker cancelled](task:<uuid>?event=blocker_c
 必须为 schema v5 升级后有持久序号的指派，且自该次指派后未承接其他 Task
 （后来已完成/取消也不例外）、没有其他未结束 Task。升级前已指派的全部不符合条件，
 不以时间戳推断或回填；cancelled 和 automation 不可重开。
-重开原子创建并自 ACK 新 revision（正文相同也创建）、进入 in_progress；
+重开原子创建新 revision（正文相同也创建）、进入 in_progress；原执行者自己重开时 auto-ACK 且不发通知，orchestrator/Web-user 重开时不 ACK 并向 assignee 发送 `[Task updated]`。
 历史成果/复盘保留但不代表新要求已交付，完成仍须新 outcome 与显式 retro。
-已结束订阅不恢复，不增加通知、UI 重开按钮或轮次状态机。角色协作与工作方法分开：随包提供独立的
+已结束订阅不恢复，不增加 UI 重开按钮或轮次状态机。角色协作与工作方法分开：随包提供独立的
 [github-coding](skills/github-coding/github-coding/SKILL.md)，指导 Git/GitHub 编码协作；
 非编码工作仍使用其自身方法。
 
@@ -50,8 +50,7 @@ blocker 取消则发送 `[Subtask blocker cancelled](task:<uuid>?event=blocker_c
 候选、具体慢点/重复卡点或 Skill/MCP 发现、契约和能力验证缺口；区分观察、假设与外部等待，
 不编造耗时、不套多段模板。done 同次必须提交新 outcome 与显式 `retro` 文本或 `null`
 （无有用发现），普通报告不传 retro。复盘独立于成果和阻塞，不授权改进或扩大范围；
-服务不新增通知、派单或完成门槛；编排者按 Skill 用 `task_retro_handle`
-处理有发现的 retro（有Subtask 的 assignee 在自己 done 前，根节点仅在用户问起时）。服务保证提交，不保证思考或文本质量。
+服务不新增通知、派单或完成门槛；有 Subtask 的节点在自己 done 前把 Subtask retro 折入自己的 retro。`task_retro_handle` 只是可选记录工具，任何调用者都可用，Skill 不规定使用时机。服务保证提交，不保证思考或文本质量。
 
 编排者也可为已授权、可信、可重复的已知脚本选择轻量 automation Task；不是把任意工作
 转成脚本。先用 `task_script_read` / `task_script_register` 发现或不可变登记，

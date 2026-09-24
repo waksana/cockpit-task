@@ -69,8 +69,7 @@ Use isolated synthetic data and the existing tests. Check:
   Rendering distinguishes recorded text, explicit no findings, missing legacy
   history and automation, without mixing retro into the delivery outcome.
 - Existing status subscriptions behave unchanged. No new notices, dispatch,
-  service gate or improvement authorization comes from recording retro; orchestrator
-  handling is Skill guidance recorded through `task_retro_handle`.
+  service gate or improvement authorization comes from recording retro. Nodes fold Subtask retros into their own retro before done; `task_retro_handle` is only an optional record open to any caller, with timing deliberately unspecified.
 
 Separately assess model behavior: delivery happens before reflection; findings
 identify useful actionable observed automation candidates, concrete slow/repeated
@@ -337,7 +336,7 @@ An optional `node "$LAB/smoke.mjs"` checks the harness in its own distinct run.
 Its scripted successes are not evidence that a model followed the Skill.
 
 
-For v9 invocation coverage, prefer real MCP calls from sessions for cases that need a real orchestrator or assignee. The HTTP harness endpoint (`/api/tools/<tool>` or module `POST /tools/:name`) has no session identity and acts as actor `user`; Tasks created there have `orchestrator="user"`, so ready/status/Subtask notices attempt delivery to a session named `user` and normally record `ORCHESTRATOR_NOT_FOUND` / not_sent. Use HTTP only for Web-board/read-only checks or explicit `user`-actor edge cases.
+For v9 invocation coverage, prefer real MCP calls from sessions for cases that need a real orchestrator or assignee. The HTTP harness endpoint (`/api/tools/<tool>` or module `POST /tools/:name`) has no session identity and acts as actor `user`; Tasks created there have `orchestrator="user"`. Dependency/Subtask notices to that orchestrator attempt delivery to a session named `user` and normally record `ORCHESTRATOR_NOT_FOUND` / not_sent. A subscription created by `user` routes to the same `user` recipient and records `SUBSCRIBER_NOT_FOUND`; subscriptions created by real sessions deliver normally. Use HTTP only for Web-board/read-only checks or explicit `user`-actor edge cases.
 
 ### Existing repository regressions
 
@@ -994,7 +993,7 @@ from that file; one prompt deliberately references a missing `incidents.csv`.
 | T8 Idle root | All of the above | Root holds no Task, creates no subscription, never polls, and only reacts to user prompts and its own orchestrator cards (ready, subscribed transitions). |
 | T9 Role labels | All of the above | Assignment prompts arrive as `[Task assigned]` (older `[Task assigned to you]` cards remain recognized); Subtask notices as `[Subtask …]`; readiness as `[Subtask ready]`. `task_read` returns `actor_role` for the calling session. A node acting on a card uses the matching responsibility and never answers an orchestrator card with assignee writes or vice versa. |
 | T10 One Task per session, delegation fidelity | Any nested case | A session with an unfinished Task is never assigned a second one (`SESSION_NOT_READY` / busy). Requirements meant for deeper levels are copied verbatim into each Subtask's complete description; a missing deeper requirement is detected at integration, attributed to the right level, and corrected by a new Subtask rather than by redispatch. |
-| T17 Service-sent update notice | *Coached*: root changes an assigned unfinished Agent Task description, changes `blocked_by`, reopens it, tries unassigned/done/metadata-only/assignee-self variants, and restarts with a pending assignee notice | Non-assignee description/blocked_by/reopen changes record `assignee_notices(kind:"updated")`, return `notice_ids`, `notifications` / `notification_error`, and send exactly the fixed `[Task updated]` text with host `mode:"immediate"` to the assignee. Assignee reads full execution and ACKs the latest revision. Inapplicable ordinary edits either save silently or fail by their own lifecycle/permission rule; there is no opt-in notice rejection. Missing/unavailable assignee records `ASSIGNEE_NOT_FOUND` / `ASSIGNEE_UNAVAILABLE`; restart expires only pending assignee notices left by an earlier process before the service-start boundary with `ASSIGNEE_NOTICE_EXPIRED`, not late delivery. |
+| T17 Service-sent update notice | *Coached*: root changes an assigned unfinished Agent Task description, changes `blocked_by`, reopens it, tries unassigned/done/metadata-only/assignee-self variants, and restarts with a pending assignee notice | Non-assignee description/blocked_by/reopen changes record `assignee_notices(kind:"updated")`, return `notice_ids`, `notifications` / `notification_error`, and send exactly the fixed `[Task updated]` text with host `mode:"immediate"` to the assignee. Assignee reads full execution and ACKs the latest revision. Inapplicable ordinary edits either save silently or fail by their own lifecycle/permission rule; there is no opt-in notice rejection. Missing/unavailable assignee records `ASSIGNEE_NOT_FOUND` / `ASSIGNEE_UNAVAILABLE`; service construction expires only pending assignee notices left by an earlier process before the service-start boundary with `ASSIGNEE_NOTICE_EXPIRED`, before any request or replay can send them late. |
 
 ### New tree-node cases T18-T22 (not yet recorded)
 

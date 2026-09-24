@@ -154,7 +154,7 @@ schema v9 是一次性切换、无别名：`tasks.owner`→`tasks.orchestrator`�
 
 通知事件 JSON 中的 legacy `actor_session_id` 就地迁移为 `actor`；`task_assign` 操作回执里的 `executor` 改为 `assignee`；`operations` 新增 `invocation` JSON，保存 MCP 调用的 `sessionId`、`runtimeSessionId`、`subagent`、`agentName` 等宿主注入 metadata。request 指纹覆盖工具、已验证输入和派生 `actor`，不覆盖完整 invocation；旧 request_id 升级后重放可能因指纹变化返回 `REQUEST_ID_CONFLICT`。
 
-迁移 roll-forward only：旧模块（例如 0.1.13）看到 v9 数据返回 `SCHEMA_TOO_NEW`，切回旧包不是数据库回退。发布必须与提供 waksana/cockpit#205 invocation metadata 的 Cockpit 联合部署，否则 MCP 工具全部返回 `INVOCATION_REQUIRED`。HTTP 模块路由仍无 session 身份，固定 actor=`user`；这种 Task 的通知会尝试找名为 `user` 的 session，通常以 `ORCHESTRATOR_NOT_FOUND` 记录未发送。
+迁移 roll-forward only：旧模块（例如 0.1.13）看到 v9 数据返回 `SCHEMA_TOO_NEW`，切回旧包不是数据库回退。发布必须与提供 waksana/cockpit#205 invocation metadata 的 Cockpit 联合部署，否则 MCP 工具全部返回 `INVOCATION_REQUIRED`。HTTP 模块路由仍无 session 身份，固定 actor=`user`；这种 Task 的 dependency/Subtask 通知会尝试找名为 `user` 的 orchestrator session，通常以 `ORCHESTRATOR_NOT_FOUND` 记录未发送；`user` subscription 通知路由到同一个 `user` recipient，通常以 `SUBSCRIBER_NOT_FOUND` 记录未发送；真实 session 的 subscription 正常投递。
 
 ### Task 依赖与 schema v6
 
@@ -207,7 +207,7 @@ assignee 先完成交付，再于 done 前回顾实际工作，只记录有证�
 具体慢点/重复卡点，或 Skill/MCP 发现、契约及能力验证缺口。观察、假设与外部等待
 要分开，不编造耗时，不要求固定多段模板或凑内容；无有用发现显式提交 null。
 普通报告省略 retro，仅 done 接受；缺字段不等于 null，应拒绝。
-复盘不代替 outcome/blockers、不授权改进或扩大范围，服务不新增派单、通知或完成门槛；orchestrator 按 Skill 处理有发现的 retro（见下文复盘处理）。
+复盘不代替 outcome/blockers、不授权改进或扩大范围，服务不新增派单、通知或完成门槛；有 Subtask 的节点在自己 done 前把 Subtask retro 折入自己的 retro。`task_retro_handle` 只是可选记录工具，任意调用者可用，Skill 不规定使用时机。
 服务保证显式提交和持久化，不保证实际思考或文本质量。脚本 automation 不产生 Agent 复盘。
 
 schema v4 在 outcomes 增加 `retro TEXT`（可空）和
@@ -224,9 +224,7 @@ has_findings 仅表示文本非 null，不代表质量；
 
 ### 复盘处理与 schema v8
 
-复盘由创建 Task 的节点（其 orchestrator）消化：有Subtask 的 assignee 在自己 done 前逐条处理Subtask
-有发现的 retro，子树处理不了的写进自己的 retro 往上传；根节点不主动汇总，只在用户问起时处理。
-不做定期汇总 Task、水位或计数。
+schema v8 只记录某个 retro 后续如何被处理；它不规定处理时机、责任队列或定期汇总。当前 Skill 要求有 Subtask 的节点把子 retro 折入自己的 retro；是否额外调用 `task_retro_handle` 只是可选记录。
 
 schema v8 仅新建追加式 `retro_handlings` 表（`id,task_id,outcome_id,status,note,refs,author,at`），
 既有 retro 均视为未处理，不回填；只能向前滚动，打开过 v8 的数据库不能再由 v7 包打开。

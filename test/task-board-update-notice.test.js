@@ -247,3 +247,17 @@ test('an update notice left pending by a restart expires as not sent instead of 
   assert.equal(notice.notification.error.code, 'ASSIGNEE_NOTICE_EXPIRED');
   assert.deepEqual(f.sent, []);
 });
+
+test('a replay after restart never sends an assignee notice left pending by the earlier process', async t => {
+  const f = fixture(t);
+  const id = await f.assigned();
+  const input = { actor: 'orchestrator', request_id: randomUUID(), ...f.context(id), reason: 'Important change', description: 'v2' };
+  const saved = f.store.executeLocal('task_edit', input);
+  assert.equal(saved.notice_ids.length, 1);
+  const service = f.restart();
+  const replay = await service.execute('task_edit', input);
+  assert.equal(replay.error, null);
+  assert.equal(replay.notifications[0].notification.status, 'not_sent');
+  assert.equal(replay.notifications[0].notification.error.code, 'ASSIGNEE_NOTICE_EXPIRED');
+  assert.deepEqual(f.sent, []);
+});

@@ -329,7 +329,7 @@ This is not an assignee requirement-update/ACK notice or a dependency scheduler.
 Inspect subscriptions for immutable trigger facts and delivery evidence.
 Task results and notification_error are separate; failed delivery does not undo
 saved outcomes. Unknown sends are not automatically retried or manually duplicated.
-After HTTP is listening, onReady recovers only known-unattempted pending notices
+Assignee notices left pending by an earlier process expire synchronously when `TaskService` starts, before any request or replay can send them. After HTTP is listening, onReady recovers only other known-unattempted pending notices
 in a bounded pass. One-shot triggering does not guarantee exactly-once host delivery.
 
 ### Task dependencies (blocked_by)

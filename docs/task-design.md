@@ -79,9 +79,8 @@ assignee 完成交付后、done 前简短回顾：保留有证据、可行动的
 不要求多段模板或填充内容；无有用发现传 null。Agent done 同次必须显式提交新
 outcome 和 `retro` 文本或 null，普通报告不传；服务保证提交，不保证思考或文本质量。
 轻量视图只显示状态、归因与处理状态；历史未记录不冒充无发现。复盘不代替成果和阻塞、
-不授权改进或扩大范围，服务不新增通知、派单或完成门槛；创建该 Task 的 orchestrator 按 Skill
-用 `task_retro_handle` 处理有发现的 retro（有Subtask 的 assignee 在自己 done 前，根节点仅在用户问起时）。
-脚本 automation 不运行 Agent、也不需要 retro；现有服务成果和生命周期保持不变。
+不授权改进或扩大范围，服务不新增通知、派单或完成门槛；有 Subtask 的节点在自己 done 前把 Subtask retro 折入自己的 retro。
+`task_retro_handle` 只是可选记录工具，任意调用者可用，Skill 不规定使用时机。脚本 automation 不运行 Agent、也不需要 retro；现有服务成果和生命周期保持不变。
 
 ## 3. 登记、准备和指派是独立操作
 

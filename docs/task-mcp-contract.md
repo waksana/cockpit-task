@@ -539,7 +539,7 @@ Read the full current Task execution view and ACK its exact latest revision befo
 
 投递使用宿主 prompt `mode:"immediate"`。缺少 assignee session 记录为
 `not_sent` / `ASSIGNEE_NOT_FOUND`；存在性检查的宿主错误记录为
-`not_sent` / `ASSIGNEE_UNAVAILABLE`。服务启动时捕获 pending 边界；只有早于该边界、由先前进程遗留且未尝试的 pending assignee notice 不会迟发，
+`not_sent` / `ASSIGNEE_UNAVAILABLE`。服务启动时在接受任何请求前捕获 pending 边界；只有早于该边界、由先前进程遗留且未尝试的 pending assignee notice 不会迟发，
 而是标为 `not_sent` / `ASSIGNEE_NOTICE_EXPIRED`。本进程启动后新产生的 pending notice 仍按正常发送路径处理。
 
 输出变更效果、当前 revision / ack 和 write_context，不重复返回全文。并发冲突不覆盖当前定义，也不自动合并自然语言要求。
@@ -714,7 +714,7 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 | `queued` | 宿主确认入队，是 busy 接收者的正常结果，同样不证明已读；重要更新使用 immediate，正常不应为了它清队列 |
 | `not_sent` | 接收 session 不存在、被动存在性查询失败，或早于服务启动边界的 pending assignee notice 因前一进程遗留而过期；明确未调用发送或不再迟发，失败已记录，不自动再试 |
 
-只有 pending 可以自动恢复；`assignee_notices` 的 pending 例外中，只有服务启动边界之前遗留的 pending 行标为 `ASSIGNEE_NOTICE_EXPIRED`，不迟发；本进程新产生的 pending 行不按重启过期处理。发送前原子 claim 成 unknown，防并发和重启重复发送；宿主 prompt 没有幂等键，因此不宣称 exactly-once。接收者不存在时不创建替代 session。通知失败通过 `notification_error` 和 MCP `isError` / HTTP 502 显式返回，Task 的 `error` 仍独立反映原变更。存储确认失败时不能把“没有通知记录”误当未发送，应保留 `NOTIFICATION_STORAGE_UNCONFIRMED` 并检查。
+只有 pending 可以自动恢复；`assignee_notices` 的 pending 例外在 `TaskService` 构造期间、接受任何请求前同步处理：只有服务启动边界之前遗留的 pending 行标为 `ASSIGNEE_NOTICE_EXPIRED`，不迟发，即使原请求 replay 也不能发送；本进程新产生的 pending 行不按重启过期处理。发送前原子 claim 成 unknown，防并发和重启重复发送；宿主 prompt 没有幂等键，因此不宣称 exactly-once。接收者不存在时不创建替代 session。通知失败通过 `notification_error` 和 MCP `isError` / HTTP 502 显式返回，Task 的 `error` 仍独立反映原变更。存储确认失败时不能把“没有通知记录”误当未发送，应保留 `NOTIFICATION_STORAGE_UNCONFIRMED` 并检查。
 
 ## 4. 通用结果与错误
 
@@ -768,6 +768,7 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 | `SUBSCRIPTION_NOT_FOUND` / `SUBSCRIPTION_NOT_WAITING` | 记录不存在、不属该 Task，或已结束；不能撤回已消费通知 |
 | `NOTIFICATION_PENDING` | Task 已保存，明确未发送的通知待恢复；不要重做 Task 变更 |
 | `NOTIFICATION_UNCONFIRMED` / `NOTIFICATION_STORAGE_UNCONFIRMED` | 通知效果或其持久确认不明，检查现有证据，不盲重发 |
+| `ORCHESTRATOR_NOT_FOUND` / `ORCHESTRATOR_UNAVAILABLE` | dependency/Subtask notice 的 orchestrator 不存在或存在性读取失败，未发送，不自动新建替代者 |
 | `SUBSCRIBER_NOT_FOUND` / `SUBSCRIBER_UNAVAILABLE` | subscriber 不存在或存在性读取失败，订阅卡未发送，不自动新建替代者 |
 | `ASSIGNEE_NOT_FOUND` / `ASSIGNEE_UNAVAILABLE` | assignee notice 的接收者不存在或存在性读取失败，未发送，不自动新建替代者 |
 | `ASSIGNEE_NOTICE_EXPIRED` | 服务启动边界前遗留的 pending assignee notice 已标记不迟发；需要时以新的变更重新判断 |
@@ -827,6 +828,7 @@ assignee notice 由服务自动发送：assignee 之外的调用者改变 assign
 细节见[宿主契约](task-host-contract.md)。
 
 通知恢复要求 `context.serviceReadyVersion === 1`，在 DB 打开或升级前检查。
-只从宿主 runtime 启动且 HTTP 监听后的 `onReady` 恢复明确 pending 的发送，
+Assignee notice expiry is not part of the recovery pass: the `TaskService` constructor expires earlier-process pending assignee notices before any request or replay is accepted.
+只从宿主 runtime 启动且 HTTP 监听后的 `onReady` 恢复其他明确 pending 的发送，
 不在激活、提前的 agent 事件或首次读取时恢复，不重试 unknown 或已尝试失败项。
 并发、持久回执和安全恢复细节见[实现契约](task-implementation.md)。
