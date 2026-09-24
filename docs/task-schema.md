@@ -20,12 +20,13 @@ Task、依赖引擎或级联状态。引用其他 Task 只是资料关联。
 cancelled / automation 不恢复执行。Owner / Executor 字段记录
 责任而非访问权限；具备工具即可操作其他 Task，但所有数据不变量仍受保护。
 
-角色由宿主装配和管理，包括已有 session 的角色变化。Task 的创建工具只为
-新 session 选择 Executor；指派不补装任何能力，也不暴露角色变更操作。
-拥有两种角色不等于实际承接，也不放宽单项执行限制。
+角色由宿主装配和管理，包括已有 session 的角色变化。模块只有一个 `node` 角色，
+Task 的创建工具为新 session 选择它；指派不补装任何能力，也不暴露角色变更操作。
+持有角色不等于实际承接，也不放宽单项执行限制。Owner / Executor 是每条 Task 的
+`owner` / `executor` 事实，读取以派生字段 `actor_role` 表示，不另行存储。
 
 资源感知创建和独立 `task_session_prepare` 只准备显式选择的原生资源，不形成
-新的 Task 字段、类型或资源要求表单。prepare 要求已加载空闲、Executor 角色已应用、
+新的 Task 字段、类型或资源要求表单。prepare 要求已加载空闲、`node` 角色已应用、
 无待重载角色且未绑定任何未结束 Task；native idle 不能解除业务占用。
 准备不创建、绑定或发送消息，Task 登记不依赖准备成功，backlog 可以不派单。
 
@@ -54,6 +55,8 @@ cancelled / automation 不恢复执行。Owner / Executor 字段记录
 | `references` | `{label,target}` 数组；资料、成果或独立 Task 引用，不形成依赖 |
 | `blocked_by` | 最多 20 个同一 Owner 的 blocker Task UUID（schema v6 `task_dependencies`）；全部 done 前 `ready=false`，指派/启动返回 `TASK_NOT_READY`；仅待派发（todo、无 Executor、automation 未启动）时可整组替换，改变 `editable` 而非 revision；拒绝自身、环和新增已取消 blocker |
 | `dependency_notices` | schema v6 就绪/blocker 取消通知及投递证据，按依赖方、类型、blocker 与其生命周期唯一 |
+| `child_notices` | schema v7 子 Task done/blocked/cancelled 发给其 Owner 的通知及投递证据，按子 Task、状态与子生命周期唯一 |
+| `parent_task_id` / `depth` | schema v7 委派谱系：Owner 正执行未完成 Agent Task 时创建即记录其为父 Task，`depth` 为父级加一；顶层为 `null` / 1，最多 3 层（`DELEGATION_DEPTH_EXCEEDED`）；创建后不变，不影响就绪、通知、指派或权限 |
 | `metadata` | 有界纯 JSON 对象，供补充工作资料；不作为凭据、不覆盖固定字段或触发工作 |
 | 取消记录 | 取消原因、作者、时间；独立于 description changelog 和 Executor activity |
 | `task_assignments` | schema v5 后首次指派的持久单调序号与 Task/Executor/作者/时间；不从时间戳推断顺序，不回填升级前指派 |
@@ -151,6 +154,17 @@ schema v6 只能向前滚动，已安装的 `0.1.11` 不能打开 v6。blocker �
 发给依赖方 Owner。就绪不改变状态、不指派、不启动；Owner 编辑从不发通知。
 blocker 重开后再次 done 属于新生命周期，可再次通知。
 
+### 层级委派与 schema v7
+
+schema v7（`experiment/hierarchical-delegation`，#66）仅在缺失时新增 `tasks.parent_task_id`
+与 `tasks.depth` 列及 `child_notices` 表，既有 Task 均为顶层；只能向前滚动，已安装的 `0.1.12` 不能打开 v7。
+角色按 Task 区分：session 对自己的指派是 Executor，对为其创建的子 Task 是 Owner。
+子 Task 必须比父 Task 更具体，不得原样下传，且在父 Task 已授权范围内；父 Task 完成前整合子结果。
+子 Task 真实转入 done/blocked/cancelled 时，同事务为父 Task 的 Executor（即子 Task Owner）写入一条
+`child_notices`（父 Task 已结束或同一转换已触发订阅时不写），投递规则同 subscriptions。
+指派拒绝自我指派（`SELF_ASSIGNMENT`）与祖先回环（`DELEGATION_CYCLE`）；创建拒绝执行中节点与
+owner 不一致（`DELEGATION_OWNER_MISMATCH`）。
+
 ### 原 Executor 自助返工与 schema v5
 
 `task_reopen` 只用于用户明确授权的返工；自报 actor 必须等于记录的原 Executor，
@@ -229,7 +243,7 @@ Executor 已直接问用户的阻塞不由 Owner 重复转述。
 author 只是服务作者标签，不是 native session 或虚构 Executor 身份。
 
 普通更新静默；Executor 不给 Owner 发进度、问题或完成消息。
-首次 assigned、显式重要 updated、订阅 status_changed 与依赖 ready / blocker_cancelled 的引用 event
+首次 assigned、显式重要 updated、订阅 status_changed、依赖 ready / blocker_cancelled 与子 Task child_done / child_blocked / child_cancelled 的引用 event
 仅为消息固定元数据，不改变 revision、ACK 或生命周期。格式见
 [引用契约](task-implementation.md#read-boundaries-and-reference)。
 

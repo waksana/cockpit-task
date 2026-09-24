@@ -22,7 +22,7 @@ Replace both placeholders with the actual IDs:
 {
   "session_id": "<executor-session-id>",
   "mode": "immediate",
-  "text": "[Task updated](task:<uuid>?event=updated)\nRead the full current Task execution view and ACK its exact latest revision before continuing affected work."
+  "text": "[As Executor: Task updated](task:<uuid>?event=updated)\nRead the full current Task execution view and ACK its exact latest revision before continuing affected work."
 }
 ```
 

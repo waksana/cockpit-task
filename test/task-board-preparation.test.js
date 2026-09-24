@@ -304,7 +304,7 @@ test('host adapter exposes preparation capability and maps only selected public 
       if (name === 'session/resources-prepare') return prepared(body.sessionId);
       if (name === 'roles/readiness') return {
         sessionId: 'executor', ready: false, loaded: true, rolesNeedReload: false,
-        appliedRoles: [{ moduleId: 'cockpit-task', roleId: 'executor' }], reasons: ['Native metadata uninitialized'],
+        appliedRoles: [{ moduleId: 'cockpit-task', roleId: 'node' }], reasons: ['Native metadata uninitialized'],
       };
       if (name === 'session/get') return { meta: {
         sessionId: 'executor', loaded: true, status: 'idle', nativeProcessing: false, activeOperations: 0, queue: [],

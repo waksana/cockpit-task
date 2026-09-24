@@ -5,6 +5,7 @@ import {
   activate,
   acknowledgementLabel,
   createReadResource,
+  delegationLabel,
   dependencyLabel,
   formatTimestamp,
   nativeStatusLabel,
@@ -147,12 +148,12 @@ test('activation requires public compatibility and preserves native fallback on 
   const rendered = renderer.component({ node: { kind: 'link', target: `task:${taskId}` }, fallback });
   assert.equal(rendered.props.taskId, taskId);
   assert.equal(rendered.props.event, null);
-  for (const event of ['assigned', 'updated', 'status_changed', 'ready', 'blocker_cancelled']) {
+  for (const event of ['assigned', 'updated', 'status_changed', 'ready', 'blocker_cancelled', 'child_done', 'child_blocked', 'child_cancelled']) {
     const node = { kind: 'link', target: `task:${taskId}?event=${event}`, label: 'An unrelated label' };
     assert.equal(renderer.matches(node), true);
     assert.equal(renderer.component({ node, fallback }).props.event, event);
   }
-  const unknown = { kind: 'link', target: `task:${taskId}?event=deleted`, label: 'Task assigned to you' };
+  const unknown = { kind: 'link', target: `task:${taskId}?event=deleted`, label: 'As Executor: Task assigned to you' };
   assert.equal(renderer.matches(unknown), false);
   assert.equal(renderer.component({ node: unknown, fallback }), fallback);
 });
@@ -180,30 +181,36 @@ test('card event headings come from the message and survive loading, failure and
   };
   const heading = card => card.children.find(child => child?.props?.className === 'tb-card-event');
   assert.equal(render('assigned').props.className, 'ck-button tb-card');
-  assert.deepEqual(heading(render('assigned')).children, ['Task assigned to you']);
-  assert.deepEqual(heading(render('status_changed')).children, ['Task status updated']);
+  assert.deepEqual(heading(render('assigned')).children, ['As Executor: Task assigned to you']);
+  assert.deepEqual(heading(render('status_changed')).children, ['As Owner: Task status updated']);
   snapshot = { phase: 'ready', data: { ...result, status: 'done', revision: 4 }, error: null };
-  assert.deepEqual(heading(render('assigned', 'Task updated')).children, ['Task assigned to you']);
-  assert.deepEqual(heading(render('updated', 'Task assigned to you')).children, ['Task updated']);
-  const notification = render('status_changed', 'Task updated');
-  assert.deepEqual(heading(notification).children, ['Task status updated']);
+  assert.deepEqual(heading(render('assigned', 'As Executor: Task updated')).children, ['As Executor: Task assigned to you']);
+  assert.deepEqual(heading(render('updated', 'As Executor: Task assigned to you')).children, ['As Executor: Task updated']);
+  const notification = render('status_changed', 'As Executor: Task updated');
+  assert.deepEqual(heading(notification).children, ['As Owner: Task status updated']);
   assert.match(heading(notification).props.title, /not an Executor requirement update/);
   assert.ok(notification.children.some(child => child?.children?.includes('Owner subscription triggered · current state shown below')));
   snapshot = { phase: 'ready', data: { ...result, status: 'in_progress', revision: 5 }, error: null };
-  assert.deepEqual(heading(render('status_changed')).children, ['Task status updated']);
-  assert.equal(heading(render(null, 'Task updated')), undefined);
+  assert.deepEqual(heading(render('status_changed')).children, ['As Owner: Task status updated']);
+  assert.equal(heading(render(null, 'As Executor: Task updated')), undefined);
   const ready = render('ready');
-  assert.deepEqual(heading(ready).children, ['Task ready']);
+  assert.deepEqual(heading(ready).children, ['As Owner: Task ready']);
   assert.match(heading(ready).props.title, /Nothing was assigned or started/);
   assert.ok(ready.children.some(child => child?.children?.includes('Dependency notice to Owner · not assigned or started · current state shown below')));
-  assert.deepEqual(heading(render('blocker_cancelled')).children, ['Task blocker cancelled']);
+  assert.deepEqual(heading(render('blocker_cancelled')).children, ['As Owner: Task blocker cancelled']);
+  for (const status of ['done', 'blocked', 'cancelled']) {
+    const child = render(`child_${status}`, 'An unrelated label');
+    assert.deepEqual(heading(child).children, [`As Owner: child Task ${status}`]);
+    assert.match(heading(child).props.title, /once per transition without a subscription/);
+    assert.ok(child.children.some(entry => entry?.children?.includes('Child Task notice to Owner · integrate before completing the parent · current state shown below')));
+  }
   snapshot = { phase: 'ready', data: { ...result, blocked_by: [{ task_id: taskId, status: 'cancelled' }], ready: false }, error: null };
   assert.ok(render(null).children.some(child => child?.children?.includes('Blocked by 1 Task · 0 done · 1 cancelled (Owner decision needed) · not ready')));
   snapshot = { phase: 'ready', data: { ...result, blocked_by: [], ready: true }, error: null };
   assert.equal(render(null).children.some(child => String(child?.children?.[0] ?? '').startsWith('Blocked by')), false);
   snapshot = { phase: 'missing', data: null, error: new Error('Missing Task') };
-  assert.deepEqual(heading(render('updated')).children, ['Task updated']);
-  assert.deepEqual(heading(render('status_changed')).children, ['Task status updated']);
+  assert.deepEqual(heading(render('updated')).children, ['As Executor: Task updated']);
+  assert.deepEqual(heading(render('status_changed')).children, ['As Owner: Task status updated']);
 });
 
 test('HTTP reads use the scoped POST contract, without reported actor or chat requests', async () => {
@@ -856,4 +863,57 @@ test('dependency labels stay compact and never imply dispatch', () => {
   assert.equal(dependencyLabel([], true), null);
   assert.equal(dependencyLabel([{ task_id: 'a', status: 'done' }, { task_id: 'b', status: 'done' }], true), 'Blocked by 2 Tasks · all done · ready to dispatch');
   assert.equal(dependencyLabel([{ task_id: 'a', status: 'done' }, { task_id: 'b', status: 'in_progress' }], false), 'Blocked by 2 Tasks · 1 done · not ready');
+});
+
+test('delegation lineage shows parent and lazily reads direct child Tasks without extra eager reads', async () => {
+  assert.equal(delegationLabel(null, 1), null);
+  assert.equal(delegationLabel(undefined, undefined), null);
+  assert.equal(delegationLabel('parent', 2), 'Child Task · delegation level 2');
+  const parentId = '6f1c0c92-3580-4cdd-85bf-d7fcf22ab3ff';
+  const childId = '7a2c0c92-3580-4cdd-85bf-d7fcf22ab3ff';
+  const f = fixture();
+  const harness = componentHarness(f.context);
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  try {
+    harness.render();
+    f.requests[0].resolve(response({ ...result, parent_task_id: parentId, depth: 2 }));
+    await settle();
+    let tree = harness.render();
+    assert.match(textContent(tree), /Child Task · delegation level 2/);
+    elements(tree).find(node => node.props.className === 'ck-button tb-card').props.onClick();
+    harness.render();
+    f.requests[1].resolve(response({ ...result, parent_task_id: parentId, depth: 2, description: 'Child definition', references: [], metadata: {} }));
+    await settle();
+    tree = harness.render();
+    assert.match(textContent(tree), /Parent Task/);
+    assert.match(textContent(tree), new RegExp(parentId));
+    assert.equal(f.requests.length, 2, 'Parent and child lineage are not read until disclosed');
+    const disclosures = elements(tree).filter(node => node.type === 'details');
+    const children = disclosures.find(node => textContent(node).includes('Child Tasks delegated from this Task'));
+    children.props.onToggle({ currentTarget: { open: true } });
+    harness.render();
+    assert.deepEqual(JSON.parse(f.requests[2].init.body), { view: 'list', parent_task_id: taskId, status: 'all', limit: 50 });
+    f.requests[2].resolve(response({ items: [{ task_id: childId, title: 'Specific child', status: 'in_progress', executor: 'worker', parent_task_id: taskId, depth: 3 }], next_cursor: null }));
+    await settle();
+    tree = harness.render();
+    assert.match(textContent(tree), /Specific child · In progress · Executor: worker/);
+    assert.equal(f.requests.length, 3);
+  } finally {
+    harness.stop();
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+  }
+});
+
+test('malformed lineage and child lists fail rather than imply a top-level Task or no children', async () => {
+  for (const [request, data] of [
+    [input, { ...result, parent_task_id: 7 }],
+    [input, { ...result, depth: 0 }],
+    [{ view: 'list', parent_task_id: taskId }, { items: [{ task_id: 'x', title: 'Other', status: 'todo', parent_task_id: 'someone-else' }], next_cursor: null }],
+    [{ view: 'list', parent_task_id: taskId }, { items: 'none', next_cursor: null }],
+  ]) {
+    const context = { request: async () => response(data) };
+    await assert.rejects(readTask(context, request), /invalid|malformed|unexpected/i, JSON.stringify(data));
+  }
 });

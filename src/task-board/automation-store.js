@@ -180,7 +180,9 @@ export class AutomationStore {
       this.db.prepare('UPDATE tasks SET status=?,lifecycle=lifecycle+?,updated_at=? WHERE id=?')
         .run(status, Number(task.status !== status), at, taskId);
       const actor = this.actor(run);
-      return [...this.store.transitionSubscriptions(task, status, actor, at), ...this.store.transitionDependents(task, status, actor, at)];
+      const subscriptions = this.store.transitionSubscriptions(task, status, actor, at);
+      return [...subscriptions, ...this.store.transitionDependents(task, status, actor, at),
+        ...this.store.transitionChild(task, status, actor, at, subscriptions)];
     };
     return this.db.isTransaction ? write() : this.store.transaction(write);
   }

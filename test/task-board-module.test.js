@@ -19,7 +19,7 @@ function fixture() {
     activeOperations: 0, queue: [], ask: null,
   };
   let capability = { sessionId: 'executor', ready: true, loaded: true, roles: [], reasons: [],
-    rolesNeedReload: false, appliedRoles: [{ moduleId: 'cockpit-task', roleId: 'executor' }] };
+    rolesNeedReload: false, appliedRoles: [{ moduleId: 'cockpit-task', roleId: 'node' }] };
   const host = {
     async call(name, body) {
       calls.push({ name, body });
@@ -182,21 +182,17 @@ test('HTTP selective reads preserve legacy defaults, errors, revision checks and
   } finally { f.close(); }
 });
 
-test('module roles retain tool subsets and share one coding Skill alongside the two role Skills', () => {
+test('module publishes one Task node role with every tool, the tree Skill and the shared coding Skill', () => {
   const manifest = JSON.parse(readFileSync(new URL('../cockpit.module.json', import.meta.url), 'utf8'));
-  const [owner, executor] = manifest.roles;
   assert.equal(manifest.name, 'Task');
   assert.equal(manifest.id, 'cockpit-task');
-  assert.deepEqual(manifest.roles.map(({ id, name }) => ({ id, name })), [
-    { id: 'owner', name: 'Owner' },
-    { id: 'executor', name: 'Executor' },
-  ]);
-  for (const role of manifest.roles) assert.deepEqual(Object.keys(role.mcpServers), ['cockpit-task']);
-  assert.deepEqual(owner.mcpServers['cockpit-task'].tools, ['task_read', 'task_create', 'task_script_register', 'task_script_read', 'task_automation_start', 'task_automation_reconcile', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe']);
-  assert.deepEqual(executor.mcpServers['cockpit-task'].tools, ['task_read', 'task_edit', 'task_ack', 'task_reopen', 'task_report', 'task_cancel']);
-  assert.deepEqual([...new Set([...owner.mcpServers['cockpit-task'].tools, ...executor.mcpServers['cockpit-task'].tools])].sort(), [...TOOL_NAMES].sort());
-  assert.deepEqual(owner.skillDirectories, ['skills/cockpit-task-owner', 'skills/github-coding']);
-  assert.deepEqual(executor.skillDirectories, ['skills/cockpit-task-executor', 'skills/github-coding']);
+  assert.deepEqual(manifest.roles.map(({ id, name }) => ({ id, name })), [{ id: 'node', name: 'Task node' }]);
+  const [node] = manifest.roles;
+  assert.deepEqual(Object.keys(node.mcpServers), ['cockpit-task']);
+  assert.deepEqual([...node.mcpServers['cockpit-task'].tools].sort(), [...TOOL_NAMES].sort());
+  assert.equal(new Set(node.mcpServers['cockpit-task'].tools).size, TOOL_NAMES.length);
+  assert.equal(node.instructions, 'roles/task-node.md');
+  assert.deepEqual(node.skillDirectories, ['skills/cockpit-task-tree', 'skills/github-coding']);
 });
 
 test('automation HTTP views never fabricate or inspect a native Executor session', async () => {
@@ -277,13 +273,13 @@ test('module HTTP and host bridge preserve registration, creation, assignment an
     const session = await f.write('task_session_create', { cwd: '/tmp' });
     assert.equal(session.body.result.operation.capability, 'ready');
     assert.deepEqual(f.calls[0], {
-      name: 'session/new', body: { cwd: '/tmp', roles: [{ moduleId: 'cockpit-task', roleId: 'executor' }] },
+      name: 'session/new', body: { cwd: '/tmp', roles: [{ moduleId: 'cockpit-task', roleId: 'node' }] },
     });
     const execution = (await f.read(id)).body.result;
     const assigned = await f.write('task_assign', { task_id: id, revision: 1, executor: 'executor', write_context: execution.write_context });
     assert.equal(assigned.body.result.operation.message, 'accepted');
     assert.deepEqual(f.calls.filter(call => call.name === 'prompt'), [{
-      name: 'prompt', body: { sessionId: 'executor', text: `[Task assigned to you](task:${id}?event=assigned)`, mode: 'enqueue' },
+      name: 'prompt', body: { sessionId: 'executor', text: `[As Executor: Task assigned to you](task:${id}?event=assigned)`, mode: 'enqueue' },
     }]);
     f.meta = { ...f.meta, loaded: false, status: 'unloaded' };
     const before = f.calls.length;

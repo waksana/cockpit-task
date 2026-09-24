@@ -9,8 +9,8 @@ report, status subscriptions or uncertain effects. Reuse understood guidance; ex
 belong in tool schemas, not a per-turn checklist.
 
 The assignment, ACK and report sections below describe Agent Tasks. Automation is
-service-managed: no Executor, ACK, session slot or Agent report. Existing read/edit/cancel
-access does not authorize create/start or child Tasks. Script/inputs never change;
+service-managed: no Executor, ACK, session slot or Agent report. Executor read/edit/cancel
+access does not authorize create/start; only Owner guidance covers it. Script/inputs never change;
 queued/starting/running definitions and materials are frozen. Success writes a service
 done+outcome, failure/interruption blocked+outcome; no automatic rerun. Reconciliation
 only releases a proven-safe process-group barrier, never turns blocked into done.
@@ -136,8 +136,11 @@ time and outcome ID. Later definition edits leave these facts intact and show
 ## Creating, preparing and assigning
 
 Task registration, Executor-session creation/preparation and assignment are distinct.
-`task_session_create` assembles a new Executor, optionally preparing explicit
-`skills` / `mcp_servers`; it does not assign or start a Task.
+`task_session_create` assembles a new session with the single Task `node` role (Executor
+for its own assignment, Owner for child Tasks it may delegate), optionally preparing explicit
+`skills` / `mcp_servers`; it does not assign or start a Task. Readiness checks that the
+`node` role is applied; sessions still carrying removed `owner`/`executor` roles must be
+given the `node` role before assignment.
 Omitting both selections preserves legacy creation; an explicit empty array still
 requests preparation. Choose existing discoverable native names, never inferred
 resources from Task text. Requested MCP tools are raw names checked against the
@@ -215,12 +218,12 @@ unassigned `todo` and dispatch remains Owner's authorized judgment. Reads show
 and selected `context`.
 
 When the last blocker of a Task still awaiting dispatch becomes `done`, the system
-sends one `[Task ready](task:<uuid>?event=ready)` card for the dependent to its Owner.
-When a blocker is cancelled, it sends one `[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)`
+sends one `[As Owner: Task ready](task:<uuid>?event=ready)` card for the dependent to its Owner.
+When a blocker is cancelled, it sends one `[As Owner: Task blocker cancelled](task:<uuid>?event=blocker_cancelled)`
 card; the dependent stays not ready until Owner removes that blocker or cancels the
 dependent. Owner edits that make a Task ready send nothing. A blocker reopened and
 completed again can send a new ready card. There is no polling, automatic assignment,
-reminder or child-Task workflow. On either card, read the dependent (`include=["context"]`
+reminder or workflow engine. On either card, read the dependent (`include=["context"]`
 shows readiness; add groups only as the decision needs), reassess whether B is still
 needed and authorized, then dispatch or revise it. Inspect delivery with
 `task_read(view=dependency_notices)`; the same no-blind-resend rules as subscriptions apply.
@@ -228,10 +231,65 @@ needed and authorized, then dispatch or revise it. Inspect delivery with
 Follow-up recognized but not yet decided with the user may also be recorded as an
 unassigned planning Task `blocked_by` its prerequisites. Its description states plainly
 that it is a pending decision (what must be discussed, candidate items, links) and must
-not be dispatched as-is. On its ready card, discuss with the user, then either rewrite it
-into complete agreed requirements (splitting into further Tasks if needed) and dispatch,
-or cancel it with the user's decision as the reason. This is guidance only: no new
-status, kind or tool.
+not be executed before that discussion. Owner may still cancel it before dispatch on the
+user's decision. On its ready card, assign it to a new session rather than claiming it
+yourself. That Executor discusses it with the user, records the agreed requirements as its
+own Task's complete definition, then delivers directly or delegates more specific child
+Tasks. If the user decides against it, cancel it with the user's decision as the reason. This is guidance only: no new status, kind or tool.
+
+## Delegating child Tasks
+
+A session's role is decided per Task: Executor for the Task assigned to it (ACK, deliver,
+report), Owner for child Tasks it creates for that Task (state requirements, dispatch, follow
+up). Derive the role from Task facts, not memory: `executor` is you means Executor, `owner`
+is you means Owner; reads with your `actor_session_id` return it as `actor_role`, and cards
+are labelled "As Executor" / "As Owner". When unsure, read the Task. Owner and Executor
+guidance stay separate: no self-acceptance, Owner does not implement a delegated child, and
+one unfinished assignment per session still holds, so children go to other sessions.
+`task_session_create` gives new sessions the `node` role, so a child's Executor may delegate
+further by the same rules without a reload.
+
+There are no preset domain-lead identities. Split and delegate when a Task contains several
+independent outcomes, needs item-by-item trade-off discussion with the user, or its follow-up
+detail would crowd its own context; deliver a single coherent result directly. The heavier
+the load, the more the session leans toward delegating. A child must be more specific than its
+parent, never passed down unchanged, and within the parent's authorized scope; anything
+outside that scope is asked of the user directly. Its description is the complete child
+agreement and references the parent. Record which child covers what in the parent's
+activity. The parent integrates and verifies child results before completing its own Task.
+Child Tasks are part of the parent's Task: follow each one until its result is integrated.
+The service wakes the parent's Executor, as the child's Owner, with one `child_done`,
+`child_blocked` or `child_cancelled` card per such transition while the parent is unfinished;
+no subscription, polling or reminder is needed, and a waiting explicit subscription that
+matches the same transition replaces the card rather than duplicating it. On the card, read
+the child with one bounded overview and integrate, unblock, revise or replace it within your
+authorized scope; a card never changes the parent's agreement. Without ready delegation
+capability, deliver directly or ask the user; never fake delegation.
+
+Pending-decision planning Tasks are assigned to a new session that discusses them with the
+user and then delivers or delegates; the Owner does not claim them itself.
+
+When `task_create` is called with an `owner` that is executing an unfinished Agent Task,
+the service records that Task as the new Task's `parent_task_id` and sets `depth` to the
+parent's depth plus one; otherwise the Task is top-level (`parent_task_id: null`,
+`depth: 1`). Delegation is capped at 3 levels: creating beneath a depth-3 Task fails with
+`DELEGATION_DEPTH_EXCEEDED` and saves nothing; deliver directly or ask the user how to
+restructure. Lineage is fixed at creation, survives the parent finishing and is never
+inferred for Tasks created before schema v7. It records where a child came from; it does
+not change `blocked_by` readiness, notices, assignment or authority. Child notices go to the
+child's Owner, which is the parent's Executor. Read direct children with
+`task_read(view=list, parent_task_id=<Task ID>, status=all)`; delivery evidence for child
+cards is in `task_read(view=child_notices, task_id=<child ID>)`.
+
+The service rejects role confusion before any effect:
+- `DELEGATION_OWNER_MISMATCH`: a session executing an unfinished Agent Task creates Tasks
+  only with itself as `owner` (they are its children), and no other session can create a
+  Task owned by a session that is executing one;
+- `SELF_ASSIGNMENT`: a Task is never assigned to its own Owner; assign another session.
+  Doing the work yourself without a Task fits only a node that already holds a Task, or
+  an explicit user instruction, never a root node's default delegation;
+- `DELEGATION_CYCLE`: a child is never assigned to a session that owns or executes one of
+  its ancestor Tasks, so work cannot loop back up the lineage.
 
 ## One-shot status subscriptions
 

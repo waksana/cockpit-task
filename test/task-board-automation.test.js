@@ -441,7 +441,7 @@ test('v2 migration preserves Agent outcomes and defaults while allowing null-Exe
     assert.equal(store.task(task.task_id).automation, null);
     assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items[0].summary, 'Legacy result');
     assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items[0].source, 'reported');
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 6);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 7);
     assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
   } finally {
     store?.close();
@@ -465,12 +465,50 @@ test('automation respects blocked_by: start waits for readiness and a finished b
     await f.start(blocker);
     assert.equal((await f.finished(blocker)).status, 'done');
     await until(() => f.sent.length === 1);
-    assert.deepEqual(f.sent, [{ id: 'owner', text: `[Task ready](task:${dependent}?event=ready)` }]);
+    assert.deepEqual(f.sent, [{ id: 'owner', text: `[As Owner: Task ready](task:${dependent}?event=ready)` }]);
     const [notice] = f.store.read({ view: 'dependency_notices', task_id: dependent }).items;
     assert.equal(notice.event.source, 'automation');
     assert.equal(f.store.task(dependent).status, 'todo', 'ready never starts automation');
     await f.start(dependent);
     assert.equal((await f.finished(dependent)).status, 'done');
     assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
+
+test('an automation child reaching done or blocked notifies the executing parent Owner once', async () => {
+  const f = fixture();
+  try {
+    // Make 'owner' execute an Agent Task so its automation Tasks become children.
+    const root = f.store.executeLocal('task_create', { actor_session_id: 'user', request_id: 'parent', owner: 'user', title: 'Parent', description: 'Coordinate' }).task_id;
+    const assign = { actor_session_id: 'user', request_id: 'parent-assign', task_id: root, write_context: f.store.task(root).write_context, revision: 1, executor: 'owner' };
+    f.store.reserveOperation('task_assign', assign);
+    f.store.bindAssignment(assign);
+    f.store.executeLocal('task_ack', { actor_session_id: 'owner', request_id: 'parent-ack', task_id: root, revision: 1, write_context: f.store.task(root).write_context });
+    await f.register('ok', 'console.log("ok")');
+    await f.register('bad', 'process.exit(3)');
+    const cards = () => f.sent.filter(entry => entry.id === 'owner').map(entry => entry.text);
+    const ok = await f.create('ok');
+    assert.equal(f.store.task(ok).parent_task_id, root);
+    await f.start(ok);
+    assert.equal((await f.finished(ok)).status, 'done');
+    await until(() => cards().length === 1);
+    const bad = await f.create('bad');
+    await f.start(bad);
+    assert.equal((await f.finished(bad)).status, 'blocked');
+    await until(() => cards().length === 2);
+    assert.deepEqual(cards(), [
+      `[As Owner: child Task done](task:${ok}?event=child_done)`,
+      `[As Owner: child Task blocked](task:${bad}?event=child_blocked)`,
+    ]);
+    const [notice] = f.store.read({ view: 'child_notices', task_id: ok }).items;
+    assert.equal(notice.event.source, 'automation');
+    assert.equal(notice.event.actor_session_id, null);
+    assert.equal(notice.parent_task_id, root);
+    const queued = await f.create('ok');
+    const cancelled = await f.write('task_cancel', { task_id: queued, write_context: f.store.task(queued).write_context, reason: 'Not needed' });
+    assert.equal(cancelled.error, null);
+    await until(() => cards().length === 3);
+    assert.equal(cards()[2], `[As Owner: child Task cancelled](task:${queued}?event=child_cancelled)`);
+    assert.equal(f.store.read({ view: 'child_notices', task_id: queued }).items.length, 1, 'Automation cancellation notifies once');
   } finally { await f.close(); }
 });

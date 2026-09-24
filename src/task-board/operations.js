@@ -29,7 +29,7 @@ async function prepareSelected({ input, operation, inspect, prepare, preflight, 
   operation.capability = current.ready ? 'ready' : 'unavailable';
   if (current.details !== undefined) operation.details = current.details;
   if (!current.idle) return fault('EXECUTOR_NOT_READY', 'Preparation requires an already loaded idle Executor');
-  if (!current.executor) return fault('EXECUTOR_ROLE_REQUIRED', 'The Executor role must already be applied without a pending role reload');
+  if (!current.executor) return fault('EXECUTOR_ROLE_REQUIRED', 'The Task node role must already be applied without a pending role reload');
   const cancelled = cancellation(signal);
   if (cancelled) return cancelled;
   preflight(operation.session_id);

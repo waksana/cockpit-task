@@ -31,7 +31,7 @@ test('assignment records uncertainty before sending exactly one assigned event r
   assert.equal(outcome.error, null);
   assert.equal(outcome.result.operation.message, 'accepted');
   assert.equal(f.bindings, 1);
-  assert.deepEqual(f.sent, [{ id: 'executor', text: `[Task assigned to you](task:${input.task_id}?event=assigned)` }]);
+  assert.deepEqual(f.sent, [{ id: 'executor', text: `[As Executor: Task assigned to you](task:${input.task_id}?event=assigned)` }]);
   assert.equal(f.saved.at(-2).result.operation.message, 'unknown');
 });
 

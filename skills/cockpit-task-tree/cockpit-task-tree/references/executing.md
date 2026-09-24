@@ -1,18 +1,13 @@
----
-name: cockpit-task-executor
-description: "Guide sessions actually assigned a Task as Executor: own the complete authorized result, reconcile requirements, resume work and report delivery without messaging the Owner. Load when first needed; reuse guidance still in context rather than loading again at each message or checkpoint."
----
+# Executing: acting as Executor
 
-# Executor
-
-Use the `cockpit-task` MCP for the shared Task record.
-Executor is a collaboration responsibility, not a business identity or extra authority.
+Read this when a Task's `executor` is your session: your one assignment. Executor is a
+collaboration responsibility, not a business identity or extra authority.
 Use project instructions and work skills for execution methods.
 
 Automation Tasks are service-managed, not Executor assignments. You may read their
 `kind`, `automation` facts, outcomes and bounded `automation_log`; do not ACK or report
-them. Existing read/edit/cancel tools do not grant create/start or script registration.
-Do not create child Tasks or add Owner capabilities to route your assigned work through automation.
+them. Executing a Task does not grant create/start or script registration;
+only [delegating](delegating.md) guidance covers trusted automation, including as a child Task.
 
 ## Own the whole authorized result
 
@@ -27,15 +22,28 @@ without assuming inherited Owner context. MCP connected is not tool offered,
 and initialized tool metadata is not final readiness.
 
 Own the entire authorized result: investigation, execution, correction and delivery,
-not just a proposal or stage. Organize internal steps/subagents without child Tasks,
-helper-request workflows or transferring responsibility. Do not add Owner capabilities
-to bypass this boundary. Hold one unfinished Task at a time, not one lifetime goal;
-having both roles does not change that limit.
+not just a proposal or stage. Keep working until done; that is not being non-interactive. Organize internal steps/subagents without helper-request
+workflows, stage-by-stage redispatch or transferring responsibility; delegate child Tasks
+only by scope, below. Hold one unfinished Task at a time, not one lifetime goal;
+owning child Tasks does not change that limit: they are delegation inside this one job.
 
 Respect "discuss only", "not now" and scope: investigation does not authorize changes
 or unrelated follow-up work. Ask real decisions, consequential scope changes or
 missing essentials directly of the user here, not through Owner. Do not wait for
 stage-by-stage redispatch or repeat requests for already-granted permission.
+
+## Deliver directly or delegate by scope
+
+Roles are per Task: Executor for your assignment, Owner for child Tasks you create for it.
+Deliver a coherent result directly. Split only for several independent outcomes, item-by-item
+trade-off discussion with the user, or follow-up detail that would crowd your context; lean
+toward delegation as load grows. Then follow [delegating](delegating.md) for each child:
+more specific than your Task, never passed down unchanged, within its authorized scope.
+You still own your Task: integrate and verify child outcomes before done; never implement a
+child you delegated, accept your own work or fake delegation without ready delegation capability
+([delegating child Tasks](task-writes-and-recovery.md#delegating-child-tasks)).
+The service wakes you with one `child_done`, `child_blocked` or `child_cancelled` card per
+such child transition; read that child's outcome or blocker and integrate, without polling.
 
 ## Coding work
 
@@ -94,9 +102,6 @@ facts explicit and separate prior investigation from current requirements.
 Your successful changed-definition edit on your unfinished Task ACKs that revision;
 check for newer changes. Notices point to Task, not a substitute agreement or authority.
 
-Reuse this Skill while it remains in context; reload for missing/changed guidance
-or an unclear rule, not each message/checkpoint. This does not reduce fresh Task reads.
-
 ## Record meaningful facts; deliver truthfully
 
 Task is the sole shared work record, not a raw evidence store. Lead activity with
@@ -132,11 +137,13 @@ scope expansion or another dispatch. Owner may read it on demand, with no requir
 review, new notification or completion gate. The service guarantees explicit
 submission and persistence, not thoughtful reflection or the quality of the text.
 Automation has no Agent retro. See the completion examples in
-[Task writes and recovery](references/task-writes-and-recovery.md#completion-retro).
+[Task writes and recovery](task-writes-and-recovery.md#completion-retro).
 
-Communicate with the user here, not with Owner. Do not send Owner questions,
+Communicate with the user here (via ask_user where available), wait for the answer, revise your
+own Task if the agreement changes, and continue. Do not send Owner questions,
 confirmations, progress, blockers or completion messages, directly or via subagents.
-Reports/ordinary edits are silent without an explicit Owner status subscription.
+Reports/ordinary edits are silent without an explicit Owner status subscription, except
+that a child Task's done/blocked/cancelled transition notifies its Owner, your parent Task's Executor.
 Do not wait for Owner to subscribe or read a notice before continuing authorized
 work or delivering it.
 Only the system sends that one-shot notice to Task's Owner; this gives Executor
@@ -161,8 +168,8 @@ Executor. Cancelled Tasks cannot reopen; done Agent Tasks have only the explicit
 original-Executor rework path above, never revival from old instructions, notices,
 definition edits or an ordinary backwards status report.
 
-Use tool schemas for arguments. Consult [Task views and fields](references/reading-tasks.md)
-for unclear fields/views, [Task writes and recovery](references/task-writes-and-recovery.md)
+Use tool schemas for arguments. Consult [Task views and fields](reading-tasks.md)
+for unclear fields/views, [Task writes and recovery](task-writes-and-recovery.md)
 for unfamiliar write rules, conflicts or partial/uncertain results, and
-[Task links](references/task-links.md) for unfamiliar notices or link syntax.
+[Task links](task-links.md) for unfamiliar notices or link syntax.
 Load only the reference needed, not the whole set.

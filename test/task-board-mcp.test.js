@@ -88,7 +88,7 @@ test('published tool descriptions explain filters, dispatch races and same-repor
       assert.deepEqual(tool.inputSchema, z.toJSONSchema(toolSchemas[tool.name], { target: 'draft-7' }));
       assert.ok(tool.description.length < 500, `${tool.name}: keep workflow detail in Skills`);
     }
-    assert.match(descriptions.task_read, /list, explicitly filter by owner or executor/);
+    assert.match(descriptions.task_read, /list, explicitly filter by owner, executor or parent_task_id/);
     assert.match(descriptions.task_read, /actor_session_id.*not an automatic list filter or authentication/);
     assert.match(descriptions.task_read, /Reads never acknowledge/);
     const readSchema = tools.find(tool => tool.name === 'task_read').inputSchema;
@@ -155,7 +155,7 @@ test('a status notification needs only one selective MCP read for done, blocked 
       } });
       assert.notEqual(report.isError, true);
       assert.equal(sent.length, index + 1);
-      assert.deepEqual(sent[index], { owner: 'owner', text: `[Task status updated](task:${task.task_id}?event=status_changed)` });
+      assert.deepEqual(sent[index], { owner: 'owner', text: `[As Owner: Task status updated](task:${task.task_id}?event=status_changed)` });
       const count = reads.length;
       const response = await f.client.callTool({ name: 'task_read', arguments: {
         view: 'overview', task_id: task.task_id, actor_session_id: 'owner', include: ['activity', 'outcome', 'retro'],
@@ -357,7 +357,7 @@ test('real notification failure crosses MCP without erasing Task effects or rese
     assert.equal(replay.isError, true);
     assert.deepEqual(replay.structuredContent, envelope);
     assert.deepEqual(sent, [{
-      owner: 'recorded-owner', text: `[Task status updated](task:${task_id}?event=status_changed)`,
+      owner: 'recorded-owner', text: `[As Owner: Task status updated](task:${task_id}?event=status_changed)`,
     }]);
   } finally {
     await f.close();

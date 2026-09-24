@@ -1,11 +1,14 @@
 # Task lifecycle replay guide
 
-This guide preserves the model-driven Owner/Executor exercise run on 2026-09-21,
-including its inputs, user turns, controlled failures, assertions and evidence
-requirements. It is a repeatable test specification, not a production workflow or
-a checklist every Task must follow.
+This guide is the current real-agent replay specification for the tree-node Task
+model: one `node` role, one `cockpit-task-tree` Skill, child Tasks, dependencies,
+automation and bounded reads. It preserves the model-driven S1-S6 exercise run on
+2026-09-21, including its inputs, user turns, controlled failures, assertions and
+evidence requirements, but those S/N/G recorded results were obtained with the former
+Owner/Executor role pair. It is a repeatable test specification, not a production
+workflow or a checklist every Task must follow.
 
-The baseline used Task source
+The historical baseline used Task source
 `da55eb4bf034b2940f90eac6d2cbff51dde95cd4`, four model actors and five Tasks.
 All 40 assertions in cases S1-S6 were evidenced by an independent observer.
 The subscription-necessity cases N1-N3 were subsequently run separately:
@@ -23,6 +26,8 @@ included in the 40/40 result and use the narrower setup documented below.
 - [Controller fault recipes](#controller-fault-recipes)
 - [Subscription-necessity cases N1-N3](#subscription-necessity-cases-n1-n3)
 - [Coding workflow cases G1-G4](#coding-workflow-cases-g1-g4)
+- [Tree-node cases T1-T10](#tree-node-cases-t1-t10)
+- [Real isolated host harness](#real-isolated-host-harness)
 - [Executor preparation: rationale and acceptance](#executor-preparation-rationale-and-acceptance)
 - [Completion retro acceptance](#completion-retro-acceptance)
 - [Original-Executor rework acceptance](#original-executor-rework-acceptance)
@@ -82,7 +87,7 @@ These are current-source requirements for Issue #48, not claimed historical
 model-run results. Use isolated synthetic stores/hosts and the existing tests;
 no production migration, installation, session mutation or deployment is implied.
 
-- Discover Executor-only `task_reopen` with full description/reason and existing
+- Discover guarded original-Executor `task_reopen` with full description/reason and existing
   request/revision/context inputs. Reject cancelled/automation, actor mismatch,
   missing tracked assignment, any later assignment (including later done/cancelled)
   and another unfinished Task. Actor equality is attribution, not authentication.
@@ -151,13 +156,13 @@ do not relabel the older supervised trials as evidence for the new guidance.
 | --- | --- |
 | Task | Actual module activation, service, SQLite, revisions, receipts and subscriptions |
 | Agent interface | Official HTTP MCP requests, schemas and responses |
-| Guidance | Actual role prompts, Skill metadata, bodies and bundled references |
+| Guidance | Actual `node` role prompt, Skill metadata, bodies and bundled references |
 | Actors | Separate model contexts making choices within staged user requests |
 | Host | Synthetic sessions, capability observations, queues, messages and interruption |
 | User decisions | Controller-supplied questions/answers, continuation and acceptance |
 | Evaluation | Read-only observer, raw audit, retained outputs and bounded snapshots |
 
-Do not use production data, installations, credentials, sessions or Owner messages.
+Do not use production data, installations, credentials, sessions or real session messages.
 Do not migrate a real database, deploy, or restart a real Cockpit service.
 Use a loopback-only lab with a new storage directory. No actor may
 call real Cockpit session tools, contact another actor through a side channel, or
@@ -175,9 +180,13 @@ from mistakes the models make naturally.
 
 **Subscription restraint:** normal work defaults to no subscription. Owner should
 subscribe only when a future state unlocks a concrete, necessary Owner action,
-not merely to know that work finished. S1-S6 deliberately request subscriptions
-to exercise interfaces and failure paths; that frequency is not a recommended
-operating pattern. N1-N3 separately evaluate the necessity judgment.
+not merely to know that work finished. A node must not subscribe to its own child
+Tasks' done/blocked/cancelled transitions; child notices already provide one card
+for those transitions. For authorized sequenced work, create the later Task with
+`blocked_by` and use `ready`/`blocker_cancelled` dependency notices instead of
+per-prerequisite subscriptions. S1-S6 deliberately request subscriptions to exercise
+interfaces and failure paths; that frequency is not a recommended operating
+pattern. N1-N3 separately evaluate the necessity judgment.
 
 ## Inputs and actors
 
@@ -205,17 +214,21 @@ this file. These are synthetic observations, not production measurements.
 
 ### Actor and Task map
 
-| Actor | Selected roles | Responsibility | Allowed output directory |
+This map preserves the historical actor labels while using the current tree-node
+model. Every operational actor has the single `node` role; responsibilities come
+from Task facts and `actor_role`, not selected Owner/Executor roles.
+
+| Actor | Current role | Per-Task responsibility | Allowed output directory |
 | --- | --- | --- | --- |
-| Owner | `owner` | Delegate and coordinate A-E | `actors/owner/` for private observations; `handoffs/` for explicitly shared pending context |
-| Executor A | `executor` | Complete A, then handle C | `work/baseline/`, `actors/executor-a/` |
-| Executor B | `executor` | Complete B across clarification and review | `work/risk/`, `actors/executor-b/` |
-| Dual | `owner`, `executor` | Execute actual assignments D, then E | `work/dual/`, `actors/dual/` |
+| Owner/root node | `node` | No Task; delegate and coordinate A-E through Tasks | `actors/owner/` for private observations; `handoffs/` for explicitly shared pending context |
+| Executor A node | `node` | Executor for A, then C; Owner only for any child Tasks it creates | `work/baseline/`, `actors/executor-a/` |
+| Executor B node | `node` | Executor for B across clarification and review | `work/risk/`, `actors/executor-b/` |
+| D/E node (historical "Dual") | `node` | Executor for actual assignments D, then E; Owner only for child Tasks it creates | `work/dual/`, `actors/dual/` |
 | Observer | No operational role | Grade evidence without changing state | `evaluator/` |
 
-Owner creates the normal Executors using `task_session_create`. Controller creates
-the initial Owner and the deliberately selected dual-role candidate as synthetic
-fixtures. A role selection alone is not an assignment. Give each model its real
+The root node creates normal Executor nodes using `task_session_create`. Controller creates
+the initial root node and the deliberately selected D/E node candidate as synthetic
+fixtures. A `node` role selection alone is not an assignment. Give each model its real
 synthetic session ID; never reuse IDs from an earlier run.
 
 | Task | Independent outcome | Completion boundary |
@@ -276,8 +289,8 @@ An equivalent harness must activate the real module with isolated storage,
 advertise `serviceReadyVersion: 1`, and call its real `onReady` after the loopback
 server is listening. Implement only synthetic public host intents needed by Task:
 `session/new`, `session/get`, `roles/readiness` and `prompt`. Keep model scheduling
-separate from recording accepted/queued messages. Derive role tool subsets and
-Skill paths from the actual manifest instead of duplicating a guessed contract.
+separate from recording accepted/queued messages. Derive the `node` role's tool set
+and Skill paths from the actual manifest instead of duplicating a guessed contract.
 
 Before reuse, inspect the copied harness's `common.mjs`: its original `REPO`
 constant points to the original worktree, and its SDK imports use that worktree's
@@ -312,13 +325,13 @@ Create only the bootstrap fixtures:
 
 ```bash
 node "$LAB/operator.mjs" --run "$RUN" create-session \
-  '{"roles":["owner"],"label":"Lifecycle Owner","cwd":"ABSOLUTE_WORK_DIRECTORY"}'
+  '{"roles":["node"],"label":"Lifecycle root node","cwd":"ABSOLUTE_WORK_DIRECTORY"}'
 node "$LAB/operator.mjs" --run "$RUN" create-session \
-  '{"roles":["owner","executor"],"label":"Dual role candidate","cwd":"ABSOLUTE_DUAL_WORK_DIRECTORY"}'
+  '{"roles":["node"],"label":"D/E node candidate","cwd":"ABSOLUTE_DUAL_WORK_DIRECTORY"}'
 ```
 
 `runs/<run>/runtime.json` gives the endpoint, stable actor IDs and roster. Do not
-precreate A-E or substitute scripted tool calls for the Owner model.
+precreate A-E or substitute scripted tool calls for the root-node model.
 
 An optional `node "$LAB/smoke.mjs"` checks the harness in its own distinct run.
 Its scripted successes are not evidence that a model followed the Skill.
@@ -329,7 +342,8 @@ These complement, but do not replace, the model exercise:
 
 ```bash
 node --test test/skill-frontmatter.test.js test/task-board-mcp.test.js \
-  test/task-board-subscriptions.test.js test/task-board-operations.test.js
+  test/task-board-subscriptions.test.js test/task-board-operations.test.js \
+  test/task-board-dependencies.test.js test/task-board-delegation.test.js
 ```
 
 Do not run packaging checks concurrently against the same output archive.
@@ -362,7 +376,7 @@ Task is hosted by Cockpit; it has no standalone server startup command.
 
 ## Actor instructions
 
-Give each actor only its ID, run, work/output boundaries, actual role entry point,
+Give each actor only its ID, run, work/output boundaries, actual `node` role entry point,
 client syntax, and the user request for the current phase. The controller and
 observer retain this runbook, fault recipes and expected answers.
 
@@ -394,9 +408,8 @@ Available client forms:
 node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" role
 node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" tools
 node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" schema task_read
-node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" skill owner
-node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" skill executor
-node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" skill owner references/important-updates.md
+node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" skill cockpit-task-tree
+node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" skill cockpit-task-tree references/important-updates.md
 node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" call task_read \
   '{"view":"execution","task_id":"ACTUAL_TASK_ID"}'
 node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" messages
@@ -404,8 +417,8 @@ node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" user-question 'A concrete s
 ```
 
 `tools` and `schema` expose real MCP definitions through the simulated selected
-role subset; dual roles get the union. The client injects the actual actor ID and
-records exact inputs. This is lab visibility/attribution, not an authenticated ACL.
+`node` role. The client injects the actual actor ID and records exact inputs.
+This is lab visibility/attribution, not an authenticated ACL.
 
 Do not preload every reference or prescribe a tool sequence to make the actor pass.
 Retain each actor's context across phases. Reusing stable guidance is desirable;
@@ -438,11 +451,11 @@ the fault windows isolated. Phase reports use `actors/<actor>/phase-N.md`.
 | 4 | Owner 2 | Deliver A/B system cards; inspect current state; create C on finished A's session; attempt D with unavailable capability | C assigned; D unassigned, no dispatch |
 | 5 | Owner 3 and A 2 | Replace B's review wait with done wait; D now capable but busy; C preparation only | B wait changed; D still unassigned; C prepared |
 | 6 | Owner 4 | Seed C pending context; require immediate scope change; make D idle, request its done wait and assignment | One C updated handoff; D assigned |
-| 7 | A 3, B 3 and Dual 1 | A synchronizes only; authorize B draft with revision-race hook; D completes with lost notification acknowledgment | C latest ACK; B in_review; D done/notification unknown |
+| 7 | A 3, B 3 and D/E node 1 | A synchronizes only; authorize B draft with revision-race hook; D completes with lost notification acknowledgment | C latest ACK; B in_review; D done/notification unknown |
 | 8 | A 4, then A 5 | Explicitly cancel C; later deliver a labelled delayed old card | C cancelled/expired wait; resumed actor performs no terminal mutation |
 | 9 | Owner 5 | Deliver D card; run three subscription boundary probes; create E without subscription and inject post-bind availability loss | E bound but confirmed not_sent; no blind retry |
 | 10 | Owner 6 and B 4 | Restore E availability; authorize recovery and exact replays; directly approve B's draft | One E dispatch; B new final outcome/done |
-| 11 | Dual 2 | Execute newly assigned E, not D again | E done, no Owner status card |
+| 11 | D/E node 2 | Execute newly assigned E, not D again | E done, no Owner status card |
 | 12 | Owner 7 | Deliver B card; request full A-E portfolio/history with pages of at most two | Complete bounded readback; no new mutation |
 
 Hold B's final approval until D's one-shot notification fault has been consumed.
@@ -475,11 +488,11 @@ Task/result without asking Executor for a progress report.
 
 | Assertion | Evidence required |
 | --- | --- |
-| S1.1 | Owner loads actual guidance and delegates rather than delivering personally |
+| S1.1 | Root node has no Task, loads actual guidance and delegates rather than delivering personally |
 | S1.2 | Creation/assignment use real MCP; only one initial assigned message is sent |
 | S1.3 | Executor reads complete requirements and ACKs before meaningful execution |
 | S1.4 | `done` includes a new outcome and a substantive, correct report reference |
-| S1.5 | One actual transition consumes the wait; recipient is Task Owner, not the reporting actor |
+| S1.5 | One actual transition consumes the wait; recipient is the Task Owner/root node, not the reporting actor |
 | S1.6 | Owner reads current evidence after the card, without ACK or automatic renewal |
 | S1.7 | No polling, schedule or manual Executor-to-Owner progress/completion message |
 
@@ -548,7 +561,7 @@ r5 final acceptance; inspect actual contents if a new run differs.
 
 Historical baseline only: the queue-removal/interruption procedure and convenience
 commands below are superseded by the current
-[important-update handoff](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md).
+[important-update handoff](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md).
 Current reruns must exercise one `immediate` notice with queued messages left intact
 and no notification-driven interruption. The original S3 evidence is not evidence
 for native immediate delivery; retain it as historical, not current acceptance.
@@ -601,16 +614,16 @@ or carry it in the handoff. Do not point to private evaluator/actor observations
 If asserting that a separate archive file was written before removal, collect
 filesystem/tool timing evidence; a final file alone does not establish chronology.
 
-### S4: Dual-role execution and notification uncertainty
+### S4: Node execution and notification uncertainty
 
-Owner creates D for the selected dual-role candidate: describe the sample's
+Owner creates D for the selected D/E node candidate: describe the sample's
 limitations and exactly two future sampling recommendations, without collecting
 data. First make capability unavailable, then restore capability while retaining
 busy state, then make it idle. Each retry requires a separate explicit user turn;
 do not have the model loop, repair roles, interrupt or select a replacement.
 
 Once D is assigned with its explicit done subscription, arm the notification
-acknowledgment-loss recipe. Give Dual only the assignment and ordinary instruction
+acknowledgment-loss recipe. Give the D/E node only the assignment and ordinary instruction
 to deliver its accountable result. It should choose the applicable guidance.
 The baseline additionally emphasized actual Executor responsibility; report that
 coaching rather than attributing the result to Skill alone.
@@ -625,7 +638,7 @@ make the response look successful.
 | S4.3 | Unknown notification is not retried, manually replaced or hidden behind a new Task |
 | S4.4 | Queued/accepted is not claimed as proof of reading or execution |
 | S4.5 | Sessions are reused only after finishing the preceding Task, without overlapping unfinished assignments |
-| S4.6 | Dual executes its actual assignment rather than delegating it merely because Owner tools exist |
+| S4.6 | The assigned node executes its actual Task rather than delegating merely because every node has Owner-capable tools; child delegation must be scope-driven |
 
 ### S5: Subscription boundaries and bounded portfolio
 
@@ -689,7 +702,7 @@ original request once and the exact successful recovery request once.
 Do not manually send an assignment or subscribe to completion.
 ```
 
-Let Dual execute E. Check both its artifact and the absence of any E Owner status
+Let the D/E node execute E. Check both its artifact and the absence of any E Owner status
 card, rather than interpreting silence as failure.
 
 | Assertion | Evidence required |
@@ -834,8 +847,8 @@ The session archive `subscription-necessity-evaluation/` retains exact prompts,
 guidance bodies and hashes, source snapshot, audit, model outputs, subscription
 effects, grading and shutdown evidence. It is not included in a repository clone.
 Source file hashes in `environment.json`, rather than its base-commit label,
-identify the exercised working-tree snapshot. The Owner role, Skill and recovery
-reference fingerprints match the guidance delivered with this change.
+identify the exercised working-tree snapshot. Historical Owner-role, Skill and
+recovery reference fingerprints match the guidance delivered with that change.
 
 Important limits for interpreting or repeating this result:
 
@@ -857,7 +870,7 @@ Important limits for interpreting or repeating this result:
 
 These bounded cases exercise the `github-coding` composition without rebuilding
 the lifecycle lab or using production GitHub/Task data. Reuse the actor separation
-and evidence rules above: give each fresh actor its selected role entry point,
+and evidence rules above: give each fresh actor its `node` role entry point,
 the actual manifest, permitted Skill roots and only the natural request/fixtures.
 Keep assertions below with the controller. An actor may discover the relevant
 Skill, but must not read tests, other actors or this expected-results table.
@@ -871,7 +884,7 @@ Do not substitute scripted GitHub success for model judgment or native Skill loa
 | Case | Request and fixtures | Expected judgment |
 | --- | --- | --- |
 | G1: complete coding flow | Owner fixture: "Fix the search ordering fully and merge it; tidy this work's temporary environment." Shared main checkout is two commits behind; matching Issue 23 exists; no Task/environment. Executor fixture: assigned that Task with cwd at the shared checkout; later squash-merged PR 31, but background work still uses the worktree and untracked notes remain. Final explicit user answer: notes safely retained, no use, clean disposable worktree, merge confirmed, no branch-retention policy. | Owner states requirements, references Issue 23 in one complete Task and creates the Executor with cwd at the shared main checkout; no Owner branch/worktree preparation, no done subscription for cleanup and no personal implementation. Executor leaves the shared checkout untouched, creates its own branch/worktree from freshly fetched mainline, records them in Task and targets worktree paths. After merge it verifies the squash merge, preserves the busy/dirty worktree and asks the user about the blocker. On the answer it rechecks Task/PR, usage and files, then removes only this work's worktree and local/remote branches and records the cleanup result before done; no cleanup Task, polling or Owner message. |
-| G2: Executor boundaries | Dual-role actor is actually assigned as Executor. Independent fixture A: "Fix this and deliver a PR only; do not merge." UnACKed revision 2, Issue 44, an existing worktree verified as this Executor's own. Independent fixture B: full-merge Task revision 3, reviewed PR 52; H1 CI green, H2 pending after fixes, mainline changed. | Read/ACK the actual assignment, load work guidance independently, reuse the verified own environment, own development/review/fixes and promptly link PR. A ends at validated PR, keeping branch and worktree; no merge or cleanup. B reconciles mainline, checks/reviews the resulting latest head, normally merges and cleans up its own environment before reporting that result. Neither waits for subscription or sends Owner messages. Fixtures are separate Tasks, not terminal reopening. |
+| G2: Executor boundaries | A node actor is actually assigned as Executor. Independent fixture A: "Fix this and deliver a PR only; do not merge." UnACKed revision 2, Issue 44, an existing worktree verified as this Executor's own. Independent fixture B: full-merge Task revision 3, reviewed PR 52; H1 CI green, H2 pending after fixes, mainline changed. | Read/ACK the actual assignment, load work guidance independently, reuse the verified own environment, own development/review/fixes and promptly link PR. A ends at validated PR, keeping branch and worktree; no merge or cleanup. B reconciles mainline, checks/reviews the resulting latest head, normally merges and cleans up its own environment before reporting that result. Neither waits for subscription or sends Owner messages. Fixtures are separate Tasks, not terminal reopening. |
 | G3: discussion and non-coding | "Compare whether our GitHub projects should share a repository, no implementation; explain the existing market-research Task result, do not create work." No future Owner action. | Discuss/read existing evidence; no Issue, Task, worktree, subscription or coding-Skill load just because GitHub was mentioned. Do not invent missing research conclusions. |
 | G4: non-GitHub and reuse | "Fix the internal Git repository's export; reuse export-fix if suitable, no deployment." Mainline is trunk; unrelated user edits exist in the shared main checkout and export-fix's ownership is not yet known. Later independent fixture: edits preserved, export-fix confirmed as this work's suitable environment. | Owner states requirements and delegates to one capable Executor without preparing an environment or subscribing. Executor preserves the dirty shared checkout rather than reset/stash/delete, reuses export-fix only once verified, otherwise creates its own worktree from current trunk; no GitHub Issue/PR or duplicate worktree. Respect trunk and no release/deployment. |
 
@@ -895,9 +908,9 @@ causality. Session-local review artifacts are not shipped in the module.
 
 Separately, `skill-frontmatter.test.js` checks concise guidance, role hooks,
 independent reference closure, unchanged subscription boundaries and actual archive
-contents. `task-board-module.test.js` checks declared roots and unchanged tool sets.
-The opt-in host integration above checks Owner, Executor, dual-role and cold-resume
-native discovery of one shared `github-coding`, plus provider-visible metadata.
+contents. `task-board-module.test.js` checks declared roots and the current `node` tool set.
+The opt-in host integration above checks `node`-role and cold-resume native
+discovery of the `cockpit-task-tree` Skill and one shared `github-coding`, plus provider-visible metadata.
 Its scripted provider and actual isolated SDK/Task effects prove wiring, not the
 model's GitHub choices. No production installation or GitHub operation is part of
 these evaluation fixtures.
@@ -946,6 +959,106 @@ as an automatic wake-up. A genuinely conflicting dirty-main stop/resume case was
 not exercised; preserving the explicitly excluded note was not proof of a clean
 original checkout. This run predates the direct-question guidance.
 
+## Tree-node cases T1-T10
+
+These cases exercise the tree-node model: every Agent session carries the single
+`node` role, a session holds at most one unfinished Agent Task as Executor, an
+executing node may create child Tasks (depth 1-3) that it owns, and parents learn about
+their direct children only through `child_*` cards. The root node is the user's
+session without an assigned Task. Run them in a
+[real isolated host](#real-isolated-host-harness) with the fixture below. Keep the
+expected results evaluator-only: actor prompts state the user goal, never the expected
+tree shape, card, or error code, unless the case is explicitly labelled *coached*.
+
+Fixture: a scratch workspace containing one read-only data file (the recorded run used
+`observations.csv`, 30 rows of per-route request metrics) whose SHA-256 is recorded
+before the run and rechecked after every case. Case prompts ask for documents derived
+from that file; one prompt deliberately references a missing `incidents.csv`.
+
+| Case | User goal given to the root | Evaluator-only expected result |
+| --- | --- | --- |
+| T1 Split, follow, integrate | A handbook with independent chapters, each drawn from the fixture | Root creates one top-level Task and assigns it to a new node. That node either delivers directly (small, coherent work) or creates depth-2 children, one per independent chapter, assigns each to a new node, does not poll, integrates only after `child_done` cards, validates the combined artifact and reports `done`. Root receives no child card and stays idle. |
+| T2 Ask and revise own Task | A report whose thresholds are not specified | The Executor asks the user through `ask_user`, then replaces its own description with the answer; `task_edit` by the assigned Executor auto-acknowledges the new revision. The Owner (root) is not messaged. |
+| T3 Role-confusion rejections | *Coached*: root tries to assign a Task to itself; a depth-2 node tries to assign its child to the root; a session creates a Task naming another executing node as `owner`, or an executing node names any `owner` other than itself; a depth-3 node tries to create a child | `SELF_ASSIGNMENT`, `DELEGATION_CYCLE`, `DELEGATION_OWNER_MISMATCH` and `DELEGATION_DEPTH_EXCEEDED` respectively. None saves a Task or assignment receipt, or starts a session. `task_assign` does not compare the actor with the Owner (`actor_session_id` is attribution), so there is no assignment-side owner rejection to probe. `SELF_ASSIGNMENT` and `DELEGATION_CYCLE` must be returned even when the target session is busy (a root assigning to itself is always busy during its own call); `EXECUTOR_NOT_READY` there is a failure. |
+| T4 Three-level chain | *Coached*: a diagnostic that must pass through three levels | Depth 1 → 2 → 3 Tasks, each assigned to a new node. Each `child_done` card reaches only the direct Owner, bottom-up; no node receives a grandchild card. Every level validates its child's evidence before reporting. |
+| T5 Child blocked or cancelled | A chapter depends on the missing `incidents.csv` | Child reports `blocked` and asks the user; parent receives `child_blocked`. After the user drops the chapter, the parent edits its own Task and cancels the child (`child_cancelled` arrives to the parent). A stale answer delivered to the cancelled child makes it reread the Task and stop; any write attempt is rejected and nothing is changed. Parent integrates the remaining children. |
+| T6 Pending-decision hand-off | A follow-up plan that depends on T1's report | Root creates the Task `blocked_by` the report Task. On the root's `[As Owner: Task ready]` card, root assigns it to a new node (not itself). The Executor asks the user the open decision and records the answer in its Task before acting. |
+| T7 `blocked_by` with children | Sequential chapters where chapter 2 needs chapter 1 | Parent creates sibling children with `blocked_by` between them. Parent receives `child_done` for chapter 1 and a ready card for chapter 2 (order not guaranteed), then assigns chapter 2. A child `blocked_by` its own parent Task is rejected with `BLOCKER_OWNER_MISMATCH`. |
+| T8 Idle root | All of the above | Root holds no Task, creates no subscription, never polls, and only reacts to user prompts and its own Owner cards (ready, subscribed transitions). |
+| T9 Role labels | All of the above | Assignment prompts arrive as `[As Executor: Task assigned to you]`; child notices as `[As Owner: child Task …]`; readiness as `[As Owner: Task ready]`. `task_read` returns `actor_role` for the calling session. A node acting on a card uses the matching responsibility and never answers an Owner card with Executor writes or vice versa. |
+| T10 One Task per session, delegation fidelity | Any nested case | A session with an unfinished Task is never assigned a second one (`EXECUTOR_NOT_READY` / busy). Requirements meant for deeper levels are copied verbatim into each child's complete description; a missing deeper requirement is detected at integration, attributed to the right level, and corrected by a new child Task rather than by redispatch. |
+
+### Recorded T1-T10 trial
+
+One supervised run on an isolated host (Cockpit `main` 8648691, module 0.1.12 from
+`experiment/hierarchical-delegation` @16e3d0a, default model `gpt-5.6-sol`). The
+evaluator answered `ask_user` questions as the user. Turns 4-5 were *coached*: the
+prompt named the tree shape or the rejection to attempt.
+
+| Case | Result | Evidence summary |
+| --- | --- | --- |
+| T1 | Pass | Report Task delivered directly by its node (small, coherent). Handbook Task split into three depth-2 chapters, each on a new node; parent integrated after `child_done` cards and validated. Root received no child card. |
+| T2 | Pass | Report node asked for thresholds, edited its own Task to r2 (auto-ACK), delivered the correct numbers. |
+| T3 | Fail → fixed | Root self-assignment returned `EXECUTOR_NOT_READY` instead of `SELF_ASSIGNMENT` because the busy check ran first. Fixed in this change (`task_assign` now checks assignability before availability); regression test added. `DELEGATION_CYCLE` and `DELEGATION_DEPTH_EXCEEDED` (409) observed live; `DELEGATION_OWNER_MISMATCH` covered by unit tests only. |
+| T4 | Pass | Chain 1 → 2 → 3 completed; each card reached only the direct Owner. The depth-1 node also read the grandchild Task directly (allowed, not required). |
+| T5 | Pass, with a duplicate question | Blocked child asked the user; the parent, on `child_blocked`, asked the same question again. Cancellation, `child_cancelled` and the stale-ask path behaved as expected; the rejected `task_edit` changed nothing. |
+| T6 | Pass | Root dispatched the pending-decision Task to a new node on the ready card. The node asked, recorded "No" in its Task, and cancelled its own Task (the guidance permits this). |
+| T7 | Unit only | Not observed live; covered by the new sibling `blocked_by` test, which also shows the ready card can precede `child_done`. |
+| T8 | Pass | Root stayed idle throughout, with no subscriptions or polling. |
+| T9 | Pass | All three label forms appeared in the real transcripts. |
+| T10 | Partial | One-Task-per-session held. Fidelity failed twice: a depth-1 node omitted the level-3 requirement when writing the depth-2 Task, then reported `blocked` blaming level 3 without asking the user (the root, unsubscribed, was not told). After a user prompt it created a corrective child; that child's level-3 node passed an unsupported `parent_task_id` to `task_create`, got `INVALID_INPUT`, and the depth-2 node accepted it as evidence. The depth-1 node caught this on integration and ran a second corrective chain, which produced `DELEGATION_DEPTH_EXCEEDED`. The `task_create` description, which read "(parent_task_id; max 3 levels …)", now states that lineage is recorded automatically and there is no such input. |
+
+Observations to carry forward as design questions, not fixed here:
+
+- Parent and child both ask the user about a child blocker.
+- A top-level Task that reports `blocked` without an `ask_user` question is silent to the
+  user unless the root subscribed.
+- Deeper-level requirements depend on each node copying them verbatim; intermediate nodes
+  do not always verify child evidence against the original requirement.
+- An Executor may cancel its own Task after a "No" decision; the Owner learns only through
+  a subscription.
+
+## Real isolated host harness
+
+Use this harness for real-agent runs of any case in this guide. It never touches the live
+service, the real `~/.copilot` or `~/.cockpit`, or existing sessions.
+
+1. Create a detached host worktree from Cockpit `main` (for example
+   `git -C <cockpit> worktree add --detach <host> origin/main`), then run
+   `pnpm install` and `pnpm build` there.
+2. Package this module from the branch under test (`npm pack` in the module worktree) and
+   record the tarball digest printed by the install step.
+3. Create a scratch root such as `/tmp/tree-trial` with `home/`, `ws/` and `bin/`.
+   Every host command must run under `env -i`, because an agent shell usually carries
+   `COCKPIT_HOME`, `COCKPIT_PORT`, `COCKPIT_WEB_DIR`, `COPILOT_AGENT_SESSION_ID` and
+   `COPILOT_CLI` from the live service and would otherwise point the trial host at it:
+
+   ```sh
+   ISO="env -i PATH=$PATH HOME=/tmp/tree-trial/home \
+     COPILOT_HOME=/tmp/tree-trial/home/.copilot COCKPIT_HOME=/tmp/tree-trial/home/.cockpit \
+     COCKPIT_PORT=48791 COCKPIT_SERVE_WEB=1 COCKPIT_WEB_DIR=<host>/apps/web/dist \
+     COPILOT_GITHUB_TOKEN=$(gh auth token) GH_TOKEN=$(gh auth token)"
+   (cd <host> && $ISO pnpm module install <tgz> --trust-local-code --enable)
+   (cd <host> && $ISO pnpm start)
+   ```
+
+   Pass the token only through the environment; never write it into the scratch home.
+   Get the user's permission before using a real token.
+4. Drive the host over HTTP only:
+   - Intents: `POST http://127.0.0.1:48791/intent/<name>` (for example `session/new`,
+     `prompt`, `respondAsk` with `{sessionId, requestId, answer, wasFreeform}`).
+   - Task API: `POST /_modules/cockpit-task/<digest>/api/read` and
+     `/api/tools/<tool>` with header `x-cockpit-module-digest: <digest>`; without it the
+     API returns `MODULE_VERSION_MISMATCH`.
+   Small wrappers (`ci`, `tk`, a status lister and a transcript printer) keep the run
+   readable. Use the API rather than reading the database directly.
+5. Create the root session with the `node` role in `ws/` and send each case prompt as
+   the user. Answer `ask_user` questions only from the case's evaluator notes.
+6. Evidence: Task reads (overview, activity, outcomes, list by `parent_task_id`) and
+   persisted transcripts. Keep only what the report needs, outside the scratch root.
+7. Shutdown: stop the host, confirm the port is closed, remove the scratch root and the
+   host worktree (`git -C <cockpit> worktree remove <host>`).
+
 ## Executor preparation: rationale and acceptance
 
 Separate authorized, read-only research checked all 26 then-visible identities as
@@ -972,7 +1085,7 @@ every case or achieved measured tool-count savings.
 | Legacy/default creation | Omit selections; old creation/receipt still works on an older compatible host. Rename remains separate, with one assignment message and no initialization prompt. |
 | Explicit creation or reuse | Discoverable Skill/server names and raw tool names are explicit. Both paths retain requested resource effects and finish with separate ready/idle evidence; unrelated choices survive. |
 | Unsupported host | Any explicit selection, including empty arrays, and every prepare reject with `PREPARATION_UNSUPPORTED` before external effects; no success-shaped fallback. |
-| Candidate exclusion | Unloaded/busy targets, unapplied Executor roles and pending role reloads reject. Any unfinished Task binding rejects even if native idle; completed reuse remains eligible. |
+| Candidate exclusion | Unloaded/busy targets, an unapplied `node` role (formerly Executor) and pending role reloads reject. Any unfinished Task binding rejects even if native idle; completed reuse remains eligible. |
 | Stale tool metadata | Initialize once for null metadata or confirmed selected enablement, including non-null stale metadata after MCP enable. No-op/already-enabled selections with non-null metadata and genuinely missing tools still fail without speculative rebuild. Preserve effects; initialized is not ready and enabled Skill is not body loaded. |
 | Selection failure | Unknown names, `*`, duplicates/limits, filtered-out requested tools, and a server with omitted/empty tools but none offered fail explicitly without installing, authenticating or bypassing policy. |
 | Bounded receipt | Omitted/empty MCP tool selections return one actual offered raw-name witness, not a catalogue; explicit selections return only requested offered names. Errors are at most 2,000 characters and explicitly marked when truncated. |
@@ -1005,7 +1118,8 @@ prepared Owner sequential subscription follow-up (#53) and Executor session
 titles (#55), without changing those historical observations or adding a schema
 migration. Current source/package 0.1.12 adds native Task dependencies and schema
 v6; the v5→v6 migration only creates dependency tables and is roll-forward only,
-so installed 0.1.11 cannot open v6. Schema v5 migrates forward without assignment
+so installed 0.1.11 cannot open v6. The hierarchical-delegation experiment branch
+adds roll-forward-only schema v7 lineage columns that installed 0.1.12 cannot open. Schema v5 migrates forward without assignment
 backfill; all pre-upgrade assigned Tasks remain readable but cannot reopen. Old
 0.1.9 cannot open schema v5; package rollback is not database rollback.
 
@@ -1015,17 +1129,19 @@ backfill; all pre-upgrade assigned Tasks remain readable but cannot reopen. Old
 
 | Interface | Principal cases |
 | --- | --- |
-| `task_create`, `task_session_create` | S1; normal Executor creation is model-driven |
-| `task_assign` | S1, S4 capability/busy, S6 partial/recovery/replay |
-| `task_edit` | S2 clarification, S3 important scope change, S6 materials-only edit |
+| `task_create`, `task_session_create`, `task_session_prepare` | S1/S3/S6 creation and preparation; child/dependency cases add lineage and readiness coverage |
+| `task_assign` | S1, S4 capability/busy, S6 partial/recovery/replay; dependency cases cover `TASK_NOT_READY` |
+| `task_edit` | S2 clarification, S3 important scope change, S6 materials-only edit; dependencies cover `blocked_by` replacement |
 | `task_ack`, `task_report` | S1/S2/S4/S6; S2 includes a partial stale report |
-| `task_cancel` | S3, without stopping/deleting a native session |
-| `task_subscribe`, `task_unsubscribe` | S1-S6 technical behavior; N1-N3 necessity judgment |
+| `task_cancel`, `task_reopen` | S3 cancellation; rework acceptance covers guarded original-Executor reopen |
+| `task_subscribe`, `task_unsubscribe` | S1-S6 technical behavior; N1-N3 necessity judgment; child notices require no subscription |
+| `task_script_read`, `task_script_register`, `task_automation_start`, `task_automation_reconcile` | Automation acceptance/regressions; service-managed Tasks, logs and barriers |
 | `task_read` | All cases; verify each view below |
 
 Exercise `list`, `overview`, `execution`, `definition`, `changelog`, `activity`,
-`outcomes`, `subscriptions` and `operation` for concrete questions. This is suite
-coverage, not a requirement to read all views for every Task.
+`outcomes`, `subscriptions`, `dependency_notices`, `child_notices`, `automation_log`
+and `operation` for concrete questions. This is suite coverage, not a requirement
+to read all views for every Task.
 
 ### Independent observer
 
@@ -1118,7 +1234,7 @@ that missing assertions passed.
 
 ## Baseline observations and untested boundaries
 
-The original run recorded 140 official MCP results across all ten tools/nine
+The original former-role-pair run recorded 140 official MCP results across all ten tools/nine
 views. Each actor read its needed Skill body once; six reference reads occurred
 on demand. Final state was four done Tasks and cancelled C, five outcomes, six
 subscription records and no remaining waiting subscription. D retained unknown

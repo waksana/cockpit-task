@@ -1,6 +1,7 @@
 import { TaskError } from './contracts.js';
 
-const executorRoles = [{ moduleId: 'cockpit-task', roleId: 'executor' }];
+// One tree-node role: a session executes its own assignment and owns the child Tasks it creates.
+const nodeRoles = [{ moduleId: 'cockpit-task', roleId: 'node' }];
 
 function availabilityReasons(meta) {
   if (meta === null) return ['session_not_found'];
@@ -38,14 +39,14 @@ export function createHostAdapter(host) {
   };
   return {
     ownerExists: async sessionId => (await get(sessionId)) !== null,
-    create: cwd => host.call('session/new', { cwd, roles: executorRoles }),
+    create: cwd => host.call('session/new', { cwd, roles: nodeRoles }),
     preparationSupported: host.resourcePreparationVersion === 1,
     prepare: (sessionId, { skills, mcp_servers }) => host.call('session/resources-prepare', {
       sessionId, ...(skills !== undefined ? { skills } : {}),
       ...(mcp_servers !== undefined ? { mcpServers: mcp_servers } : {}),
     }),
     async inspect(sessionId) {
-      const capability = await host.call('roles/readiness', { sessionId, roles: executorRoles });
+      const capability = await host.call('roles/readiness', { sessionId, roles: nodeRoles });
       if (capability?.sessionId !== sessionId || typeof capability.ready !== 'boolean'
         || typeof capability.loaded !== 'boolean' || !Array.isArray(capability.reasons)) {
         throw new TaskError('CAPABILITY_UNAVAILABLE', 'Host returned no confirmed Executor readiness');
@@ -56,7 +57,7 @@ export function createHostAdapter(host) {
         ready: capability.ready && capability.loaded && meta?.loaded === true,
         idle: availability_reasons.length === 0,
         executor: capability.rolesNeedReload === false && Array.isArray(capability.appliedRoles)
-          && capability.appliedRoles.some(role => role.moduleId === 'cockpit-task' && role.roleId === 'executor'),
+          && capability.appliedRoles.some(role => role.moduleId === 'cockpit-task' && role.roleId === 'node'),
         details: {
           reasons: capability.reasons, loaded: meta?.loaded ?? null, status: meta?.status ?? null,
           availability_reasons, observed_at: new Date().toISOString(),

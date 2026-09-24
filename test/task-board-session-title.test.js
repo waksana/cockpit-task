@@ -19,7 +19,7 @@ function nativeHost(t, { name = null, userSet = false, provenance = true, rename
       } };
       if (intent === 'roles/readiness') return {
         sessionId: body.sessionId, ready: true, loaded: true, reasons: [], rolesNeedReload: false,
-        appliedRoles: [{ moduleId: 'cockpit-task', roleId: 'executor' }],
+        appliedRoles: [{ moduleId: 'cockpit-task', roleId: 'node' }],
       };
       if (intent === 'prompt') return { ok: true, queued: false };
       if (intent === 'session/rename') {

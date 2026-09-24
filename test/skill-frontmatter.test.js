@@ -19,14 +19,14 @@ function skillMetadata(source) {
 }
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const sharedReferences = ['reading-tasks.md', 'task-links.md', 'task-writes-and-recovery.md'];
-const skillDirectory = role => `skills/cockpit-task-${role}/cockpit-task-${role}`;
+const treeDirectory = 'skills/cockpit-task-tree/cockpit-task-tree';
 const codingDirectory = 'skills/github-coding/github-coding';
-const skillFiles = role => [
-  'SKILL.md',
-  ...[...sharedReferences, ...(role === 'owner' ? ['important-updates.md', 'automation.md'] : [])]
-    .map(name => `references/${name}`),
-].sort();
+// The single tree-node Skill keeps each former role's guidance in its own category reference.
+const roleReference = { owner: 'references/delegating.md', executor: 'references/executing.md' };
+const treeFiles = ['SKILL.md', ...['automation.md', 'delegating.md', 'executing.md', 'important-updates.md',
+  'reading-tasks.md', 'task-links.md', 'task-writes-and-recovery.md'].map(name => `references/${name}`)].sort();
+const roleGuide = role => ['SKILL.md', roleReference[role]]
+  .map(file => readFileSync(join(root, treeDirectory, file), 'utf8')).join('\n');
 const prose = source => source.replace(/\s+/g, ' ');
 const localLinks = source => [...source.matchAll(/\[[^\]\n]*\]\(([^)\s]+)\)/g)]
   .map(([, target]) => target)
@@ -56,10 +56,10 @@ function assertSkillClosure(directory, expected) {
   assert.deepEqual([...visited].sort(), expected, 'Every bundled reference must be reachable');
 }
 
-test('two Task role Skills and one shared coding Skill have unique YAML-safe metadata', () => {
+test('one Task tree Skill and one shared coding Skill have unique YAML-safe metadata', () => {
   const files = readdirSync(join(root, 'skills'), { recursive: true })
     .filter(path => basename(path) === 'SKILL.md');
-  assert.equal(files.length, 3);
+  assert.equal(files.length, 2);
   const names = new Set();
   for (const path of files) {
     const metadata = skillMetadata(readFileSync(join(root, 'skills', path), 'utf8'));
@@ -67,7 +67,7 @@ test('two Task role Skills and one shared coding Skill have unique YAML-safe met
     assert.ok(!names.has(metadata.name), `Duplicate skill name: ${metadata.name}`);
     names.add(metadata.name);
   }
-  assert.deepEqual([...names].sort(), ['cockpit-task-executor', 'cockpit-task-owner', 'github-coding']);
+  assert.deepEqual([...names].sort(), ['cockpit-task-tree', 'github-coding']);
 });
 
 test('repository entrypoints describe only the current Task module', () => {
@@ -83,7 +83,7 @@ test('repository entrypoints describe only the current Task module', () => {
   assert.deepEqual(Object.keys(pkg.scripts).sort(), ['package:module', 'test']);
   assert.deepEqual(readdirSync(join(root, 'src')), ['task-board']);
   assert.deepEqual(readdirSync(join(root, 'web')), ['task-board']);
-  assert.deepEqual(readdirSync(join(root, 'roles')).sort(), ['task-executor.md', 'task-owner.md']);
+  assert.deepEqual(readdirSync(join(root, 'roles')).sort(), ['task-node.md']);
   assert.deepEqual(readdirSync(join(root, 'scripts')), ['package-task-board.js']);
   assert.deepEqual(readdirSync(join(root, '.github/workflows')), ['task-board-ci.yml']);
   for (const path of ['module.json', 'service-delivery.json', 'BRIEF.md',
@@ -95,23 +95,20 @@ test('repository entrypoints describe only the current Task module', () => {
 test('each current Skill has an independent relative reference closure without research payloads', t => {
   const isolated = mkdtempSync(join(tmpdir(), 'task-skill-closure-'));
   t.after(() => rmSync(isolated, { recursive: true, force: true }));
+  const directory = join(isolated, 'tree');
+  cpSync(join(root, treeDirectory), directory, { recursive: true });
+  assertSkillClosure(directory, treeFiles);
+  const body = readFileSync(join(directory, 'SKILL.md'), 'utf8');
+  const metadata = skillMetadata(body);
+  assert.equal(metadata.name, 'cockpit-task-tree');
+  assert.match(metadata.description, /first|reuse/i);
+  assert.ok(body.split('\n').length < 100, 'Keep the tree-node principle concise; category guidance belongs in references');
+  assert.match(body, /Load only the reference needed, not the whole set/);
+  assert.match(body, /Reuse this Skill while it remains in context/);
+  assert.match(body, /fresh Task/);
   for (const role of ['owner', 'executor']) {
-    const directory = join(isolated, role);
-    cpSync(join(root, skillDirectory(role)), directory, { recursive: true });
-    assertSkillClosure(directory, skillFiles(role));
-    const source = readFileSync(join(directory, 'SKILL.md'), 'utf8');
-    const metadata = skillMetadata(source);
-    assert.equal(metadata.name, `cockpit-task-${role}`);
-    assert.match(metadata.description, /first|reuse/i);
-    assert.ok(source.split('\n').length < 175, 'Keep role and completion-retro principles concise; details belong in references');
-    assert.match(source, /Load only the reference needed, not the whole set/);
-    assert.match(source, /Reuse this Skill while it remains in context/);
-    assert.match(source, /fresh Task/);
-  }
-  for (const reference of sharedReferences) {
-    assert.equal(readFileSync(join(isolated, 'owner/references', reference), 'utf8'),
-      readFileSync(join(isolated, 'executor/references', reference), 'utf8'),
-      `${reference}: independent copies must retain the same shared protocol guidance`);
+    const guide = readFileSync(join(directory, roleReference[role]), 'utf8');
+    assert.match(guide, /Load only the reference needed, not the whole set/, `${role} guidance keeps its reference index`);
   }
   const coding = join(isolated, 'github-coding');
   cpSync(join(root, codingDirectory), coding, { recursive: true });
@@ -124,17 +121,17 @@ test('each current Skill has an independent relative reference closure without r
 
 test('coding guidance composes with roles without widening implementation or subscription authority', () => {
   for (const role of ['owner', 'executor']) {
-    const source = readFileSync(join(root, skillDirectory(role), 'SKILL.md'), 'utf8');
+    const source = roleGuide(role);
     const section = source.match(/## Coding work\n([\s\S]*?)(?=\n## )/)?.[1];
     assert.ok(section?.includes('`github-coding`'), `${role} must independently discover the work Skill`);
     assert.ok(section.trim().split('\n').length <= 8, 'Do not duplicate the work flow in role Skills');
   }
-  const prompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
+  const prompt = prose(readFileSync(join(root, 'roles/task-node.md'), 'utf8'));
   assert.match(prompt, /Coding Executors get cwd at a target repository.s main checkout and set up\/clean up their own worktree/);
   assert.match(prompt, /cwd at a target repository's main checkout/);
   assert.doesNotMatch(prompt, /Issue\/environment preparation/);
-  const executorPrompt = prose(readFileSync(join(root, 'roles/task-executor.md'), 'utf8'));
-  assert.match(executorPrompt, /coding: create\/clean up your own worktree; cwd checkout stays read-only/);
+  const executorPrompt = prose(readFileSync(join(root, 'roles/task-node.md'), 'utf8'));
+  assert.match(executorPrompt, /set up\/clean up their own worktree \(`github-coding`\); the cwd checkout stays read-only/);
   const coding = prose(readFileSync(join(root, codingDirectory, 'SKILL.md'), 'utf8'));
   const requirements = [
     /"main" means the repository's agreed target mainline/,
@@ -200,14 +197,14 @@ test('coding guidance composes with roles without widening implementation or sub
   assert.match(description, /safely cleans up after merge/);
   assert.doesNotMatch(description, /Owner prepares|Owner safely cleans/);
   for (const role of ['owner', 'executor']) {
-    const roleSkill = prose(readFileSync(join(root, skillDirectory(role), 'SKILL.md'), 'utf8'));
+    const roleSkill = prose(roleGuide(role));
     assert.doesNotMatch(roleSkill, /prepared worktree|Owner handles safe post-merge|prepare clean mainline|freshly fetched|local\/remote branches/,
       `${role} Skill must leave Git mechanics to github-coding`);
   }
 });
 
 test('rework guidance keeps self-reopen narrow and defaults to safe retained worktree continuation', () => {
-  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  const executor = prose(roleGuide('executor'));
   for (const requirement of [
     /user explicitly authorizes rework/,
     /read full current `execution` and use `task_reopen` yourself only if eligible/,
@@ -219,7 +216,7 @@ test('rework guidance keeps self-reopen narrow and defaults to safe retained wor
     /Cancelled Tasks and automation never use this path/,
   ]) assert.match(executor, requirement);
   assert.doesNotMatch(executor, /done\/cancelled cannot reopen/);
-  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  const owner = prose(roleGuide('owner'));
   assert.match(owner, /Prefer eligible original-Executor `task_reopen`.*not replacement\/redispatch/);
   const coding = prose(readFileSync(join(root, codingDirectory, 'SKILL.md'), 'utf8'));
   for (const requirement of [
@@ -259,13 +256,13 @@ test('coding scope distinguishes repository changes from deployment and keeps mi
   assert.doesNotMatch(prose(source), /Owner-coordinated Issue\/environment preparation/);
   assert.match(prose(source), /verify your own worktree before editing/);
   assert.doesNotMatch(setup, /For GitHub work,/);
-  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8')
+  const owner = prose(roleGuide('owner')
     .split('## Coding work')[1].split('## Coordinate through Task')[0]);
   assert.match(owner, /version-controlled repository files/);
   assert.match(owner, /pure deployment using existing verified artifacts/);
   assert.match(owner, /State the requirements and reference any existing Issue; Executor sets up and cleans up its own environment, so you do not prepare or clean branches\/worktrees/);
   assert.match(owner, /Create the Executor session with cwd at a target repository's shared main checkout \(any involved one for cross-repository work\)/);
-  const executorCoding = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8')
+  const executorCoding = prose(roleGuide('executor')
     .split('## Coding work')[1].split('\n## ')[0]);
   assert.match(executorCoding, /set up your own isolated environment, deliver through the authorized review\/PR\/merge boundary and clean up after merge; nobody prepares or cleans it for you/);
   assert.match(executorCoding, /Ask the user, not Owner, before scope changes/);
@@ -278,26 +275,20 @@ test('coding scope distinguishes repository changes from deployment and keeps mi
 });
 
 test('role prompts stay short while the Skills preserve delegation, communication and synchronization boundaries', () => {
-  for (const role of ['owner', 'executor']) {
-    const prompt = prose(readFileSync(join(root, `roles/task-${role}.md`), 'utf8'));
-    assert.ok(prompt.split(' ').length <= 200, `${role}: keep details in the Skill and references`);
-    assert.ok(prompt.includes(`Load \`cockpit-task-${role}\` when first needed`));
-    assert.match(prompt, /Reuse.*reload only when missing, changed or a rule is unclear/);
-    assert.match(prompt, /not for each new message/);
-    assert.match(prompt, /Stable Skill reuse never replaces fresh Task reads/);
-  }
-  const ownerPrompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
-  assert.match(ownerPrompt, /independent Executor through Task, not your own tools or subagents/);
-  assert.match(ownerPrompt, /explicit user request or an actual assignment as a capable Executor/);
-  assert.match(ownerPrompt, /dual-role selection alone is neither/);
-  assert.match(ownerPrompt, /Coordinate through Task, not chats with Executor/);
-  assert.match(ownerPrompt, /do not monitor or schedule reminders/);
-  const executorPrompt = prose(readFileSync(join(root, 'roles/task-executor.md'), 'utf8'));
-  assert.match(executorPrompt, /one complete assigned Task at a time/);
-  assert.match(executorPrompt, /directly of the user here; do not message Owner, directly or through other agents/);
-  assert.match(executorPrompt, /exact revision.*every `definition_check`/);
+  const prompt = prose(readFileSync(join(root, 'roles/task-node.md'), 'utf8'));
+  assert.ok(prompt.split(' ').length <= 360, 'node: one prompt replaces two; keep details in the Skill and references');
+  assert.ok(prompt.includes('Load `cockpit-task-tree` when first needed'));
+  assert.match(prompt, /Reuse.*reload only when missing, changed or a rule is unclear/);
+  assert.match(prompt, /Stable Skill reuse never replaces fresh Task reads/);
+  assert.match(prompt, /only judgment is whether to do work yourself or split it into child Tasks/);
+  assert.match(prompt, /With a Task, you own completing it/);
+  assert.match(prompt, /Without a Task, stay available: delegate delivery through Task/);
+  assert.match(prompt, /Derive your role from Task facts, not memory/);
+  assert.match(prompt, /Coordinate through Task, not chats with Executor/);
+  assert.match(prompt, /directly of the user here; do not message Owner, directly or through other agents/);
+  assert.match(prompt, /exact revision.*every `definition_check`/);
 
-  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  const owner = prose(roleGuide('owner'));
   assert.match(owner, /independent Executor, not your own tools or subagents/);
   assert.match(owner, /A result request is not permission for personal implementation, even for small work/);
   assert.match(owner, /Split independent outcomes, not tightly coupled stages, resources or specialties/);
@@ -314,7 +305,7 @@ test('role prompts stay short while the Skills preserve delegation, communicatio
   assert.match(owner, /Avoid a fixed overview-then-outcomes sequence, guessing outcomes then activity, or reading every group/);
   assert.match(owner, /scan chats routinely or schedule monitoring/);
 
-  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  const executor = prose(roleGuide('executor'));
   assert.match(executor, /task_read\(view=execution\)/);
   assert.match(executor, /At start, on resumption, between stages, before consequential actions and before delivery, read the latest Task/);
   assert.match(executor, /complete requirements with `task_read\(view=execution\)` and ACK the exact current revision/);
@@ -328,8 +319,8 @@ test('role prompts stay short while the Skills preserve delegation, communicatio
 });
 
 test('preparation guidance keeps professional selection and Skill body loading explicit', () => {
-  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
-  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  const owner = prose(roleGuide('owner'));
+  const executor = prose(roleGuide('executor'));
   assert.match(owner, /Exclude every Executor bound to an unfinished Task, even if native idle/);
   assert.match(owner, /existing discoverable Skill\/MCP names, not guesses from Task text/);
   assert.match(owner, /`task_session_create` with selections or `task_session_prepare`/);
@@ -344,7 +335,7 @@ test('preparation guidance keeps professional selection and Skill body loading e
 
 test('record guidance preserves the task-specific agreement and evidence without copying prior context', () => {
   for (const role of ['owner', 'executor']) {
-    const source = prose(readFileSync(join(root, skillDirectory(role), 'SKILL.md'), 'utf8'));
+    const source = prose(roleGuide(role));
     for (const requirement of [
       /goal, scope, key decisions, authorization boundaries, special constraints and completion conditions/,
       /not complete prior context/,
@@ -359,7 +350,7 @@ test('record guidance preserves the task-specific agreement and evidence without
       /[Kk]eep exact values needed to support conclusions or resume safely/,
     ]) assert.match(source, requirement, `${role}: ${requirement}`);
   }
-  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  const executor = prose(roleGuide('executor'));
   assert.match(executor, /Lead activity with meaningful new changes, findings, decisions or blockers and necessary remaining work/);
   assert.match(executor, /not a restatement of the brief/);
   assert.match(executor, /State what a blocker needs/);
@@ -368,25 +359,25 @@ test('record guidance preserves the task-specific agreement and evidence without
 });
 
 test('explicit one-shot subscriptions preserve silent defaults, role boundaries and uncertain delivery guidance', () => {
-  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  const owner = prose(roleGuide('owner'));
   assert.match(owner, /Owner may explicitly subscribe to specified Task states/);
   assert.match(owner, /first real matching transition ends the subscription/);
   assert.match(owner, /already matching at registration means failure, not an immediate notice/);
   assert.match(owner, /read only necessary latest content in one bounded call where possible and reassess the planned follow-up/);
   assert.match(owner, /card is not proof of complete delivery or an Executor definition-ACK instruction/);
   assert.match(owner, /Do not automatically resubscribe, poll or hold this turn open waiting/);
-  const ownerPrompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
+  const ownerPrompt = prose(readFileSync(join(root, 'roles/task-node.md'), 'utf8'));
   assert.match(ownerPrompt, /explicit one-shot status subscription permits a system notice to Task's Owner/);
   assert.match(ownerPrompt, /Read only needed latest content on receipt, in one bounded call where possible/);
   assert.match(ownerPrompt, /No automatic resubscription or acceptance/);
-  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  const executor = prose(roleGuide('executor'));
   assert.match(executor, /Only the system sends that one-shot notice/);
   assert.match(executor, /no subscription capability or permission to notify Owner/);
   assert.match(executor, /not an instruction to execute or ACK a notification/);
-  const executorPrompt = prose(readFileSync(join(root, 'roles/task-executor.md'), 'utf8'));
+  const executorPrompt = prose(readFileSync(join(root, 'roles/task-node.md'), 'utf8'));
   assert.match(executorPrompt, /only a system notice, not Executor messages, subscription capability or a notification ACK/);
   for (const role of ['owner', 'executor']) {
-    const reference = name => prose(readFileSync(join(root, skillDirectory(role), 'references', name), 'utf8'));
+    const reference = name => prose(readFileSync(join(root, treeDirectory, 'references', name), 'utf8'));
     const writes = reference('task-writes-and-recovery.md');
     for (const name of ['task_subscribe', 'task_unsubscribe', 'task_read(view=subscriptions)']) {
       assert.ok(writes.includes(`\`${name}\``), `Missing subscription interface ${name}`);
@@ -414,28 +405,28 @@ test('explicit one-shot subscriptions preserve silent defaults, role boundaries 
     assert.match(reading, /`subscriptions` with `task_id`/);
     assert.match(reading, /do not poll while waiting/);
     const links = reference('task-links.md');
-    assert.ok(links.includes('[Task status updated](task:<uuid>?event=status_changed)'));
+    assert.ok(links.includes('[As Owner: Task status updated](task:<uuid>?event=status_changed)'));
     assert.match(links, /System notice to Task's Owner after an explicit status subscription matches/);
     assert.match(links, /not an Executor instruction or a request to ACK a notification/);
     assert.match(links, /distinct from `updated`, which asks Executor to read and ACK the current definition/);
-    assert.match(links, /Only lowercase `assigned`, `updated`, `status_changed`, `ready` and `blocker_cancelled`/);
-    assert.ok(links.includes('[Task ready](task:<uuid>?event=ready)'));
-    assert.ok(links.includes('[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)'));
+    assert.match(links, /Only lowercase `assigned`, `updated`, `status_changed`, `ready`, `blocker_cancelled`, `child_done`, `child_blocked` and `child_cancelled`/);
+    assert.ok(links.includes('[As Owner: Task ready](task:<uuid>?event=ready)'));
+    assert.ok(links.includes('[As Owner: Task blocker cancelled](task:<uuid>?event=blocker_cancelled)'));
     assert.match(links, /They point to the dependent, not the blocker; nothing was assigned or started/);
     assert.match(reading, /`dependency_notices` with the dependent's `task_id`/);
     assert.match(reading, /`blocked_by`, `ready`/);
     assert.match(links, /A link alone neither creates a subscription nor authorizes editing or scheduling/);
   }
-  const handoff = prose(readFileSync(join(root, skillDirectory('owner'), 'references/important-updates.md'), 'utf8'));
+  const handoff = prose(readFileSync(join(root, treeDirectory, 'references/important-updates.md'), 'utf8'));
   assert.match(handoff, /`status_changed` subscription notice to Owner is separate/);
   assert.match(handoff, /does not trigger this Executor-directed `updated` handoff/);
 });
 
 test('important updates use one immediate notice without queue intervention or interruption', () => {
-  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  const owner = prose(roleGuide('owner'));
   assert.match(owner, /one `immediate` notice/);
   assert.doesNotMatch(owner, /before handling pending messages or interrupting/);
-  const source = readFileSync(join(root, skillDirectory('owner'), 'references/important-updates.md'), 'utf8');
+  const source = readFileSync(join(root, treeDirectory, 'references/important-updates.md'), 'utf8');
   const handoff = prose(source);
   for (const requirement of [
     /cannot wait.*normal checkpoints/,
@@ -461,13 +452,13 @@ test('important updates use one immediate notice without queue intervention or i
   const example = JSON.parse(source.match(/```json\n([\s\S]*?)\n```/)[1]);
   assert.equal(example.session_id, '<executor-session-id>');
   assert.equal(example.mode, 'immediate');
-  assert.ok(example.text.includes('[Task updated](task:<uuid>?event=updated)'));
+  assert.ok(example.text.includes('[As Executor: Task updated](task:<uuid>?event=updated)'));
   assert.match(example.text, /full current Task execution view/);
   assert.match(example.text, /ACK its exact latest revision before continuing affected work/);
 });
 
 test('subscription guidance requires necessary Owner follow-up without gating Executor work', () => {
-  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  const owner = prose(roleGuide('owner'));
   assert.match(owner, /Default to no subscription/);
   assert.match(owner, /identify the concrete, necessary authorized Owner action that a future Task state enables/);
   assert.match(owner, /Merely knowing progress or confirming completion, including repeated reporting, is not a reason to subscribe/);
@@ -478,18 +469,19 @@ test('subscription guidance requires necessary Owner follow-up without gating Ex
   assert.match(owner, /withdraw a still-waiting subscription if the follow-up is no longer needed/);
   assert.match(owner, /create B at once as an unassigned Task with `blocked_by` and a complete description instead of subscribing; private notes never wake you/);
   assert.match(owner, /`event=ready` or `event=blocker_cancelled` card, reassess before dispatching or revising B/);
-  assert.match(owner, /undecided follow-up may be a pending-decision planning Task, discussed with the user before rewrite or cancel/);
-  assert.match(owner, /`blocked_by` readiness gates, not child Tasks, workflow engines/);
+  assert.match(owner, /undecided follow-up may be a pending-decision planning Task, dispatched to a new session that discusses it with the user/);
+  assert.match(owner, /`blocked_by` readiness gates, not workflow engines/);
+  assert.doesNotMatch(owner, /Tasks are flat/);
   assert.match(owner, /act only if it is still needed and authorized/);
-  const ownerPrompt = prose(readFileSync(join(root, 'roles/task-owner.md'), 'utf8'));
+  const ownerPrompt = prose(readFileSync(join(root, 'roles/task-node.md'), 'utf8'));
   assert.match(ownerPrompt, /Default to no subscription; register only when a future status unlocks necessary authorized Owner work/);
   assert.match(ownerPrompt, /Executors ask users directly, without Owner relay/);
-  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  const executor = prose(roleGuide('executor'));
   assert.match(executor, /Do not wait for Owner to subscribe or read a notice before continuing authorized work or delivering it/);
-  const executorPrompt = prose(readFileSync(join(root, 'roles/task-executor.md'), 'utf8'));
+  const executorPrompt = prose(readFileSync(join(root, 'roles/task-node.md'), 'utf8'));
   assert.match(executorPrompt, /Execution does not depend on Owner subscribing or reading a notice/);
   for (const role of ['owner', 'executor']) {
-    const writes = prose(readFileSync(join(root, skillDirectory(role), 'references/task-writes-and-recovery.md'), 'utf8'));
+    const writes = prose(readFileSync(join(root, treeDirectory, 'references/task-writes-and-recovery.md'), 'utf8'));
     assert.match(writes, /Default to no subscription/);
     assert.match(writes, /concrete, necessary authorized Owner follow-up, not simply to track progress, know completion or repeat a report/);
     assert.match(writes, /direct user question, even when blocked, stays in that session/);
@@ -504,11 +496,12 @@ test('subscription guidance requires necessary Owner follow-up without gating Ex
     assert.match(writes, /Private Owner notes, todos and plans trigger no reminder: without a dependency or subscription, a status-dependent follow-up waits until the user prompts it/);
     assert.match(writes, /reject `TASK_NOT_READY` otherwise, before any Executor check; there is no override/);
     assert.match(writes, /Readiness never changes status, assigns, starts or dispatches/);
-    assert.match(writes, /sends one `\[Task ready\]\(task:<uuid>\?event=ready\)` card for the dependent to its Owner/);
-    assert.match(writes, /When a blocker is cancelled, it sends one `\[Task blocker cancelled\]\(task:<uuid>\?event=blocker_cancelled\)`/);
-    assert.match(writes, /There is no polling, automatic assignment, reminder or child-Task workflow/);
+    assert.match(writes, /sends one `\[As Owner: Task ready\]\(task:<uuid>\?event=ready\)` card for the dependent to its Owner/);
+    assert.match(writes, /When a blocker is cancelled, it sends one `\[As Owner: Task blocker cancelled\]\(task:<uuid>\?event=blocker_cancelled\)`/);
+    assert.match(writes, /There is no polling, automatic assignment, reminder or workflow engine/);
     assert.match(writes, /unassigned planning Task `blocked_by` its prerequisites/);
-    assert.match(writes, /pending decision \(what must be discussed, candidate items, links\) and must not be dispatched as-is/);
+    assert.match(writes, /pending decision \(what must be discussed, candidate items, links\) and must not be executed before that discussion/);
+    assert.match(writes, /assign it to a new session rather than claiming it yourself/);
     assert.match(writes, /cancel it with the user's decision as the reason\. This is guidance only: no new status, kind or tool/);
   }
 });
@@ -529,7 +522,7 @@ test('public documentation links resolve to active resources rather than retired
 
 test('selective read examples match the overview contract without replacing execution checkpoints', () => {
   for (const role of ['owner', 'executor']) {
-    const source = readFileSync(join(root, skillDirectory(role), 'references/reading-tasks.md'), 'utf8');
+    const source = readFileSync(join(root, treeDirectory, 'references/reading-tasks.md'), 'utf8');
     const reading = prose(source);
     for (const requirement of [
       /`include` is valid only with `view="overview"`/,
@@ -591,11 +584,11 @@ test('selective read examples match the overview contract without replacing exec
 });
 
 test('automation guidance preserves Agent default, explicit service execution and bounded evidence', () => {
-  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  const owner = prose(roleGuide('owner'));
   assert.match(owner, /Agent remains the default/);
   assert.match(owner, /trusted repeatable known script.*not to bypass delegation for arbitrary work/);
-  assert.match(owner, /\[automation\]\(references\/automation.md\)/);
-  const source = readFileSync(join(root, skillDirectory('owner'), 'references/automation.md'), 'utf8');
+  assert.match(owner, /\[automation\]\(automation.md\)/);
+  const source = readFileSync(join(root, treeDirectory, 'references/automation.md'), 'utf8');
   const automation = prose(source);
   for (const requirement of [
     /No installation, deployment or production testing is implied/,
@@ -647,15 +640,15 @@ test('automation guidance preserves Agent default, explicit service execution an
     ...registration.parameters.map(parameter => String(inputs[parameter.name]))],
   ['-I', '/srv/task-scripts/inventory.py', '/srv/inventory', '25', 'false']);
 
-  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  const executor = prose(roleGuide('executor'));
   assert.match(executor, /Automation Tasks are service-managed, not Executor assignments/);
   assert.match(executor, /do not ACK or report them/);
-  assert.match(executor, /do not grant create\/start or script registration/);
-  assert.match(executor, /Do not create child Tasks or add Owner capabilities/);
+  assert.match(executor, /does not grant create\/start or script registration/);
+  assert.match(executor, /only \[delegating\]\(delegating\.md\) guidance covers trusted automation, including as a child Task/);
 });
 
 test('completion retro guidance separates evidence-based reflection from delivery and authority', () => {
-  const executor = prose(readFileSync(join(root, skillDirectory('executor'), 'SKILL.md'), 'utf8'));
+  const executor = prose(roleGuide('executor'));
   for (const requirement of [
     /After completing delivery, before done/,
     /actionable observed automation candidates/,
@@ -670,15 +663,15 @@ test('completion retro guidance separates evidence-based reflection from deliver
     /service guarantees explicit submission and persistence, not thoughtful reflection or the quality/,
     /Automation has no Agent retro/,
   ]) assert.match(executor, requirement);
-  const owner = prose(readFileSync(join(root, skillDirectory('owner'), 'SKILL.md'), 'utf8'));
+  const owner = prose(roleGuide('owner'));
   assert.match(owner, /Read it on demand/);
   assert.match(owner, /No mandatory Owner review, new notification, subscription or completion gate/);
-  const role = prose(readFileSync(join(root, 'roles/task-executor.md'), 'utf8'));
+  const role = prose(readFileSync(join(root, 'roles/task-node.md'), 'utf8'));
   assert.match(role, /After delivery, do a lightweight evidence-based retro before done/);
   assert.match(role, /explicit `retro` text or `null` together with `status=done`/);
 
   for (const roleName of ['owner', 'executor']) {
-    const source = readFileSync(join(root, skillDirectory(roleName), 'references/task-writes-and-recovery.md'), 'utf8');
+    const source = readFileSync(join(root, treeDirectory, 'references/task-writes-and-recovery.md'), 'utf8');
     const writes = prose(source);
     assert.match(writes, /Ordinary reports omit retro; only done accepts it/);
     assert.match(writes, /Missing retro is rejected, not interpreted as no findings/);
@@ -699,7 +692,7 @@ test('completion retro guidance separates evidence-based reflection from deliver
       assert.equal(schemas.task_report.safeParse(omitted).success, false);
       assert.equal(schemas.task_report.safeParse({ ...example, status: 'in_progress' }).success, false);
     }
-    const reading = prose(readFileSync(join(root, skillDirectory(roleName), 'references/reading-tasks.md'), 'utf8'));
+    const reading = prose(readFileSync(join(root, treeDirectory, 'references/reading-tasks.md'), 'utf8'));
     for (const status of ['recorded', 'not_recorded', 'not_applicable']) assert.ok(reading.includes(status));
     assert.match(reading, /Without `include`, overview\/list return the same status and attribution without `text`/);
     assert.match(reading, /description edit preserves the recorded revision and sets `current:false`/);
@@ -708,14 +701,14 @@ test('completion retro guidance separates evidence-based reflection from deliver
   }
 });
 
-test('module packaging carries the role Skills and shared coding Skill without evaluation resources', t => {
+test('module packaging carries the tree Skill and shared coding Skill without evaluation resources', t => {
   const packaged = spawnSync('npm', ['run', 'package:module'], { cwd: root, encoding: 'utf8' });
   assert.equal(packaged.status, 0, packaged.error?.message ?? `${packaged.stdout}\n${packaged.stderr}`);
   const manifest = JSON.parse(readFileSync(join(root, 'cockpit.module.json'), 'utf8'));
   const archive = join(root, 'dist', `cockpit-task-${manifest.version}.tgz`);
   const entries = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n');
   const expected = [
-    ...['owner', 'executor'].flatMap(role => skillFiles(role).map(file => `./${skillDirectory(role)}/${file}`)),
+    ...treeFiles.map(file => `./${treeDirectory}/${file}`),
     `./${codingDirectory}/SKILL.md`,
   ].sort();
   assert.deepEqual(entries.filter(entry => entry.startsWith('./skills/') && !entry.endsWith('/')).sort(), expected);
@@ -729,7 +722,8 @@ test('module packaging carries the role Skills and shared coding Skill without e
   assert.equal(packagedMetadata.name, manifest.id);
   assert.equal(packagedMetadata.version, manifest.version);
   const packagedManifest = JSON.parse(execFileSync('tar', ['-xOf', archive, './cockpit.module.json'], { encoding: 'utf8' }));
-  for (const selected of [[packagedManifest.roles[0]], [packagedManifest.roles[1]], packagedManifest.roles]) {
+  assert.deepEqual(packagedManifest.roles.map(role => role.id), ['node']);
+  for (const selected of [packagedManifest.roles]) {
     const directories = new Set(selected.flatMap(role => role.skillDirectories));
     assert.ok(directories.has('skills/github-coding'));
     const discovered = entries.filter(entry => entry.endsWith('/SKILL.md') &&
@@ -758,4 +752,58 @@ test('unquoted mapping separators in either role description fail release valida
       { name: `cockpit-task-${role}`, description });
   }
   assert.throws(() => skillMetadata('---\nname: cockpit-task-owner\ndescription: "invalid \\q escape"\n---\n'), SyntaxError);
+});
+
+test('delegation guidance assigns roles per Task and bounds child scope', () => {
+  const owner = prose(roleGuide('owner'));
+  const executor = prose(roleGuide('executor'));
+  for (const source of [owner, executor]) {
+    assert.match(source, /Roles are per Task: Executor for your assignment, Owner/);
+    assert.match(source, /more specific than (its parent|your Task), never passed down unchanged/);
+    assert.match(source, /within (the parent's|its) authorized scope/);
+    assert.match(source, /integrate (their|and verify child) outcomes before/);
+    assert.match(source, /references\/task-writes-and-recovery\.md#delegating-child-tasks/);
+  }
+  assert.match(owner, /caps it at 3 levels; pending-decision Tasks go to a new session/);
+  assert.match(executor, /Then follow \[delegating\]\(delegating.md\) for each child/);
+  for (const prompt of ['node']) {
+    assert.match(prose(readFileSync(join(root, `roles/task-${prompt}.md`), 'utf8')), /orchestrate more specific child Tasks within its authorized scope/);
+  }
+  for (const role of ['owner', 'executor']) {
+    const writes = prose(readFileSync(join(root, treeDirectory, 'references/task-writes-and-recovery.md'), 'utf8'));
+    assert.match(writes, /A session's role is decided per Task/);
+    assert.match(writes, /There are no preset domain-lead identities/);
+    assert.match(writes, /never passed down unchanged, and within the parent's authorized scope/);
+    assert.match(writes, /The parent integrates and verifies child results before completing its own Task/);
+    assert.match(writes, /never fake delegation/);
+    assert.match(writes, /the Owner does not claim them itself/);
+    assert.match(writes, /capped at 3 levels: creating beneath a depth-3 Task fails with `DELEGATION_DEPTH_EXCEEDED` and saves nothing/);
+    assert.match(writes, /does not change `blocked_by` readiness, notices, assignment or authority/);
+    assert.match(writes, /`task_read\(view=list, parent_task_id=<Task ID>, status=all\)`/);
+  }
+});
+
+test('tree Skill states the node principle, per-Task roles, child cards and delegation guards', () => {
+  const read = file => prose(readFileSync(join(root, treeDirectory, file), 'utf8'));
+  const skill = read('SKILL.md');
+  assert.match(skill, /every session is a node/);
+  assert.match(skill, /If you have a Task, you own completing it\./);
+  assert.match(skill, /Without a Task\*\* \(in practice the root session the user prompts directly\)/);
+  assert.match(skill, /Your role comes from Task facts, not memory/);
+  assert.match(skill, /return `actor_role`, and notice cards are labelled "As Executor: …" or "As Owner: …"/);
+  const reading = read('references/reading-tasks.md');
+  assert.match(reading, /\| `actor_role` \|/);
+  assert.match(reading, /child_notices/);
+  const links = read('references/task-links.md');
+  for (const status of ['done', 'blocked', 'cancelled']) {
+    assert.ok(links.includes(`[As Owner: child Task ${status}](task:<uuid>?event=child_${status})`), status);
+  }
+  assert.ok(links.includes('[Task assigned to you](task:<uuid>?event=assigned)'), 'Legacy unprefixed labels stay recognized');
+  const writes = read('references/task-writes-and-recovery.md');
+  for (const code of ['DELEGATION_OWNER_MISMATCH', 'SELF_ASSIGNMENT', 'DELEGATION_CYCLE']) assert.match(writes, new RegExp(`\`${code}\``));
+  assert.match(read('references/executing.md'), /child_done`, `child_blocked` or `child_cancelled` card/);
+  assert.match(read('references/delegating.md'), /child_done`, `child_blocked` or `child_cancelled` card/);
+  const node = prose(readFileSync(join(root, 'roles/task-node.md'), 'utf8'));
+  assert.doesNotMatch(node, /cockpit-task-owner|cockpit-task-executor/);
+  assert.match(node, /cockpit-task-tree/);
 });

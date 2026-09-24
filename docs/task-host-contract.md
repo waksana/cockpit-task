@@ -72,17 +72,16 @@ HTTP MCP 配置和工具选择。Web 与 MCP 创建共用宿主角色选择流�
 
 | 选择 | Skill | Task MCP 工具（省略 `task_` 前缀） |
 | --- | --- | --- |
-| Owner | `cockpit-task-owner`、`github-coding` | read、create、session_create、session_prepare、assign、edit、cancel、subscribe、unsubscribe、script_read、script_register、automation_start、automation_reconcile |
-| Executor | `cockpit-task-executor`、`github-coding` | read、edit、ack、report、reopen、cancel |
-| 两者 | 两份角色 Skill 与一份 `github-coding` | 十六个工具的并集，共用 `cockpit-task` HTTP MCP 配置 |
+| node（Task node） | `cockpit-task-tree`、`github-coding` | 全部十六个：read、create、session_create、session_prepare、assign、edit、cancel、subscribe、unsubscribe、script_read、script_register、automation_start、automation_reconcile、ack、report、reopen |
 
-两角色都声明同一个 `skills/github-coding` 发现根；宿主复用同来源工作 Skill，
-不复制到各角色目录，不新增装载接口。它仅在编码工作需要时读取，非编码不触发；
-Skill 可发现不等于正文已读，Executor 不继承 Owner 的加载上下文。
+原 `owner`、`executor` 角色已删除且无别名；只持有旧角色的 session 由根节点改为 `node`。
+`node` 声明 `skills/cockpit-task-tree` 与 `skills/github-coding` 发现根；
+不复制到其他目录，不新增装载接口。工作 Skill 仅在编码工作需要时读取，非编码不触发；
+Skill 可发现不等于正文已读，子 Task 的 Executor 不继承 Owner 的加载上下文。
 
 工具子集是 agent 能力装配，不是 Task 逐记录 ACL。业务 actor 为自报来源；
 具有工具不证明用户授权或另一个 Executor 已阅读要求。
-两种角色可共存，但不放宽“一项未结束执行 Task”的限制。
+节点可同时是自己 Task 的 Executor 与子 Task 的 Owner，但不放宽“一项未结束执行 Task”的限制。
 
 默认 Agent Task 使用上述 session 指派边界；可信脚本 automation 由模块持久单队列
 执行，不创建或占用 Executor session，不伪造 ACK。启动仍显式授权，宿主不提供
@@ -109,10 +108,10 @@ Host API 使用 camelCase，Task MCP 使用 snake_case。Task adapter 仅依赖�
 
 | 调用 | 输入/结果 |
 | --- | --- |
-| `session/new` | `{cwd,roles:[{moduleId:"cockpit-task",roleId:"executor"}]}` → `{sessionId}` |
+| `session/new` | `{cwd,roles:[{moduleId:"cockpit-task",roleId:"node"}]}` → `{sessionId}` |
 | `session/get` | `{sessionId}` → `{meta}`；未知 session 为 `meta:null` |
 | `session/resources-prepare` | `{sessionId,skills?,mcpServers?:[{name,tools?}]}` → `{sessionId,ok,skills,mcpServers,tools,error?}`；严格验证、分步回执 |
-| `roles/readiness` | `{sessionId,roles:[{moduleId:"cockpit-task",roleId:"executor"}]}` → 含 `sessionId,loaded,ready,roles,reasons` 的显式检查结果 |
+| `roles/readiness` | `{sessionId,roles:[{moduleId:"cockpit-task",roleId:"node"}]}` → 含 `sessionId,loaded,ready,roles,reasons` 的显式检查结果 |
 | `prompt` | `{sessionId,text,mode:"enqueue"}` → `{ok,queued?}` |
 | `session/rename` | `{sessionId,name}` → `{ok,title?}`；仅用于指派后的会话标题步骤 |
 
@@ -191,7 +190,7 @@ Task adapter 不单独调用 [Cockpit #97](https://github.com/waksana/cockpit/pu
 ### 重要更新使用已有单次操作
 
 Owner 的例外更新流程由
-[随包参考](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)
+[随包参考](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md)
 指导，不是 Task 工具或自动循环。先保存 Task，核对仍为同一未结束指派且最新版未 ACK，
 再通过已有 `cockpit_send_prompt` 的 `mode:"immediate"` 发送一次 updated 引用及读取/ACK 要求。
 运行中的 immediate 是向当前轮次插入消息，不是新开一轮；不整理、删除或重放队列，

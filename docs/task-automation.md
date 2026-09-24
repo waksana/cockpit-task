@@ -3,7 +3,8 @@
 Agent is the default: one independent Executor delivers a complete authorized
 outcome. Owner may instead choose automation for an already known, trusted,
 repeatable local script. This is not arbitrary task-to-script conversion, a
-workflow/dependency engine, a scheduler, or permission to invent child Tasks.
+workflow/dependency engine, a scheduler, or permission to invent child Tasks outside
+authorized delegation scope.
 Registration, Task creation, optional subscription and execution are separate.
 
 Script automation is available only on Linux (including WSL2). On other platforms
@@ -32,7 +33,7 @@ ordinary Agent Tasks are unaffected.
    service's persistent single queue, not in an Agent session.
 
 All required arguments and real JSON examples are in the independently packaged
-[Owner reference](../skills/cockpit-task-owner/cockpit-task-owner/references/automation.md).
+[Owner reference](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md).
 Exact schemas and bounds are in the [MCP contract](task-mcp-contract.md).
 
 Execution uses `executable [...argv, script_path, ...typedStrings]` with no shell.

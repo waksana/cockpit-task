@@ -39,8 +39,12 @@ export class TaskService {
       if (name === 'task_assign') {
         const row = this.store.row(input.task_id);
         if (row.kind === 'automation') throw new TaskError('AUTOMATION_MANAGED', 'Automation Tasks cannot be assigned to an Agent');
-        // Reject before reserving or inspecting the Executor; binding rechecks inside its transaction.
-        if (!input.resume_request_id && !this.store.receipt(name, input)) this.store.assertReady(row);
+        // Reject before reserving or inspecting the Executor, so a busy target cannot mask role
+        // confusion as unavailability; binding rechecks inside its transaction.
+        if (!input.resume_request_id && !this.store.receipt(name, input)) {
+          this.store.assertAssignable(row, input.executor);
+          this.store.assertReady(row);
+        }
       }
       if (['task_session_create', 'task_session_prepare', 'task_assign'].includes(name)) {
         const receipt = this.store.reserveOperation(name, input);
@@ -182,7 +186,7 @@ export class TaskService {
     if (this.closing || signal?.aborted) return Promise.resolve();
     if (this.recovery) return this.recovery;
     // Fixed high-water marks bound this startup pass. New transitions deliver themselves.
-    const sources = ['subscriptions', 'dependency_notices']
+    const sources = ['subscriptions', 'dependency_notices', 'child_notices']
       .map(table => ({ table, through: this.store.pendingNotificationBoundary(table) })).filter(source => source.through);
     if (!sources.length) return Promise.resolve();
     this.active++;
