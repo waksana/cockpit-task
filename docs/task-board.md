@@ -1,14 +1,14 @@
 # Task
 
 Task is a Cockpit module for independent work records shared by orchestrator and assignee.
-Its module ID and HTTP MCP key are `cockpit-task`, version `0.1.13` (source preparation; no deployment implied).
+Its module ID and HTTP MCP key are `cockpit-task`, version `0.2.0` (source preparation; no deployment implied).
 It runs in Cockpit, not a standalone daemon or dashboard.
 
-This preparation packages per-Task hierarchical delegation and the tree-node model
+Version 0.1.13 packaged per-Task hierarchical delegation and the tree-node model
 merged through #75 (#71, #72, #74). Schema v7 adds nullable
 `tasks.parent_task_id`, `tasks.depth` default 1 and `child_notices` through a
 forward migration that only adds columns and a table; existing Tasks stay top-level.
-It replaces the orchestrator/assignee roles with one `node` role and one merged
+It replaced the `owner`/`executor` roles with one `node` role and one merged
 `cockpit-task-tree` Skill. Schema v7 is roll-forward only: installed 0.1.12 cannot
 open v7 data, and switching back to an older package is not a database rollback.
 Validate migration on an isolated consistent copy before authorized deployment;
@@ -45,6 +45,12 @@ before resource-aware creation or preparation effects. Omitting resource selecti
 preserves legacy creation. This is separate from the unchanged UI support baseline
 `9fd5204bda99a8bd65b2c5ef152cc47ce87837d5` / `uiSurfaceVersion: 1`.
 Source support is not a release or deployment claim.
+
+Version 0.2.0 packages schema v8 outcome retro handling and the schema v9
+orchestrator/assignee vocabulary switch. MCP tools derive caller identity from
+the paired host's `_meta["cockpit/invocation"].sessionId`; callers no longer
+supply `actor_session_id`. Schema v9 is roll-forward only and requires Cockpit
+0.4.7 or a compatible source containing waksana/cockpit#205.
 
 ## Roles and records
 
@@ -381,7 +387,7 @@ npm test
 npm run package:module
 ```
 
-`dist/cockpit-task-0.1.13.tgz` contains runtime dependencies, backend/frontend assets,
+`dist/cockpit-task-0.2.0.tgz` contains runtime dependencies, backend/frontend assets,
 the node role prompt, the tree Skill and the shared coding Skill. Its `.sha256` sidecar identifies the
 archive. [Task CI](https://github.com/waksana/cockpit-task/blob/main/.github/workflows/task-board-ci.yml) retains these as the
 `cockpit-task-module` artifact; an artifact is not an installation or deployment.
@@ -390,7 +396,7 @@ Installation is an explicit operator action on a compatible host. From the host
 checkout, stage the local artifact using the host's module installer:
 
 ```sh
-pnpm module install /absolute/path/to/cockpit-task-0.1.13.tgz --trust-local-code
+pnpm module install /absolute/path/to/cockpit-task-0.2.0.tgz --trust-local-code
 ```
 
 This command deliberately omits automatic enablement. Follow that host's documented
