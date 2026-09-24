@@ -277,6 +277,36 @@ test('child notices yield to a same-transition subscription and stop once the pa
   assert.equal(f.childNotices(late).length, 0);
 });
 
+test('third-party Subtask subscriptions do not suppress child notices to the parent Assignee', async t => {
+  const f = fixture(t);
+  await f.start('user-orchestrator', 'lead');
+  const doneChild = await f.start('lead', 'worker');
+  const subscribed = await f.as('observer', 'task_subscribe', {
+    task_id: doneChild, write_context: f.store.task(doneChild).write_context, statuses: ['done'],
+  });
+  assert.equal(subscribed.error, null, JSON.stringify(subscribed.error));
+  const done = await f.report('worker', doneChild, { status: 'done', outcome: { summary: 'Delivered' }, retro: null });
+  assert.equal(done.error, null, JSON.stringify(done.error));
+  assert.deepEqual(done.result.subscription_ids, [subscribed.result.subscription.subscription_id]);
+  assert.equal(done.result.notice_ids.length, 1);
+  assert.deepEqual(f.cards('lead'), [`[Subtask done](task:${doneChild}?event=child_done)`]);
+  assert.deepEqual(f.cards('observer'), [`[Subscribed Task status changed](task:${doneChild}?event=status_changed)`]);
+  assert.equal(f.childNotices(doneChild).length, 1);
+
+  const blockedChild = await f.start('lead', 'helper');
+  const assigneeSub = await f.as('helper', 'task_subscribe', {
+    task_id: blockedChild, write_context: f.store.task(blockedChild).write_context, statuses: ['blocked'],
+  });
+  assert.equal(assigneeSub.error, null, JSON.stringify(assigneeSub.error));
+  const blocked = await f.report('helper', blockedChild, { status: 'blocked', activity: { text: 'Need input' } });
+  assert.equal(blocked.error, null, JSON.stringify(blocked.error));
+  assert.deepEqual(blocked.result.subscription_ids, [assigneeSub.result.subscription.subscription_id]);
+  assert.equal(blocked.result.notice_ids.length, 1);
+  assert.equal(f.cards('lead').at(-1), `[Subtask blocked](task:${blockedChild}?event=child_blocked)`);
+  assert.deepEqual(f.cards('helper'), [`[Subscribed Task status changed](task:${blockedChild}?event=status_changed)`]);
+  assert.equal(f.childNotices(blockedChild).length, 1);
+});
+
 test('a pending child notice survives restart and is recovered exactly once', async t => {
   const f = fixture(t);
   await f.start('user-orchestrator', 'lead');

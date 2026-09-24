@@ -184,10 +184,10 @@ Task adapter 不单独调用 [Cockpit #97](https://github.com/waksana/cockpit/pu
 完整原因码及安全恢复条件见 [MCP 契约](task-mcp-contract.md#task_assign)。
 
 `task_reopen` 使用相同公开适配器检查原 assignee 存在且能力就绪，但不是接单：
-当前 session 正在执行用户授权返工时可调用，不要求 idle/空队列或无当前 MCP 操作。
-不创建/加载/重载 session、不修复资源、不调用 prepare 或 prompt，也不发新派单。
-服务在宿主观察后仍于本地写事务核对原归属、revision/context、持久指派序号资格
-及无其他未结束 Task。能力、业务资格与用户授权分别判断；调用 session 等于原 assignee 不是用户授权认证，
+orchestrator 或原 assignee 可调用；工作仍继续归原 assignee，不要求 idle/空队列或无当前 MCP 操作。
+不创建/加载/重载 session、不修复资源、不调用 prepare，也不发新派单。
+服务在宿主观察后仍于本地写事务核对调用者关系、revision/context、持久指派序号资格
+及无其他未结束 Task。原 assignee 调用会 self-ACK 且不发 prompt；orchestrator/Web-user 调用不 auto-ACK，并通过 assignee notice 发送固定 `[Task updated]`。能力、业务资格与用户授权分别判断；调用 session 等于原 assignee 不是用户授权认证，
 不读取聊天验证用户决定。首次 assign/prepare 的原生空闲门槛保持不变。
 
 ### Assignee notices are service-sent immediate prompts

@@ -16,8 +16,8 @@ Task、依赖引擎或级联状态。引用其他 Task 只是资料关联。
 [自动化边界](task-automation.md)。
 
 同一 session 同时最多承担一项未结束 Task，完成或取消后可以复用。
-首次绑定后不能替换 assignee；仅原 assignee 可按下述窄条件重开 done Agent Task，
-cancelled / automation 不恢复执行。orchestrator / assignee 字段记录
+首次绑定后不能替换 assignee；orchestrator 或原 assignee 可按下述窄条件重开 done Agent Task，
+工作仍由原 assignee 继续，cancelled / automation 不恢复执行。orchestrator / assignee 字段记录
 责任关系；服务按该关系授权写入。所有节点都拿到工具，但越权写入以 403 拒绝且不保存。
 
 角色由宿主装配和管理，包括已有 session 的角色变化。模块只有一个 `node` 角色，
@@ -52,7 +52,7 @@ Task 的创建工具为新 session 选择它；指派不补装任何能力，也
 | `activity` | 执行者报告的事实；每条有 revision、assignee、author、时间及正文 |
 | `outcome` | 成果 summary 与可选 references，保留所属 revision 与执行归属 |
 | `retro` | Agent 完成时显式提交的独立复盘文本或 null，与同次 outcome 关联，不代替成果或阻塞 |
-| `retro_handlings` | schema v8 orchestrator 对某条有发现 retro 的处理记录（fixed/followup/watching/dismissed），按 outcome_id 追加保留历史 |
+| `retro_handlings` | schema v8 对某条有发现 retro 的处理记录（fixed/followup/watching/dismissed），按 outcome_id 追加保留历史；任意调用者可记录 |
 | `references` | `{label,target}` 数组；资料、成果或独立 Task 引用，不形成依赖 |
 | `blocked_by` | 最多 20 个任意 orchestrator 的 blocker Task UUID（schema v6 `task_dependencies`）；全部 done 前 `ready=false`，指派/启动返回 `TASK_NOT_READY`；任何未结束 Task 均可整组替换（automation 仅 created 阶段），改变 `editable` 而非 revision；拒绝自身、环、祖先 blocker（`BLOCKER_ANCESTOR`）和新增已取消 blocker |
 | `dependency_notices` | schema v6 就绪/blocker 取消通知及投递证据，按依赖方、类型、blocker 与其生命周期唯一 |
@@ -139,7 +139,7 @@ activity 只能引用固定 assignee 实际确认过的精确 revision，包括�
 | 完成 | 对当前已确认 revision 同次原子提交 `status=done`、新 outcome 与显式 `retro` |
 | 取消 | 对未结束 Task 保存 cancelled 与原因；不要求先 ACK 新要求，也不停止 session |
 | 终态后的操作 | 可读历史和编辑定义；拒绝普通执行报告、ACK、改派；只有下述 task_reopen 可重开 done Agent |
-| 显式返工重开 | 原 assignee 对符合条件的 done Agent 原子创建新定义/ACK、进入 in_progress，保留身份及历史 |
+| 显式返工重开 | orchestrator 或原 assignee 对符合条件的 done Agent 原子创建新定义、进入 in_progress，保留身份及历史；仅原 assignee 调用会 self-ACK，其他调用者触发 assignee updated notice |
 
 状态报告可在未结束工作中按事实进入 `in_progress`、`blocked`、`in_review`，
 不强制先后审批。outcome 本身不隐式进入 done，activity 本身不隐式改变状态。
@@ -171,11 +171,11 @@ schema v7（0.1.13，经 #75 合入 #71/#72/#74）仅在缺失时新增 `tasks.p
 角色按 Task 区分：session 对自己的指派是 assignee，对为其创建的Subtask 是 orchestrator。
 Subtask 必须比父 Task 更具体，不得原样下传，且在父 Task 已授权范围内；父 Task 完成前整合子结果。
 Subtask 真实转入 done/blocked/cancelled 时，同事务为父 Task 的 assignee（即Subtask orchestrator）写入一条
-`child_notices`（父 Task 已结束或同一转换已触发订阅时不写），投递规则同 subscriptions。
+`child_notices`（父 Task 已结束，或同一转换已触发订阅且 subscriber 正是该 orchestrator 时不写；其他 subscriber 的订阅不消费父级 Subtask 卡），投递规则同 subscriptions。
 指派拒绝自我指派（`SELF_ASSIGNMENT`）与祖先回环（`DELEGATION_CYCLE`）；创建拒绝执行中节点与
 无须比较调用者和传入 orchestrator；`DELEGATION_OWNER_MISMATCH` 已删除。
 
-### 原 assignee 自助返工与 schema v5
+### 原 assignee 返工与 schema v5
 
 `task_reopen` 只用于用户明确授权的返工；调用者必须是 Task orchestrator 或原 assignee；
 这是关系授权而非聊天认证，服务不通过聊天验证用户决定。
@@ -192,7 +192,7 @@ schema v5 新增 `task_assignments`，每次升级后的首次指派在绑定事
 单调记录与单项未结束唯一约束在事务中重新验证，重启不能重置资格。
 
 重开同事务写完整 description、新 revision、带 author/reason/服务时间的定义历史，
-通过既有确认机制 self-ACK，并将状态改为 in_progress、推进 lifecycle context；
+将状态改为 in_progress、推进 lifecycle context；原 assignee 调用时通过既有确认机制 self-ACK，orchestrator/Web-user 调用时不 auto-ACK 并写入 assignee updated notice；
 即使正文逐字相同也创建新版。Task/orchestrator/assignee、资料引用、活动、所有旧 ACK、
 outcome/retro 与订阅/通知历史保持不变，不新增强制 activity 或轮次状态机。
 旧 outcome/retro `current:false`，直至对应的新报告；旧 ACK/成果不能完成新版。

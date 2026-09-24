@@ -119,8 +119,8 @@ orchestrator 查找任务用 `task_read(view=list, orchestrator=<自己的 sessi
 编辑前读完整 definition，历史有具体疑问才分页，省略 include 保持旧 overview。
 
 用户明确授权 done Agent 返工且原 assignee 符合重开条件时，orchestrator 不创建替代
-Task/session、不重新派单或代 assignee 重开。保留原责任和环境，由原 assignee
-自助继续。cancelled、automation、升级前指派或已发生后续指派等不符合条件的工作，
+Task/session、不重新派单；可由 orchestrator 重开并通知 assignee，或由原 assignee 自助重开。保留原责任和环境，由原 assignee
+继续。cancelled、automation、升级前指派或已发生后续指派等不符合条件的工作，
 才按新的明确授权安排适当 Task，不换人接管原 Task。
 
 ### 轻量 automation 路径
@@ -157,13 +157,13 @@ assignee 先读 execution 确认真实指派、完整 description、资料、版
 当前 assignee 成功修改未结束 Task 的实际正文时自动 ACK 新版；
 相同正文、仅资料修改、终态编辑不适用。检查是否又有后续变化，不把通知当成新授权。
 
-原 assignee 收到明确返工授权后读完整 execution，用独立 `task_reopen`
-提交当前 revision/write_context、完整 description 和 reason。仅适用于 done Agent，
-actor 必须等于原 assignee（归因而非认证）。资格要求 schema v5 后的持久单调指派序号、
+明确返工授权后，orchestrator 或原 assignee 可读完整 execution 并用独立 `task_reopen`
+提交当前 revision/write_context、完整 description 和 reason；工作继续归原 assignee。仅适用于 done Agent，
+调用者必须是 orchestrator 或原 assignee（归因而非认证）。资格要求 schema v5 后的持久单调指派序号、
 自原指派后没有其他 Task 指派（后来 done/cancelled 仍不例外），且无其他未结束 Task。
 升级前已指派的全部不可重开，不回填或猜时间顺序。只查能力就绪，不要求当前执行 session
-空闲；不自发 prompt、prepare 或 dispatch。
-原子进入 in_progress、创建新版并 self-ACK，即使正文相同；历史及引用不变，
+空闲；不 prepare 或 dispatch。
+原子进入 in_progress、创建新版，即使正文相同；原 assignee 调用会 self-ACK 且不发 notice，orchestrator/Web-user 调用不 auto-ACK 并发送 `[Task updated]`；历史及引用不变，
 旧成果/复盘 current:false，旧 ACK/成果不能交付新版。完成仍须新 outcome/retro。
 已结束订阅不续订、不补发通知，不新增强制 activity 日志或轮次状态机。
 
@@ -194,9 +194,9 @@ orchestrator 按 Task tree Skill 用 `task_retro_handle` 处理有发现的 retr
 | `[Subscribed Task status changed](task:<uuid>?event=status_changed)` | 系统按显式一次性订阅通知 subscriber，不是 assignee 的 ACK 通知 |
 | `[Subtask ready](task:<uuid>?event=ready)` | `blocked_by` 全部 done 后系统通知依赖方 orchestrator；不代表已指派或启动 |
 | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` | 待派发依赖方的 blocker 取消后系统通知 orchestrator 重新评估 |
-| `[Subtask done](task:<uuid>?event=child_done)` | Subtask 每次真实进入 done 时系统通知其 orchestrator，无需订阅；同一转换已触发订阅或父 Task 已结束时不发 |
-| `[Subtask blocked](task:<uuid>?event=child_blocked)` | Subtask 每次真实进入 blocked 时系统通知其 orchestrator，无需订阅；同一转换已触发订阅或父 Task 已结束时不发 |
-| `[Subtask cancelled](task:<uuid>?event=child_cancelled)` | Subtask 每次真实进入 cancelled 时系统通知其 orchestrator，无需订阅；同一转换已触发订阅或父 Task 已结束时不发 |
+| `[Subtask done](task:<uuid>?event=child_done)` | Subtask 每次真实进入 done 时系统通知其 orchestrator，无需订阅；仅同一转换已触发给同一 orchestrator 的订阅或父 Task 已结束时不发 |
+| `[Subtask blocked](task:<uuid>?event=child_blocked)` | Subtask 每次真实进入 blocked 时系统通知其 orchestrator，无需订阅；仅同一转换已触发给同一 orchestrator 的订阅或父 Task 已结束时不发 |
+| `[Subtask cancelled](task:<uuid>?event=child_cancelled)` | Subtask 每次真实进入 cancelled 时系统通知其 orchestrator，无需订阅；仅同一转换已触发给同一 orchestrator 的订阅或父 Task 已结束时不发 |
 
 使用真实 UUID。event 由 URL 明确给出，只有上表小写值有效；不是 Task 类型、
 状态、命令或事件总线。卡片读取当前数据，消息原因保持不变。

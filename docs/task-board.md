@@ -95,13 +95,13 @@ or assignee (`DELEGATION_CYCLE`). `DELEGATION_OWNER_MISMATCH` is removed because
 `orchestrator` from host invocation metadata instead of accepting an input. When a Subtask reaches done, blocked or
 cancelled, the service sends its orchestrator (the parent's assignee) one
 `[Subtask done](task:<uuid>?event=child_done)` card per transition
-(`child_blocked`/`child_cancelled` likewise) without a subscription, skipping it when a
-subscription already fired for that transition or the parent is finished; the
+(`child_blocked`/`child_cancelled` likewise) without a subscription, skipping it only when a
+subscription for that transition already notified the same orchestrator or the parent is finished; the
 `child_notices` and `assignee_notices` read views page delivery facts.
 `task_session_create` gives new sessions the `node` role. The board shows the delegation
 level, a lazy parent link and a lazy Subtask list. There is no workflow engine or
-reassignment; `blocked_by` is only a readiness gate and lineage does not gate readiness. Only the original assignee may self-reopen an eligible
-done Agent Task for explicitly user-authorized rework; cancelled and automation
+reassignment; `blocked_by` is only a readiness gate and lineage does not gate readiness. The orchestrator or original assignee may reopen an eligible
+done Agent Task for explicitly user-authorized rework; the work still continues with that original assignee, while cancelled and automation
 Tasks never reopen. Review is optional unless the Task's
 requirements demand it; assignee can complete without a default orchestrator approval gate.
 Work methods remain separate from role collaboration.
@@ -110,8 +110,8 @@ Reopen requires a tracked assignment after schema v5 upgrade, no later Task
 assignment to that assignee (even one now done/cancelled), and no other unfinished
 Task. Pre-upgrade assignments are all ineligible: no timestamp inference/backfill.
 It atomically writes a new full definition revision even for identical text,
-self-ACKs, advances lifecycle context and enters in_progress with the same
-Task/orchestrator/assignee. Old outcome/retro and all history remain, but current:false
+advances lifecycle context and enters in_progress with the same
+Task/orchestrator/assignee. Original-assignee reopen self-ACKs silently; orchestrator or Web-user reopen does not auto-ACK and sends the assignee a fixed `[Task updated]` notice. Old outcome/retro and all history remain, but current:false
 does not deliver the new agreement. Done again requires a new outcome and explicit
 retro. Busy original-session execution is allowed; current capability readiness
 is still checked. No dispatch/self-prompt, subscription renewal, duplicate notice,
@@ -180,11 +180,11 @@ Task auto-ACKs the new revision. Terminal definitions can be edited without reop
 | `task_edit` | Replace the complete description, materials or `blocked_by`; authorized assignee self-edits auto-ACK changed descriptions, while changes by anyone else to assigned unfinished Agent work make the service send a fixed immediate assignee notice |
 | `task_ack` | Confirm the current definition separately from status |
 | `task_report` | Explicit activity, status and/or outcome; Agent done requires a new outcome and explicit retro text or null |
-| `task_reopen` | Original assignee's explicitly authorized eligible done Agent rework; new revision/self-ACK, no dispatch |
+| `task_reopen` | Orchestrator or original assignee reopens eligible done Agent work for the original assignee; assignee self-reopen auto-ACKs, other reopen sends `[Task updated]`; no dispatch |
 | `task_cancel` | Cancel Agent without stopping its session; request automation termination, never rollback |
-| `task_subscribe` | Optional one-shot orchestrator wait for explicit target statuses |
+| `task_subscribe` | Optional one-shot subscriber wait for explicit target statuses |
 | `task_unsubscribe` | Cancel a still-waiting subscription |
-| `task_retro_handle` | orchestrator records how a recorded retro with findings (normally the latest) was handled: fixed, followup (terminal), watching or dismissed |
+| `task_retro_handle` | Any caller records how a recorded retro with findings (normally the latest) was handled: fixed, followup (terminal), watching or dismissed |
 
 The single `node` role receives all seventeen tools. The service authorizes writes by the caller's relation to each Task: `ack`/`report` require assignee; `edit`/`cancel`/`reopen` require orchestrator or assignee; `assign`/automation start/reconcile require orchestrator; reads, create/session/script helpers, subscribe/unsubscribe and retro handling are open to any caller. Rejections are 403 and save nothing. `actor` is reported provenance, not verified identity.
 
@@ -316,8 +316,8 @@ targets and withdraw the wait if the follow-up is no longer needed.
 assignee never waits for subscription or notice consumption before delivering.
 
 Registration already in a target state fails without subscribing or notifying.
-Each Task permits one waiting subscription; the first matching committed
-transition consumes it. An unmatched terminal transition expires it.
+Each Task permits one waiting subscription per subscriber; the first matching committed
+transition consumes that subscriber's wait. An unmatched terminal transition expires it.
 Same-state reports, edits, ACKs and activity alone do not trigger.
 Unsubscribe cannot recall a consumed notification or host queue item.
 
@@ -348,8 +348,7 @@ current `status`) and `ready` in overview/list context and on the classic board 
 When the last blocker of an undispatched dependent becomes done, the system enqueues one
 `event=ready` card for the dependent to its orchestrator; a cancelled blocker enqueues one
 `event=blocker_cancelled` card. If the dependent is already assigned, the assignee receives `[Task updated]` instead. Each notice is keyed by dependent, kind, blocker and
-blocker lifecycle, so a reopened blocker completing again may notify again. orchestrator
-edits never notify. orchestrator reassesses on the card, then dispatches, revises
+blocker lifecycle, so a reopened blocker completing again may notify again. Non-assignee edits to `blocked_by` on an assigned Agent Task notify that assignee separately. orchestrator reassesses on the dependency card, then dispatches, revises
 `blocked_by` or cancels B. `task_read(view=dependency_notices)` returns delivery
 records with the same recovery semantics as subscriptions. There is no polling,
 automatic assignment or workflow engine.

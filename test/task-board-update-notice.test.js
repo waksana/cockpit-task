@@ -24,6 +24,7 @@ function fixture(t, { sessionExists = async () => true, send } = {}) {
   const f = {
     sent, as, context,
     get store() { return store; },
+    get service() { return service; },
     restart() { service.close(); store = new TaskStore(root); service = new TaskService(store, host, { report: () => {} }); return service; },
     async assigned(assignee = 'assignee') {
       const id = (await as('orchestrator', 'task_create', { title: 'Update target', description: 'v1' })).result.task_id;
@@ -156,6 +157,43 @@ test('orchestrator reopen sends an update and leaves ACK pending while assignee 
   assert.deepEqual(f.sent, []);
 });
 
+test('Web user cancel, reopen and edit send assignee notices without auto-ACKing', async t => {
+  const f = fixture(t);
+  const cancelled = await f.assigned('web-cancel-worker');
+  const cancel = await f.as('user', 'task_cancel', {
+    task_id: cancelled, write_context: f.store.task(cancelled).write_context, reason: 'User stopped it',
+  });
+  assert.equal(cancel.error, null, JSON.stringify(cancel.error));
+  assert.deepEqual(f.sent, [{
+    session: 'web-cancel-worker', mode: 'immediate',
+    text: `[Task cancelled](task:${cancelled}?event=cancelled)\n${CANCEL_NOTICE_INSTRUCTION}`,
+  }]);
+
+  const reopened = await f.assigned('web-reopen-worker');
+  assert.equal((await f.as('web-reopen-worker', 'task_report', {
+    ...f.context(reopened), status: 'done', outcome: { summary: 'Delivered' }, retro: null,
+  })).error, null);
+  f.sent.length = 0;
+  const webReopen = await f.as('user', 'task_reopen', {
+    ...f.context(reopened), description: 'Rework from user', reason: 'User asked',
+  });
+  assert.equal(webReopen.error, null, JSON.stringify(webReopen.error));
+  assert.equal(webReopen.result.acknowledged_revision, 1);
+  assert.deepEqual(f.sent, [{
+    session: 'web-reopen-worker', mode: 'immediate',
+    text: `[Task updated](task:${reopened}?event=updated)\n${UPDATE_NOTICE_INSTRUCTION}`,
+  }]);
+
+  const edited = await f.assigned('web-edit-worker');
+  const webEdit = await f.edit('user', edited, { description: 'Edited from Web board' });
+  assert.equal(webEdit.error, null, JSON.stringify(webEdit.error));
+  assert.equal(webEdit.result.acknowledged_revision, 1);
+  assert.deepEqual(f.sent.at(-1), {
+    session: 'web-edit-worker', mode: 'immediate',
+    text: `[Task updated](task:${edited}?event=updated)\n${UPDATE_NOTICE_INSTRUCTION}`,
+  });
+});
+
 test('update notice failures keep the saved edit and report notification_error', async t => {
   let exists = true;
   const f = fixture(t, { sessionExists: async () => exists });
@@ -167,6 +205,32 @@ test('update notice failures keep the saved edit and report notification_error',
   assert.equal(edited.notifications[0].notification.status, 'not_sent');
   assert.equal(edited.notification_error.code, 'ASSIGNEE_NOT_FOUND');
   assert.deepEqual(f.sent, []);
+});
+
+test('recoverNotifications does not expire a live assignee notice beyond its startup boundary', async t => {
+  let releaseExists;
+  const entered = [];
+  const f = fixture(t, {
+    sessionExists: async () => {
+      entered.push(true);
+      return new Promise(resolve => { releaseExists = resolve; });
+    },
+  });
+  const id = await f.assigned('slow-worker');
+  const editing = f.edit('orchestrator', id, { description: 'v2' });
+  while (!entered.length) await new Promise(resolve => setImmediate(resolve));
+  await f.service.recoverNotifications();
+  await f.service.recoverNotifications();
+  const pending = f.store.read({ view: 'assignee_notices', task_id: id }).items[0];
+  assert.equal(pending.notification.status, 'pending');
+  releaseExists(true);
+  const edited = await editing;
+  assert.equal(edited.error, null, JSON.stringify(edited.error));
+  assert.equal(edited.notifications[0].notification.status, 'accepted');
+  assert.deepEqual(f.sent, [{
+    session: 'slow-worker', mode: 'immediate',
+    text: `[Task updated](task:${id}?event=updated)\n${UPDATE_NOTICE_INSTRUCTION}`,
+  }]);
 });
 
 test('an update notice left pending by a restart expires as not sent instead of arriving late', async t => {

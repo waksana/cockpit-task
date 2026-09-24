@@ -30,7 +30,7 @@ The current vocabulary refactor for Issue #82 is schema v9 and a one-shot
 switch with no aliases: `owner` becomes `orchestrator`, `executor` becomes
 `assignee`, and tool inputs/results, error codes, operation receipts, Web and
 docs move together. Schema v9 renames columns/indexes in place, adds
-`operations.invocation` and `update_notices`, migrates event JSON `actor_session_id` to `actor`, and
+`operations.invocation` and `assignee_notices(kind updated|cancelled)`, renames `subscriptions.owner` to `subscriber` (alongside the other v9 renames), migrates event JSON `actor_session_id` to `actor`, and
 is roll-forward only: installed 0.1.13 and older modules refuse v9 data with
 `SCHEMA_TOO_NEW`. Deploy it only jointly with a Cockpit build that injects
 `_meta["cockpit/invocation"].sessionId` into MCP calls (waksana/cockpit#205);

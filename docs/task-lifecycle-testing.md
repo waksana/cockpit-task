@@ -89,20 +89,19 @@ model-run results. Use isolated synthetic stores/hosts and the existing tests;
 no production migration, installation, session mutation or deployment is implied.
 
 - Discover guarded original-assignee `task_reopen` with full description/reason and existing
-  request/revision/context inputs. Reject cancelled/automation, actor mismatch,
+  request/revision/context inputs. Accept either the Task orchestrator or original assignee as caller; reject unrelated actors, cancelled/automation,
   missing tracked assignment, any later assignment (including later done/cancelled)
-  and another unfinished Task. Actor equality is attribution, not authentication.
+  and another unfinished Task. Caller relation is attribution/authorization data, not chat authentication.
 - Migrate older schemas transactionally to v5 without backfilling any old
   assignment. All pre-upgrade assigned Tasks remain ineligible. Newly assigned
   Tasks receive durable monotonic order, including Tasks created before upgrade
   but first assigned after it. Restart and identical timestamps do not change order.
-- A busy, capable original assignee can reopen without an idle gate, dispatch,
-  self-prompt, preparation or workspace creation. Missing capability still fails.
+- A busy, capable original assignee can self-reopen without an idle gate, dispatch,
+  self-prompt, preparation or workspace creation. Orchestrator/Web-user reopen uses the same original assignee and does not create or dispatch a replacement. Missing capability still fails.
   Concurrent assignment/definition/lifecycle changes are rechecked transactionally;
   errors and exact replay do not duplicate revisions or effects.
 - Successful reopen preserves identity/references/history, enters in_progress,
-  advances lifecycle context, creates a revision even with identical text and
-  self-ACKs through the existing helper. Definition audit keeps reason/author/time.
+  advances lifecycle context, and creates a revision even with identical text. Original-assignee reopen self-ACKs through the existing helper and sends no notice; orchestrator/Web-user reopen does not auto-ACK and sends the assignee fixed `[Task updated]` (`assignee_notices.kind=updated`). Definition audit keeps reason/author/time.
   Old outcome/retro is current:false; old ACK/outcome cannot deliver the new revision.
   New completion requires a new outcome and explicit retro text or null.
 - Consumed/cancelled/expired subscriptions stay ended, with no renewal or duplicate
@@ -995,7 +994,7 @@ from that file; one prompt deliberately references a missing `incidents.csv`.
 | T8 Idle root | All of the above | Root holds no Task, creates no subscription, never polls, and only reacts to user prompts and its own orchestrator cards (ready, subscribed transitions). |
 | T9 Role labels | All of the above | Assignment prompts arrive as `[Task assigned]` (older `[Task assigned to you]` cards remain recognized); Subtask notices as `[Subtask …]`; readiness as `[Subtask ready]`. `task_read` returns `actor_role` for the calling session. A node acting on a card uses the matching responsibility and never answers an orchestrator card with assignee writes or vice versa. |
 | T10 One Task per session, delegation fidelity | Any nested case | A session with an unfinished Task is never assigned a second one (`SESSION_NOT_READY` / busy). Requirements meant for deeper levels are copied verbatim into each Subtask's complete description; a missing deeper requirement is detected at integration, attributed to the right level, and corrected by a new Subtask rather than by redispatch. |
-| T17 Service-sent update notice | *Coached*: root changes an assigned unfinished Agent Task description, changes `blocked_by`, reopens it, tries unassigned/done/metadata-only/assignee-self variants, and restarts with a pending assignee notice | Non-assignee description/blocked_by/reopen changes record `assignee_notices(kind:"updated")`, return `notice_ids`, `notifications` / `notification_error`, and send exactly the fixed `[Task updated]` text with host `mode:"immediate"` to the assignee. Assignee reads full execution and ACKs the latest revision. Inapplicable ordinary edits either save silently or fail by their own lifecycle/permission rule; there is no opt-in notice rejection. Missing/unavailable assignee records `ASSIGNEE_NOT_FOUND` / `ASSIGNEE_UNAVAILABLE`; restart expires pending assignee notices with `ASSIGNEE_NOTICE_EXPIRED`, not late delivery. |
+| T17 Service-sent update notice | *Coached*: root changes an assigned unfinished Agent Task description, changes `blocked_by`, reopens it, tries unassigned/done/metadata-only/assignee-self variants, and restarts with a pending assignee notice | Non-assignee description/blocked_by/reopen changes record `assignee_notices(kind:"updated")`, return `notice_ids`, `notifications` / `notification_error`, and send exactly the fixed `[Task updated]` text with host `mode:"immediate"` to the assignee. Assignee reads full execution and ACKs the latest revision. Inapplicable ordinary edits either save silently or fail by their own lifecycle/permission rule; there is no opt-in notice rejection. Missing/unavailable assignee records `ASSIGNEE_NOT_FOUND` / `ASSIGNEE_UNAVAILABLE`; restart expires only pending assignee notices left by an earlier process before the service-start boundary with `ASSIGNEE_NOTICE_EXPIRED`, not late delivery. |
 
 ### New tree-node cases T18-T22 (not yet recorded)
 

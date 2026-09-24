@@ -14,7 +14,7 @@ Task 是 Cockpit 模块：用共同的持久化 Task 记录协作，通过唯一
 
 Subtask 进入 done、blocked 或 cancelled 时，服务自动向其 orchestrator（父 Task 的 assignee）
 每次转换发送一张 `[Subtask done](task:<uuid>?event=child_done)`（或
-`child_blocked` / `child_cancelled`）卡片，无需订阅；同一次转换若已触发订阅则不重复，
+`child_blocked` / `child_cancelled`）卡片，无需订阅；仅当同一次转换已触发订阅且 subscriber 正是该 orchestrator 时才不重复，
 父 Task 已结束时不发送。旧的无前缀卡片标签仍可识别。
 
 通用引用为 `[Task](task:<uuid>)`；首次指派由 `task_assign` 仅发送一次
@@ -35,8 +35,8 @@ blocker 取消则发送 `[Subtask blocker cancelled](task:<uuid>?event=blocker_c
 
 默认 Agent Task 由一个 assignee 完整负责，可在内部使用 subagents。要求直接修改 Task，
 执行者在同步点读取并 ACK；执行动态和结果带有实际确认的版本。可在授权范围内
-编排Subtask（受深度上限限制），没有改派或任意终态回退。用户明确授权返工时，符合条件的原执行者可自行
-`task_reopen` 同一 done Agent Task；不重新派单、不自发消息、不更换责任人。
+编排Subtask（受深度上限限制），没有改派或任意终态回退。用户明确授权返工时，orchestrator 或符合条件的原执行者可
+`task_reopen` 同一 done Agent Task；不重新派单、不更换责任人。原执行者调用会 auto-ACK 且静默，orchestrator/Web-user 调用会通知 assignee 读取并 ACK。
 必须为 schema v5 升级后有持久序号的指派，且自该次指派后未承接其他 Task
 （后来已完成/取消也不例外）、没有其他未结束 Task。升级前已指派的全部不符合条件，
 不以时间戳推断或回填；cancelled 和 automation 不可重开。

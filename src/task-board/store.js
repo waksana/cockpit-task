@@ -782,7 +782,10 @@ export class TaskStore {
   }
   recordAssigneeNotice(row, input, at, kind = 'updated') {
     const id = randomUUID();
-    const event = { event_id: randomUUID(), revision: row.revision, request_id: input.request_id, at, actor: input.actor };
+    const event = {
+      event_id: randomUUID(), revision: row.revision, request_id: input.request_id, at, actor: input.actor,
+      ...(input.source === 'automation' ? { source: 'automation', run_id: input.run_id } : {}),
+    };
     this.db.prepare('INSERT INTO assignee_notices(id,task_id,revision,assignee,kind,event,created_at) VALUES(?,?,?,?,?,?,?)')
       .run(id, row.id, row.revision, row.assignee, kind, JSON.stringify(event), at);
     return id;

@@ -203,7 +203,7 @@ JSON 转义预算可能使一页短于 limit，按 next_offset 续读。complete
 subscriptions 视图返回 `{task_id,items,next_cursor}`，默认 5 项、最多 10 项，并遵循共用页预算。终态 Task 仍可读取。每项为：
 
 ```text
-subscription_id, task_id, orchestrator, actor, statuses,
+subscription_id, task_id, subscriber, author, statuses,
 state, created_at, ended_at, ended_by,
 event: null | {event_id, request_id, from_status, status, at, actor, source?, run_id?},
 notification: {status, attempted_at, completed_at, error: null | {code, message}}
@@ -246,12 +246,12 @@ blocker 必须存在、不是自身、不是依赖方祖先、不是已取消，
 调用 session 若正在执行未完成的 Agent Task，服务自动把新 Task 记录为该 Task 的 Subtask（`parent_task_id` 为当前 Task，`depth` 为父级加一；顶层为 1）；父 Task 已在第 3 层时返回 `DELEGATION_DEPTH_EXCEEDED` 且不保存。context 返回 `parent_task_id` 与 `depth`；`list` 可用 `parent_task_id` 读取直接 Subtask。谱系不影响就绪。
 读取（list 项、overview、execution、definition 及 include 读取）附 `actor_role`：`assignee`、`orchestrator` 或 `none`，由调用 session 和 Task 事实推导；写入授权也使用同一关系。v9 前遗留的同人行可能显示 `orchestrator_and_assignee`。
 指派时 `assignee` 等于 `orchestrator` 返回 `SELF_ASSIGNMENT`；`assignee` 是任一祖先 Task 的 `orchestrator` 或 `assignee` 返回 `DELEGATION_CYCLE`。`DELEGATION_OWNER_MISMATCH` 已删除，因为 `orchestrator` 总是调用者。
-Subtask 真实转入 done、blocked 或 cancelled 且父 Task 未结束、父 Task 的 assignee 即 Subtask 的 orchestrator 时，系统向该 orchestrator 发送一次 `[Subtask done](task:<uuid>?event=child_done)`（或 `[Subtask blocked](task:<uuid>?event=child_blocked)`、`[Subtask cancelled](task:<uuid>?event=child_cancelled)`），无需订阅；引用指向 Subtask。按 Subtask、状态与生命周期唯一，每次转换一张；同一转换已触发订阅时不重复。投递规则同 subscriptions，id 附在 `notice_ids`。
+Subtask 真实转入 done、blocked 或 cancelled 且父 Task 未结束、父 Task 的 assignee 即 Subtask 的 orchestrator 时，系统向该 orchestrator 发送一次 `[Subtask done](task:<uuid>?event=child_done)`（或 `[Subtask blocked](task:<uuid>?event=child_blocked)`、`[Subtask cancelled](task:<uuid>?event=child_cancelled)`），无需订阅；引用指向 Subtask。按 Subtask、状态与生命周期唯一，每次转换一张；只有同一转换已触发订阅且 subscriber 正是该 orchestrator 时才不重复，其他 session 的订阅不消费父级 Subtask 卡。投递规则同 subscriptions，id 附在 `notice_ids`。
 就绪不改变状态、不指派、不启动。仍待派发（todo、无 assignee；automation 尚未启动）的依赖方在
 最后一个 blocker 真实转入 done 时，系统向其 orchestrator 发送一次 `[Subtask ready](task:<uuid>?event=ready)`；
 blocker 被取消时发送一次 `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)`。
 引用指向依赖方。通知按依赖方、类型、blocker 与 blocker 生命周期唯一，重开后再次 done 可再通知；
-orchestrator 编辑从不发通知。投递与 subscriptions 使用相同证据与恢复规则，触发写入的 result 附 `notice_ids`。
+orchestrator 编辑不会产生 dependency notice；但任何非 assignee 对已指派未结束 Agent Task 的 `blocked_by` 编辑会另行产生 assignee `[Task updated]` notice。投递与 subscriptions 使用相同证据与恢复规则，触发写入的 result 附 `notice_ids`。
 
 ### task_script_read / task_script_register
 
@@ -539,8 +539,8 @@ Read the full current Task execution view and ACK its exact latest revision befo
 
 投递使用宿主 prompt `mode:"immediate"`。缺少 assignee session 记录为
 `not_sent` / `ASSIGNEE_NOT_FOUND`；存在性检查的宿主错误记录为
-`not_sent` / `ASSIGNEE_UNAVAILABLE`。模块重启时未尝试的 pending assignee notice 不会迟发，
-而是标为 `not_sent` / `ASSIGNEE_NOTICE_EXPIRED`。
+`not_sent` / `ASSIGNEE_UNAVAILABLE`。服务启动时捕获 pending 边界；只有早于该边界、由先前进程遗留且未尝试的 pending assignee notice 不会迟发，
+而是标为 `not_sent` / `ASSIGNEE_NOTICE_EXPIRED`。本进程启动后新产生的 pending notice 仍按正常发送路径处理。
 
 输出变更效果、当前 revision / ack 和 write_context，不重复返回全文。并发冲突不覆盖当前定义，也不自动合并自然语言要求。
 
@@ -602,9 +602,9 @@ retro 保存效果附 outcome_id 与 revision，仅与同次完成一起保存�
 
 ### task_reopen
 
-仅为用户明确授权返工提供原 assignee 自助入口，不是 orchestrator 代办、任意状态回退、
-重新指派、自动重试或 automation 重跑。Skill 负责如实记录用户决定；
-`assignee` 相等检查使用宿主提供的调用 session，是固定执行归属不变量，不是用户授权认证。
+仅为用户明确授权返工提供 guarded reopen 入口，不是任意状态回退、
+重新指派、自动重试或 automation 重跑。orchestrator 或原 assignee 可调用；工作始终继续由原 assignee 承担。Skill 负责如实记录用户决定；
+关系检查使用宿主提供的调用 session，是固定执行归属不变量，不是用户授权认证。
 
 输入严格为共用变更字段加 `revision,description,reason`：
 
@@ -637,14 +637,14 @@ references/metadata 或工作环境字段。先读完整 execution 并核对当�
 
 原子效果：保留 Task/orchestrator/assignee，进入 in_progress，写完整 description，
 revision 增一，即使正文相同；保存带 reason/author/服务时间的定义历史，
-通过既有 helper self-ACK 新版，并推进 lifecycle context。返回当前效果、
-revision/ack 和新 write_context，不重复全文。
+推进 lifecycle context。原 assignee 调用时通过既有 helper self-ACK 新版且不发送 notice；orchestrator 或 Web-user 调用时不 auto-ACK，并记录 `assignee_notices(kind:"updated")` / `[Task updated]`。返回当前效果、
+revision/ack、notice_ids（如有）和新 write_context，不重复全文。
 资料/成果引用、活动、旧定义、ACK、outcome、完成 retro 及通知历史保留。
 旧成果/复盘仍有原版归因且 `current:false`；旧 ACK/成果不能交付新版，
 再次 done 仍同次要求新 outcome 与显式 retro 文本或 null。
 不制造必填 activity、通用状态日志或轮次状态机。
 
-不重新派单、不自发消息或要求 orchestrator 消息。triggered/cancelled/expired
+不重新派单、不要求 orchestrator 手写消息。triggered/cancelled/expired
 订阅保持结束，不自动续订、补发或重复通知。无 UI 重开按钮。
 编码默认复用经核实的既有 worktree/branch，即使旧 PR 已合并；已删除时由 assignee
 按 `github-coding` 新建，改作他用需明确解决；reopen 本身不建环境。具体安全同步、独立 review 和后续 PR
@@ -712,9 +712,9 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 | `unknown` | 发送前已持久标记，可能正在发送、已发送或响应丢失；不自动重发 |
 | `accepted` | 宿主确认接受，不证明接收 session 已读或已处理 |
 | `queued` | 宿主确认入队，是 busy 接收者的正常结果，同样不证明已读；重要更新使用 immediate，正常不应为了它清队列 |
-| `not_sent` | 接收 session 不存在、被动存在性查询失败，或 pending updated 通知因重启过期；明确未调用发送或不再迟发，失败已记录，不自动再试 |
+| `not_sent` | 接收 session 不存在、被动存在性查询失败，或早于服务启动边界的 pending assignee notice 因前一进程遗留而过期；明确未调用发送或不再迟发，失败已记录，不自动再试 |
 
-只有 pending 可以自动恢复；`assignee_notices` 的 pending 例外，模块重启时标为 `ASSIGNEE_NOTICE_EXPIRED`，不迟发。发送前原子 claim 成 unknown，防并发和重启重复发送；宿主 prompt 没有幂等键，因此不宣称 exactly-once。接收者不存在时不创建替代 session。通知失败通过 `notification_error` 和 MCP `isError` / HTTP 502 显式返回，Task 的 `error` 仍独立反映原变更。存储确认失败时不能把“没有通知记录”误当未发送，应保留 `NOTIFICATION_STORAGE_UNCONFIRMED` 并检查。
+只有 pending 可以自动恢复；`assignee_notices` 的 pending 例外中，只有服务启动边界之前遗留的 pending 行标为 `ASSIGNEE_NOTICE_EXPIRED`，不迟发；本进程新产生的 pending 行不按重启过期处理。发送前原子 claim 成 unknown，防并发和重启重复发送；宿主 prompt 没有幂等键，因此不宣称 exactly-once。接收者不存在时不创建替代 session。通知失败通过 `notification_error` 和 MCP `isError` / HTTP 502 显式返回，Task 的 `error` 仍独立反映原变更。存储确认失败时不能把“没有通知记录”误当未发送，应保留 `NOTIFICATION_STORAGE_UNCONFIRMED` 并检查。
 
 ## 4. 通用结果与错误
 
@@ -770,7 +770,7 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 | `NOTIFICATION_UNCONFIRMED` / `NOTIFICATION_STORAGE_UNCONFIRMED` | 通知效果或其持久确认不明，检查现有证据，不盲重发 |
 | `SUBSCRIBER_NOT_FOUND` / `SUBSCRIBER_UNAVAILABLE` | subscriber 不存在或存在性读取失败，订阅卡未发送，不自动新建替代者 |
 | `ASSIGNEE_NOT_FOUND` / `ASSIGNEE_UNAVAILABLE` | assignee notice 的接收者不存在或存在性读取失败，未发送，不自动新建替代者 |
-| `ASSIGNEE_NOTICE_EXPIRED` | 模块重启前未发送的重要更新通知已标记不迟发；需要时以新的 edit 重新判断 |
+| `ASSIGNEE_NOTICE_EXPIRED` | 服务启动边界前遗留的 pending assignee notice 已标记不迟发；需要时以新的变更重新判断 |
 | `ORCHESTRATOR_REQUIRED` / `ORCHESTRATOR_OR_ASSIGNEE_REQUIRED` / `ASSIGNEE_REQUIRED` | 调用者与 Task 的关系不满足该写入；403 且不保存任何内容 |
 | `RETRO_NOT_FOUND` / `RETRO_NO_FINDINGS` | 指定的不是该 Task 已记录的 retro，或该 retro 为显式 null；读取 Task retro 或 outcomes 后使用其 outcome_id |
 

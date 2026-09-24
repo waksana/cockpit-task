@@ -20,7 +20,7 @@ SQLite transactions protect local mutations. Separate tables hold Tasks,
 description snapshots, exact revision acknowledgements, activities, outcomes,
 operation receipts, subscriptions, assignment order, script registrations and automation runs. A partial unique index limits each
 assignee to one unfinished Task. Subscription uniqueness permits one waiting
-subscription per Task orchestrator; orchestrator is fixed for the Task.
+subscription per `(task_id, subscriber)`; the subscriber is derived from the caller.
 
 Schema version 6 adds `task_dependencies(task_id, blocker_id, author, at)`, unique
 per pair, no self-edge, indexed by blocker, and `dependency_notices` with
@@ -42,7 +42,7 @@ rejects `SELF_ASSIGNMENT` (assignee = orchestrator) and `DELEGATION_CYCLE` (assi
 executes any ancestor) before readiness. A Subtask's real transition into
 done/blocked/cancelled, in the same write transaction (including automation
 `finish`), inserts one `child_notices` row for its orchestrator when the parent is unfinished,
-the parent's assignee is that orchestrator and no subscription fired for the transition;
+the parent's assignee is that orchestrator and no subscription for the same transition already notified that same orchestrator;
 delivery and startup recovery share the subscription path. Reads derive `actor_role` from the host-supplied caller and `orchestrator`/`assignee`; nothing is stored.
 Blocker sets are validated in the write transaction: at most
 20 unique ids, existing Tasks from any orchestrator, no self, no ancestor blocker (`BLOCKER_ANCESTOR`), no newly added cancelled blocker,
@@ -173,8 +173,7 @@ a description edit, without changing historic outcomes or reopening execution.
 ### Guarded original-assignee reopen
 
 Only `task_reopen` can move a done Agent Task to in_progress for explicitly
-user-authorized rework. It preserves Task/orchestrator/assignee and requires reported
-actor equality with the original assignee; this is not authentication.
+user-authorized rework. It preserves Task/orchestrator/assignee and requires the caller to be either the orchestrator or original assignee; this relation check is not chat authentication. Work always continues with the original eligible assignee.
 Cancelled and automation Tasks remain excluded; report/edit/assign do not reopen.
 Eligibility requires a tracked post-v5 assignment, no later assignment to that
 assignee (including other Tasks now done/cancelled), and no other unfinished Task.
@@ -328,7 +327,7 @@ Subscription is optional and normally unused. Any caller registers only for a co
 necessary future action of that subscriber, not progress/completion watching; this is Skill
 guidance rather than a server-side policy expression. Choose minimal targets,
 withdraw unnecessary waits and never automatically re-subscribe. assignee work
-does not depend on an orchestrator wait or notice being read.
+does not depend on a subscriber wait or notice being read.
 
 Registration atomically checks lifecycle, current status and waiting uniqueness.
 Already matching fails without registration or immediate notification.
@@ -366,8 +365,7 @@ runtime is started and HTTP is listening so resumed sessions can connect MCP.
 Activation, pre-listen agent events and inbound reads do not trigger it.
 Recovery uses bounded batches through a fixed high-water mark without waiting
 for new Task traffic. Waiting subscriptions survive restart; only known-unattempted
-pending subscription/dependency/child notices recover. Pending `assignee_notices`
-expire on restart as `ASSIGNEE_NOTICE_EXPIRED` and are not delivered late. Unknown,
+pending subscription/dependency/child notices recover. At service start, the module captures a high-water boundary for `assignee_notices`; only pending rows left by an earlier process before that boundary expire as `ASSIGNEE_NOTICE_EXPIRED` and are not delivered late. Assignee notices created after this process starts follow the normal send path. Unknown,
 accepted, queued and known failed attempts do not replay. Shutdown prevents new
 claims and keeps storage open until in-flight work records its outcome. There is
 no exactly-once guarantee for host prompt.

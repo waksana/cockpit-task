@@ -25,7 +25,11 @@ function fixture({ ready = true, platform } = {}) {
   let request = 0;
   const sent = [], errors = [];
   const open = () => {
-    service = new TaskService(store, { sessionExists: async () => true, send: async (id, text) => { sent.push({ id, text }); return { ok: true, queued: false }; } },
+    service = new TaskService(store, {
+      sessionExists: async () => true,
+      inspect: async () => ({ ready: true, idle: true, node: true }),
+      send: async (id, text) => { sent.push({ id, text }); return { ok: true, queued: false }; },
+    },
       { report: error => errors.push(error) });
     if (ready) service.automation.recover();
   };
@@ -484,9 +488,15 @@ test('an automation child reaching done or blocked notifies the executing parent
     const cards = () => f.sent.filter(entry => entry.id === 'orchestrator').map(entry => entry.text);
     const ok = await f.create('ok');
     assert.equal(f.store.task(ok).parent_task_id, root);
+    const subscribed = await f.write('task_subscribe', {
+      task_id: ok, write_context: f.store.task(ok).write_context, statuses: ['done'],
+      actor: 'observer',
+    });
+    assert.equal(subscribed.error, null, JSON.stringify(subscribed.error));
     await f.start(ok);
     assert.equal((await f.finished(ok)).status, 'done');
     await until(() => cards().length === 1);
+    assert.equal(f.sent.some(entry => entry.id === 'observer' && entry.text === `[Subscribed Task status changed](task:${ok}?event=status_changed)`), true);
     const bad = await f.create('bad');
     await f.start(bad);
     assert.equal((await f.finished(bad)).status, 'blocked');
@@ -505,5 +515,32 @@ test('an automation child reaching done or blocked notifies the executing parent
     await until(() => cards().length === 3);
     assert.equal(cards()[2], `[Subtask cancelled](task:${queued}?event=child_cancelled)`);
     assert.equal(f.store.read({ view: 'child_notices', task_id: queued }).items.length, 1, 'Automation cancellation notifies once');
+  } finally { await f.close(); }
+});
+
+test('automation blocker completion updates an assigned Agent dependent despite no orchestrator ready card', async () => {
+  const f = fixture();
+  try {
+    await f.register('agent-blocker', 'console.log("done");');
+    const blocker = await f.create('agent-blocker');
+    const dependent = (await f.write('task_create', {
+      title: 'Assigned dependent', description: 'Waits after assignment',
+    })).result.task_id;
+    assert.equal((await f.change('task_assign', dependent, { assignee: 'dependent-worker' })).error, null);
+    assert.equal((await f.change('task_ack', dependent, { actor: 'dependent-worker' })).error, null);
+    assert.equal((await f.change('task_report', dependent, { actor: 'dependent-worker', status: 'in_progress' })).error, null);
+    f.sent.length = 0;
+    const edited = await f.change('task_edit', dependent, {
+      reason: 'Wait for automation blocker', blocked_by: [blocker],
+    });
+    assert.equal(edited.error, null, JSON.stringify(edited.error));
+    f.sent.length = 0;
+    await f.start(blocker);
+    assert.equal((await f.finished(blocker)).status, 'done');
+    await until(() => f.sent.some(entry => entry.id === 'dependent-worker' && entry.text.startsWith(`[Task updated](task:${dependent}?event=updated)\n`)));
+    assert.equal(f.sent.some(entry => entry.id === 'orchestrator' && entry.text === `[Subtask ready](task:${dependent}?event=ready)`), false);
+    const [notice] = f.store.read({ view: 'assignee_notices', task_id: dependent }).items;
+    assert.equal(notice.kind, 'updated');
+    assert.equal(notice.notification.status, 'accepted');
   } finally { await f.close(); }
 });
