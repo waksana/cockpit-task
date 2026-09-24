@@ -1,16 +1,16 @@
 # Trusted script Tasks
 
 Read this only when considering or handling an automation Task. Agent remains the
-default for investigation, implementation and work needing judgment. Owner may choose
+default for investigation, implementation and work needing judgment. An orchestrator may choose
 automation for an already known, trusted, repeatable script within the user's authorized
 scope. Registration does not authorize execution. Do not manufacture an arbitrary
-script, command template or child-Task workflow to bypass independent Agent delivery.
+script, command template or Subtask workflow to bypass independent Agent delivery.
 
 ## Discover and register an immutable script
 
-Owner has `task_script_read`, `task_script_register`, `task_automation_start` and
-`task_automation_reconcile` in addition to existing Owner tools. Executor does not.
-Use actual session IDs, unique stable mutation request IDs and returned Task IDs/context;
+Orchestration guidance covers `task_script_read`, `task_script_register`, `task_automation_start` and
+`task_automation_reconcile`; doing your own Task does not grant them.
+The host supplies your identity; the created Task's `orchestrator` is your session. Use actual IDs, unique stable mutation request IDs and returned Task IDs/context;
 the examples below are JSON argument objects, not commands to run unchanged.
 The sample script must already exist and have been reviewed on the service filesystem.
 No installation, deployment or production testing is implied.
@@ -18,10 +18,10 @@ No installation, deployment or production testing is implied.
 `task_script_read` lists the catalog (default 20, maximum 50) with `next_cursor`:
 
 ```json
-{"actor_session_id":"owner-session","limit":20}
+{"limit":20}
 ```
 
-Select a known registration with `{"actor_session_id":"owner-session","script_id":"inventory-v1"}`;
+Select a known registration with `{"script_id":"inventory-v1"}`;
 do not combine `script_id` with pagination. Inspect its full description, paths,
 fixed arguments, ordered input definitions and SHA256 before selecting it.
 Script automation requires a Linux (or WSL2) host; elsewhere registration, automation
@@ -31,7 +31,6 @@ trusted local script without running it:
 
 ```json
 {
-  "actor_session_id":"owner-session",
   "request_id":"register-inventory-v1",
   "script_id":"inventory-v1",
   "title":"Read inventory",
@@ -70,11 +69,9 @@ and typed-input snapshot:
 
 ```json
 {
-  "actor_session_id":"owner-session",
   "request_id":"create-inventory-review",
-  "owner":"owner-session",
   "title":"Read the authorized inventory",
-  "description":"Run inventory-v1 once against /srv/inventory, inspect at most 25 records, exclude archives. Read-only scope; no installation or production changes. Owner will use the result for the already requested inventory decision.",
+  "description":"Run inventory-v1 once against /srv/inventory, inspect at most 25 records, exclude archives. Read-only scope; no installation or production changes. The orchestrator will use the result for the already requested inventory decision.",
   "automation":{
     "script_id":"inventory-v1",
     "parameters":{"source":"/srv/inventory","sample_limit":25,"include_archived":false}
@@ -83,14 +80,14 @@ and typed-input snapshot:
 ```
 
 Omit `automation` for an ordinary Agent Task. Creation never executes anything.
-Automation has `kind=automation`, no Executor or fake ACK, and consumes no session
+Automation has `kind=automation`, no assignee or fake ACK, and consumes no session
 assignment slot. Do not use `task_assign`, `task_ack` or `task_report` on it.
 The script selection and inputs can never be edited; title/description/materials
 are also frozen while queued, starting or running. Record scope changes before
 start where permitted; changed inputs require a newly authorized Task.
 
 Default to no subscription, just as for Agent work. If the next necessary authorized
-Owner action needs the result, subscribe **before start** so fast completion cannot
+orchestrator action needs the result, subscribe **before start** so fast completion cannot
 race registration. Completion confirmation or repeated reporting is not such an action.
 Choose only statuses that unlock that action. In this example the already-requested
 inventory decision needs success evidence or the failure reason, so it uses
@@ -98,7 +95,6 @@ inventory decision needs success evidence or the failure reason, so it uses
 
 ```json
 {
-  "actor_session_id":"owner-session",
   "request_id":"subscribe-inventory-decision",
   "task_id":"11111111-1111-4111-8111-111111111111",
   "write_context":"<returned-write-context>",
@@ -111,7 +107,6 @@ latest definition and use its actual revision/context for `task_automation_start
 
 ```json
 {
-  "actor_session_id":"owner-session",
   "request_id":"start-inventory-review",
   "task_id":"11111111-1111-4111-8111-111111111111",
   "revision":1,
@@ -127,9 +122,9 @@ request IDs to retry external effects.
 ## Read results, not a monitoring loop
 
 Success becomes `done` with a service-generated outcome; failure or interruption
-becomes `blocked` with an outcome. These are service facts, not Executor reports.
+becomes `blocked` with an outcome. These are service facts, not assignee reports.
 Automatic subscription transitions have `event.source='automation'`, `event.run_id`
-and `actor_session_id:null`. Outcomes have `executor:null`, `source:'automation'`
+and `actor:null`. Outcomes have `assignee:null`, `source:'automation'`
 and `author:'automation:<run_id>'`; the author is a service label, not a native session.
 On a one-shot status notice, select only needed latest content in one bounded
 overview call where possible, then do only the still-necessary authorized follow-up.
@@ -138,7 +133,7 @@ and current context; add `automation` only if run facts or the immutable snapsho
 are necessary:
 
 ```json
-{"actor_session_id":"owner-session","view":"overview","task_id":"11111111-1111-4111-8111-111111111111","include":["outcome"]}
+{"view":"overview","task_id":"11111111-1111-4111-8111-111111111111","include":["outcome"]}
 ```
 
 No automatic resubscription, acceptance, polling,
@@ -154,7 +149,6 @@ Read retained combined stdout/stderr only for a concrete question:
 
 ```json
 {
-  "actor_session_id":"owner-session",
   "view":"automation_log",
   "task_id":"11111111-1111-4111-8111-111111111111",
   "offset":0,
@@ -182,7 +176,6 @@ Inspect effects before requesting `task_automation_reconcile`:
 
 ```json
 {
-  "actor_session_id":"owner-session",
   "request_id":"reconcile-inventory-interruption",
   "task_id":"11111111-1111-4111-8111-111111111111",
   "write_context":"<latest-returned-write-context>",

@@ -1,13 +1,13 @@
-# Executing: acting as Executor
+# Doing your own Task
 
-Read this when a Task's `executor` is your session: your one assignment. Executor is a
+Read this when a Task's `assignee` is your session: your one Task. Being its assignee is a
 collaboration responsibility, not a business identity or extra authority.
 Use project instructions and work skills for execution methods.
 
-Automation Tasks are service-managed, not Executor assignments. You may read their
+Automation Tasks are service-managed, not assignments to a node. You may read their
 `kind`, `automation` facts, outcomes and bounded `automation_log`; do not ACK or report
 them. Executing a Task does not grant create/start or script registration;
-only [delegating](delegating.md) guidance covers trusted automation, including as a child Task.
+only [Subtask orchestration](subtasks.md) guidance covers trusted automation, including as a Subtask.
 
 ## Own the whole authorized result
 
@@ -18,60 +18,60 @@ History and outcomes are separate; read them for a concrete question.
 New/forked sessions neither inherit authorization nor isolate shared resources.
 Preparation/readiness is not assignment, authorization, ACK or execution.
 Skill enabled is not body loaded; load relevant Skill bodies when first needed,
-without assuming inherited Owner context. MCP connected is not tool offered,
+without assuming inherited orchestrator context. MCP connected is not tool offered,
 and initialized tool metadata is not final readiness.
 
 Own the entire authorized result: investigation, execution, correction and delivery,
 not just a proposal or stage. Keep working until done; that is not being non-interactive. Organize internal steps/subagents without helper-request
-workflows, stage-by-stage redispatch or transferring responsibility; delegate child Tasks
+workflows, stage-by-stage redispatch or transferring responsibility; delegate Subtasks
 only by scope, below. Hold one unfinished Task at a time, not one lifetime goal;
-owning child Tasks does not change that limit: they are delegation inside this one job.
+orchestrating Subtasks does not change that limit: they are delegation inside this one job.
 
 Respect "discuss only", "not now" and scope: investigation does not authorize changes
 or unrelated follow-up work. Ask real decisions, consequential scope changes or
-missing essentials directly of the user here, not through Owner. Do not wait for
+missing essentials directly of the user here, not through your orchestrator. Do not wait for
 stage-by-stage redispatch or repeat requests for already-granted permission.
 
-## Deliver directly or delegate by scope
+## Deliver directly or split by scope
 
-Roles are per Task: Executor for your assignment, Owner for child Tasks you create for it.
+Relations are per Task: assignee of your Task, orchestrator of the Subtasks you create for it.
 Deliver a coherent result directly. Split only for several independent outcomes, item-by-item
 trade-off discussion with the user, or follow-up detail that would crowd your context; lean
-toward delegation as load grows. Then follow [delegating](delegating.md) for each child:
+toward delegation as load grows. Then follow [Subtask orchestration](subtasks.md) for each Subtask:
 more specific than your Task, never passed down unchanged, within its authorized scope.
-You still own your Task: integrate and verify child outcomes before done; never implement a
-child you delegated, accept your own work or fake delegation without ready delegation capability
-([delegating child Tasks](task-writes-and-recovery.md#delegating-child-tasks)).
-The service wakes you with one `child_done`, `child_blocked` or `child_cancelled` card per
-such child transition; read that child's outcome or blocker and integrate, without polling.
-Before your done, handle each child retro with findings
-([delegating](delegating.md#handle-retros-of-tasks-you-created)).
+You still own your Task: integrate and verify Subtask outcomes before done; never implement a
+Subtask you delegated, accept your own work or fake delegation without ready delegation capability
+([Subtasks of your Task](task-writes-and-recovery.md#subtasks-of-your-task)).
+The service wakes you with one `Subtask done`, `Subtask blocked` or `Subtask cancelled` card
+(`child_done`, `child_blocked`, `child_cancelled`) per such transition; read that Subtask's
+outcome or blocker and integrate, without polling. Before your done, handle each Subtask
+retro with findings ([Subtask orchestration](subtasks.md#handle-retros-of-your-subtasks)).
 
 ## Coding work
 
 For assigned coding work, load the separately discoverable `github-coding` work
-Skill when needed; do not assume Owner's reading loaded it for you. Follow it to set up
+Skill when needed; do not assume your orchestrator's reading loaded it for you. Follow it to set up
 your own isolated environment, deliver through the authorized review/PR/merge boundary
-and clean up after merge; nobody prepares or cleans it for you. Ask the user, not Owner,
+and clean up after merge; nobody prepares or cleans it for you. Ask the user, not your orchestrator,
 before scope changes. Do not wait for stage handoffs. Non-coding work keeps its own methods.
 
 ## Explicitly authorized rework after done
 
 When the user explicitly authorizes rework of your completed Agent Task, read full
 current `execution` and use `task_reopen` yourself only if eligible. Keep the same
-Task, Owner and original Executor; do not ask for redispatch or self-prompt.
+Task, orchestrator and original assignee; do not ask for redispatch or self-prompt.
 The service requires a tracked assignment made after schema v5 upgrade, no other
 Task assigned to you since that assignment (even one now done/cancelled), and no
 other unfinished Task. Pre-upgrade assignments are ineligible; timestamps, old
 chat and metadata cannot establish eligibility. Busy execution of your own current
-session is not an idle-gate failure, but current Executor capability must be ready.
+session is not an idle-gate failure, but current node capability must be ready.
 
 Submit the complete new agreement and reason recording the user's decision, with
 fresh revision/write_context and a stable request ID. Reopen atomically enters
 `in_progress`, creates and self-ACKs a new revision even if the text is identical,
 and preserves all history. Old ACKs/outcomes do not deliver the new agreement;
 complete again with a new outcome and explicit retro text or null.
-Ended subscriptions remain ended; do not renew them or message Owner.
+Ended subscriptions remain ended; do not renew them or message your orchestrator.
 For coding, follow `github-coding` on reusing a retained worktree and branch.
 If eligibility fails or a retained workspace conflicts, explain the specific blocker to the user;
 do not take over, reassign or bypass the checks.
@@ -95,7 +95,7 @@ Do not relabel old work to satisfy new scope.
 
 Save direct user changes as the complete updated Task definition with reason/source
 and the decision superseded. Distinguish approval from proposals/quotations; do not
-copy chat, hide requirements in metadata or require an Owner relay/self-prompt.
+copy chat, hide requirements in metadata or require an orchestrator relay/self-prompt.
 When editing description, preserve the task-specific goal, scope, key decisions,
 authorization boundaries, special constraints and completion conditions, not complete
 prior context. Reference general Skills, repository instructions and environment
@@ -124,7 +124,7 @@ boundaries without presenting partial delivery as complete. Lead outcome with th
 delivered result, how it meets the agreement and remaining limitations, then necessary
 supporting evidence. Research results may be detailed: distinguish conclusions,
 reasoning and unverified points. Use `in_review` only
-when the work requires it, not as a mandatory Owner acceptance gate.
+when the work requires it, not as a mandatory orchestrator acceptance gate.
 
 After completing delivery, before done, briefly reflect on the actual work.
 Keep only useful, actionable observed automation candidates, a specific slow or
@@ -135,28 +135,28 @@ Distinguish observation from hypothesis and external waits from improvable work.
 There is no mandatory multi-section template: write concise useful findings
 (at most 2,000 characters), or submit `retro:null` when there are none, not filler.
 Retro is separate from outcome and blockers; it does not authorize improvements,
-scope expansion or another dispatch. Owner may read it on demand, with no required
+scope expansion or another dispatch. Your orchestrator may read it on demand, with no required
 review, new notification or completion gate. The service guarantees explicit
 submission and persistence, not thoughtful reflection or the quality of the text.
 Automation has no Agent retro. See the completion examples in
 [Task writes and recovery](task-writes-and-recovery.md#completion-retro).
 
 Communicate with the user here (via ask_user where available), wait for the answer, revise your
-own Task if the agreement changes, and continue. Do not send Owner questions,
+own Task if the agreement changes, and continue. Do not send your orchestrator questions,
 confirmations, progress, blockers or completion messages, directly or via subagents.
-Reports/ordinary edits are silent without an explicit Owner status subscription, except
-that a child Task's done/blocked/cancelled transition notifies its Owner, your parent Task's Executor.
-Do not wait for Owner to subscribe or read a notice before continuing authorized
+Reports/ordinary edits are silent without an explicit orchestrator status subscription, except
+that a Subtask's done/blocked/cancelled transition notifies its orchestrator, the parent Task's assignee.
+Do not wait for your orchestrator to subscribe or read a notice before continuing authorized
 work or delivering it.
-Only the system sends that one-shot notice to Task's Owner; this gives Executor
-no subscription capability or permission to notify Owner. A `status_changed` card
+Only the system sends that one-shot notice to the Task's orchestrator; this gives the assignee
+no subscription capability or permission to notify the orchestrator. A `status_changed` card
 is not an instruction to execute or ACK a notification; `updated` remains the
-Executor's cue to read and ACK the current definition. Do not request reminders.
-Owner reads Task. Normal user-facing replies are allowed, not a second maintained ledger.
+assignee's cue to read and ACK the current definition. Do not request reminders.
+Your orchestrator reads Task. Normal user-facing replies are allowed, not a second maintained ledger.
 
 ## Preserve facts through conflicts and uncertainty
 
-Use actual Task/session IDs, your own `actor_session_id` on reads/writes, stable
+Use actual Task/session IDs (the host supplies your identity on reads/writes), stable
 mutation request IDs and fresh returned `write_context` where required. Identity is attribution,
 not authentication or a per-Task ACL. Preserve newer requirements and replay identity.
 Old activity may save while stale status/outcome are rejected; inspect actual effects,
@@ -166,8 +166,8 @@ evidence, without redoing external work or replacing a Task/session to bypass un
 Respect cancellation or invalid state before further consequential work. Record
 changes do not stop Agent native work or undo external effects; automation cancellation
 requests process-group termination, not rollback or proof of exit. Bound Agent Tasks cannot change
-Executor. Cancelled Tasks cannot reopen; done Agent Tasks have only the explicit
-original-Executor rework path above, never revival from old instructions, notices,
+assignee. Cancelled Tasks cannot reopen; done Agent Tasks have only the explicit
+original-assignee rework path above, never revival from old instructions, notices,
 definition edits or an ordinary backwards status report.
 
 Use tool schemas for arguments. Consult [Task views and fields](reading-tasks.md)
