@@ -115,7 +115,7 @@ Host API 使用 camelCase，Task MCP 使用 snake_case。Task adapter 仅依赖�
 | `session/get` | `{sessionId}` → `{meta}`；未知 session 为 `meta:null` |
 | `session/resources-prepare` | `{sessionId,skills?,mcpServers?:[{name,tools?}]}` → `{sessionId,ok,skills,mcpServers,tools,error?}`；严格验证、分步回执 |
 | `roles/readiness` | `{sessionId,roles:[{moduleId:"cockpit-task",roleId:"node"}]}` → 含 `sessionId,loaded,ready,roles,reasons` 的显式检查结果 |
-| `prompt` | `{sessionId,text,mode:"enqueue"}` → `{ok,queued?}` |
+| `prompt` | `{sessionId,text,mode:"enqueue"|"immediate"}` → `{ok,queued?}`；首次指派/订阅等普通通知用 enqueue，重要更新通知由模块用 immediate |
 | `session/rename` | `{sessionId,name}` → `{ok,title?}`；仅用于指派后的会话标题步骤 |
 
 指派的标题步骤依赖宿主在完整 `session/get` 中提供 `nativeName` 与 `nativeNameUserSet`
@@ -190,15 +190,17 @@ Task adapter 不单独调用 [Cockpit #97](https://github.com/waksana/cockpit/pu
 及无其他未结束 Task。能力、业务资格与用户授权分别判断；调用 session 等于原 assignee 不是用户授权认证，
 不读取聊天验证用户决定。首次 assign/prepare 的原生空闲门槛保持不变。
 
-### 重要更新使用已有单次操作
+### 重要更新由模块发送固定 immediate 通知
 
 orchestrator 的例外更新流程由
 [随包参考](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md)
-指导，不是 Task 工具或自动循环。先保存 Task，核对仍为同一未结束指派且最新版未 ACK，
-再通过已有 `cockpit_send_prompt` 的 `mode:"immediate"` 发送一次 updated 引用及读取/ACK 要求。
+指导，不是自动循环。调用方把所有说明写入完整 Task 定义，并在改变 description 的
+同一次 `task_edit` 设置 `notify_assignee:true`；模块核对仍为已指派、未结束 Agent Task
+且调用者不是 assignee 后，通过宿主 `prompt` 的 `mode:"immediate"` 发送一次固定 updated
+引用及读取/ACK 要求。调用方不再用 `cockpit_send_prompt` 手写这张卡。
 运行中的 immediate 是向当前轮次插入消息，不是新开一轮；不整理、删除或重放队列，
 也不为通知中断主轮次或后台工作。它不能回答待决 ask/plan/elicitation，受理不等于已读或 ACK，
-失败或未知效果只作有界核对，不盲重试或自动升级为中断。Task 不新增通知 API 或调度器。
+失败或未知效果只作有界核对，不盲重试或自动升级为中断。
 
 ## 4. 模块 HTTP 与官方 MCP transport
 

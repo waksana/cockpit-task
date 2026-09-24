@@ -191,7 +191,7 @@ orchestrator 按 subtasks.md 用 `task_retro_handle` 处理有发现的 retro（
 | --- | --- |
 | `[Task](task:<uuid>)` | 普通引用 |
 | `[Task assigned to you](task:<uuid>?event=assigned)` | `task_assign` 的完整首次派单；orchestrator 不重复发送 |
-| `[Task updated](task:<uuid>?event=updated)` | orchestrator 明确的重要要求更新，附读取/ACK 最新版要求 |
+| `[Task updated](task:<uuid>?event=updated)` | 服务按 `task_edit notify_assignee:true` 发送给 assignee 的重要要求更新，附读取/ACK 最新版要求 |
 | `[Task status updated](task:<uuid>?event=status_changed)` | 系统按显式一次性订阅通知 Task.orchestrator，不是 assignee 的 ACK 通知 |
 | `[Subtask ready](task:<uuid>?event=ready)` | `blocked_by` 全部 done 后系统通知依赖方 orchestrator；不代表已指派或启动 |
 | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` | 待派发依赖方的 blocker 取消后系统通知 orchestrator 重新评估 |
@@ -205,10 +205,10 @@ orchestrator 按 subtasks.md 用 `task_retro_handle` 处理有发现的 retro（
 
 普通要求更新只改 Task，不排队发送 cue。orchestrator 仅在重要变更不能等待正常检查点时，
 按[重要更新参考](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md)
-先保存完整要求并核对同一未结束指派及未 ACK 的最新 revision，再通过已有
-`cockpit_send_prompt` 的 `mode:"immediate"` 单次发送 updated 引用和读取/ACK 要求。
+把所有说明写进完整要求，并在改变 description 的同一次 `task_edit` 设置
+`notify_assignee:true`。服务用 `mode:"immediate"` 单次发送固定 updated 引用和读取/ACK 要求。
 不复制 description、不整理或重放队列、不为通知中断工作；未知效果只作有界核对，
-不盲重发。接受不等于消费或当前 revision 的 ACK。
+不手写补发。接受不等于消费或当前 revision 的 ACK。
 
 **默认不订阅。** orchestrator 只有在未来状态会使自己采取具体、必要的后续行动时，
 才用 task_subscribe；无需等用户明确要求订阅，但不能为此虚构工作、拆分成果或
@@ -267,7 +267,7 @@ definition_check 检查本次定向 Task 及 actor 承接的未结束 Task，不
 | 视图、字段、截断和分页 | [Task 读取](../skills/cockpit-task-tree/cockpit-task-tree/references/reading-tasks.md) |
 | 写入、冲突、部分结果与恢复 | [写入与恢复](../skills/cockpit-task-tree/cockpit-task-tree/references/task-writes-and-recovery.md) |
 | Task 引用和通知原因 | [Task 链接](../skills/cockpit-task-tree/cockpit-task-tree/references/task-links.md) |
-| 重要变更不能等正常检查点 | orchestrator：[重要更新](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md)；assignee：读取完整 execution 并 ACK 最新 revision |
+| 重要变更不能等正常检查点 | orchestrator：[重要更新](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md) 并用 `task_edit notify_assignee:true`；assignee：读取完整 execution 并 ACK 最新 revision |
 | 可信脚本与自动化 | [自动化](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md) |
 
 只读当前需要的参考，不每轮加载全套。Skill 指导真实行为，工具保护数据一致性；

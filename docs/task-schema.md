@@ -57,6 +57,7 @@ Task 的创建工具为新 session 选择它；指派不补装任何能力，也
 | `blocked_by` | 最多 20 个任意 orchestrator 的 blocker Task UUID（schema v6 `task_dependencies`）；全部 done 前 `ready=false`，指派/启动返回 `TASK_NOT_READY`；仅待派发（todo、无 assignee、automation 未启动）时可整组替换，改变 `editable` 而非 revision；拒绝自身、环、祖先 blocker（`BLOCKER_ANCESTOR`）和新增已取消 blocker |
 | `dependency_notices` | schema v6 就绪/blocker 取消通知及投递证据，按依赖方、类型、blocker 与其生命周期唯一 |
 | `child_notices` | schema v7 Subtask done/blocked/cancelled 发给其 orchestrator 的通知及投递证据，按 Subtask、状态与子生命周期唯一 |
+| `update_notices` | schema v9 重要 description 更新发给 assignee 的固定 immediate 通知及投递证据：`seq,id,task_id,revision,assignee,event,created_at,delivery_status,attempted_at,completed_at,delivery_error`，按 Task 与序号分页读取 |
 | `parent_task_id` / `depth` | schema v7 委派谱系：orchestrator 正执行未完成 Agent Task 时创建即记录其为父 Task，`depth` 为父级加一；顶层为 `null` / 1，最多 3 层（`DELEGATION_DEPTH_EXCEEDED`）；创建后不变，不影响就绪、通知、指派或权限 |
 | `metadata` | 有界纯 JSON 对象，供补充工作资料；不作为凭据、不覆盖固定字段或触发工作 |
 | 取消记录 | 取消原因、作者、时间；独立于 description changelog 和 assignee activity |
@@ -149,7 +150,7 @@ activity 只能引用固定 assignee 实际确认过的精确 revision，包括�
 
 ### 词汇切换与 schema v9
 
-schema v9 是一次性切换、无别名：`tasks.owner`→`tasks.orchestrator`、`tasks.executor`→`tasks.assignee`，`activities.executor`、`outcomes.executor`、`task_assignments.executor` 同步改为 `assignee`，`subscriptions.owner`、`dependency_notices.owner`、`child_notices.owner` 同步改为 `orchestrator`，`subscriptions.actor_session_id` 改为 `author`。索引 `executor_occupancy`、`task_assignments_executor`、`subscriptions_waiting_owner` 重建为 `assignee_occupancy`、`task_assignments_assignee`、`subscriptions_waiting_orchestrator`。
+schema v9 是一次性切换、无别名：`tasks.owner`→`tasks.orchestrator`、`tasks.executor`→`tasks.assignee`，`activities.executor`、`outcomes.executor`、`task_assignments.executor` 同步改为 `assignee`，`subscriptions.owner`、`dependency_notices.owner`、`child_notices.owner` 同步改为 `orchestrator`，`subscriptions.actor_session_id` 改为 `author`。索引 `executor_occupancy`、`task_assignments_executor`、`subscriptions_waiting_owner` 重建为 `assignee_occupancy`、`task_assignments_assignee`、`subscriptions_waiting_orchestrator`。同版还创建 `update_notices` 及索引 `update_notices_task`、`update_notices_pending`，用于 `task_edit notify_assignee:true` 的固定 updated 通知投递证据。
 
 通知事件 JSON 中的 legacy `actor_session_id` 就地迁移为 `actor`；`task_assign` 操作回执里的 `executor` 改为 `assignee`；`operations` 新增 `invocation` JSON，保存 MCP 调用的 `sessionId`、`runtimeSessionId`、`subagent`、`agentName` 等宿主注入 metadata。request 指纹覆盖工具、已验证输入和派生 `actor`，不覆盖完整 invocation；旧 request_id 升级后重放可能因指纹变化返回 `REQUEST_ID_CONFLICT`。
 
@@ -267,7 +268,7 @@ assignee 已直接问用户的阻塞不由 orchestrator 重复转述。
 author 只是服务作者标签，不是 native session 或虚构 assignee 身份。
 
 普通更新静默；assignee 不给 orchestrator 发进度、问题或完成消息。
-首次 assigned、显式重要 updated、订阅 status_changed、依赖 ready / blocker_cancelled 与 Subtask child_done / child_blocked / child_cancelled 的引用 event
+首次 assigned、服务发送的重要 updated、订阅 status_changed、依赖 ready / blocker_cancelled 与 Subtask child_done / child_blocked / child_cancelled 的引用 event
 仅为消息固定元数据，不改变 revision、ACK 或生命周期。格式见
 [引用契约](task-implementation.md#read-boundaries-and-reference)。
 

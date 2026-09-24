@@ -19,7 +19,8 @@ Subtask 进入 done、blocked 或 cancelled 时，服务自动向其 orchestrato
 
 通用引用为 `[Task](task:<uuid>)`；首次指派由 `task_assign` 仅发送一次
 `[Task assigned to you](task:<uuid>?event=assigned)`。orchestrator 明确决定的重要更新
-使用 `[Task updated](task:<uuid>?event=updated)`，并要求读取、ACK 最新版本。
+通过改变完整 description 的 `task_edit notify_assignee:true` 由服务发送
+`[Task updated](task:<uuid>?event=updated)`，并要求读取、ACK 最新版本。
 event 只说明这条消息的原因，不是 Task 状态；卡片仍读取当前数据，普通编辑不发通知。
 
 状态订阅使用独立的 `[Task status updated](task:<uuid>?event=status_changed)`，

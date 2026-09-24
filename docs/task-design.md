@@ -129,7 +129,7 @@ assignee 在开工、恢复、重要阶段之间、重要外部操作前和交�
 | --- | --- |
 | 普通引用 | `[Task](task:<uuid>)` |
 | 首次派单，由 `task_assign` 发送一次 | `[Task assigned to you](task:<uuid>?event=assigned)` |
-| orchestrator 明确的重要要求更新 | `[Task updated](task:<uuid>?event=updated)`，附读取/ACK 最新版要求 |
+| orchestrator 明确的重要要求更新，由 `task_edit notify_assignee:true` 发送给 assignee | `[Task updated](task:<uuid>?event=updated)`，附读取/ACK 最新版要求 |
 | 显式一次性状态订阅，由系统通知 orchestrator | `[Task status updated](task:<uuid>?event=status_changed)` |
 | 依赖方的全部 blocker 已 done，由系统通知 orchestrator | `[Subtask ready](task:<uuid>?event=ready)` |
 | 待派发依赖方的 blocker 被取消，由系统通知 orchestrator | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` |
@@ -140,9 +140,10 @@ assignee 在开工、恢复、重要阶段之间、重要外部操作前和交�
 首次派单不复制 description，orchestrator 不重复发单。普通编辑与报告静默。
 只有 orchestrator 判断重要更新不能等待正常同步点时，才按
 [重要更新参考](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md)
-先保存 Task 并核对同一未结束指派及未 ACK 的最新 revision，再用
-`cockpit_send_prompt` 的 `mode:"immediate"` 单次发送 updated 引用和读取/ACK 要求。
-不整理或重放队列、不为通知中断工作；受理不等于消费或 ACK，未知效果不盲重试。
+把所有说明写入完整 Task 定义，并在改变 description 的同一次 `task_edit` 中设置
+`notify_assignee:true`。服务核对同一未结束指派、调用者不是 assignee 后，用
+`mode:"immediate"` 发送固定 updated 引用和读取/ACK 要求。
+不整理或重放队列、不为通知中断工作；受理不等于消费或 ACK，未知效果不盲重试或手写补发。
 
 状态订阅默认不使用。只有未来状态使 orchestrator 必须采取具体、必要的后续行动时
 才登记；单纯看进度或确认完成不是理由。不虚构后续工作或审批关卡，

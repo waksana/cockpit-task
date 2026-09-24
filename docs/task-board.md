@@ -97,7 +97,7 @@ cancelled, the service sends its orchestrator (the parent's assignee) one
 `[Subtask done](task:<uuid>?event=child_done)` card per transition
 (`child_blocked`/`child_cancelled` likewise) without a subscription, skipping it when a
 subscription already fired for that transition or the parent is finished; the
-`child_notices` read view pages delivery facts.
+`child_notices` and `update_notices` read views page delivery facts.
 `task_session_create` gives new sessions the `node` role. The board shows the delegation
 level, a lazy parent link and a lazy Subtask list. There is no workflow engine or
 reassignment; `blocked_by` is only a readiness gate and lineage does not gate readiness. Only the original assignee may self-reopen an eligible
@@ -180,7 +180,7 @@ Task auto-ACKs the new revision. Terminal definitions can be edited without reop
 | `task_session_create` | Create an assignee, optionally preparing explicitly selected native resources |
 | `task_session_prepare` | Prepare a loaded idle assignee with no unfinished Task; no creation or dispatch |
 | `task_assign` | Check an existing assignee, bind once, best-effort set its default/auto session title to the Task title, and send one assigned reference |
-| `task_edit` | Replace the complete description or edit title/materials |
+| `task_edit` | Replace the complete description or edit title/materials; optional `notify_assignee:true` sends one fixed immediate update notice for an important changed description |
 | `task_ack` | Confirm the current definition separately from status |
 | `task_report` | Explicit activity, status and/or outcome; Agent done requires a new outcome and explicit retro text or null |
 | `task_reopen` | Original assignee's explicitly authorized eligible done Agent rework; new revision/self-ACK, no dispatch |
@@ -295,7 +295,7 @@ are allowed. Ordinary edits/reports stay silent without an explicit subscription
 | --- | --- |
 | Ordinary reference | `[Task](task:<uuid>)` |
 | Entire automatic first dispatch | `[Task assigned to you](task:<uuid>?event=assigned)` |
-| Explicit important-update notice | `[Task updated](task:<uuid>?event=updated)` |
+| Service-sent important-update notice (`task_edit notify_assignee:true`) | `[Task updated](task:<uuid>?event=updated)` |
 | System notice from a status subscription | `[Task status updated](task:<uuid>?event=status_changed)` |
 | Dependent's blockers are all done | `[Subtask ready](task:<uuid>?event=ready)` |
 | A blocker of a waiting dependent was cancelled | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` |
@@ -315,12 +315,14 @@ read on demand and never imply business progress or capability readiness.
 
 For an exceptionally important change that cannot wait for checkpoints, orchestrator
 follows the [important-update handoff](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md):
-save the updated Task, confirm the same unfinished assignment and unacknowledged
-latest revision, then send one `cockpit_send_prompt` notice with `mode:"immediate"`.
-It interjects into a running turn without queue handling or interruption, carrying
-an updated reference and an instruction to read/ACK the latest revision.
-Acceptance is not consumption or ACK; uncertain delivery does not authorize retries.
-`task_edit` never sends this notice automatically.
+put every explanation in the complete Task definition, then call `task_edit` with
+`notify_assignee:true` while changing the description. The service verifies an
+assigned, unfinished Agent Task and a caller different from the assignee, records an
+`update_notices` row and sends exactly one fixed `[Task updated]` card plus the
+read/ACK instruction with `mode:"immediate"`. It interjects into a running turn
+without queue handling or interruption. Acceptance is not consumption or ACK;
+uncertain delivery does not authorize retries or a handwritten duplicate. Without
+`notify_assignee:true`, `task_edit` stays silent.
 
 ### One-shot status subscriptions
 

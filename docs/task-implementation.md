@@ -54,7 +54,7 @@ start reject `TASK_NOT_READY`; readiness never changes status or dispatches.
 `report`/`cancel`/automation finish return these as `notice_ids`, delivered and
 recovered through the same outbox path as `subscription_ids`.
 
-Schema version 9 renames vocabulary in place: tasks.owner→orchestrator, tasks.executor→assignee; activities/outcomes/task_assignments.executor→assignee; subscriptions/dependency_notices/child_notices.owner→orchestrator; subscriptions.actor_session_id→author. It drops legacy occupancy/waiting indexes and creates `assignee_occupancy`, `task_assignments_assignee` and `subscriptions_waiting_orchestrator`; it adds `operations.invocation`. Notification event JSON is migrated from `actor_session_id` to `actor`, and saved `task_assign` operation input/result JSON moves `executor` to `assignee`. The migration is roll-forward only; older installed modules reject user_version 9 with `SCHEMA_TOO_NEW`.
+Schema version 9 renames vocabulary in place: tasks.owner→orchestrator, tasks.executor→assignee; activities/outcomes/task_assignments.executor→assignee; subscriptions/dependency_notices/child_notices.owner→orchestrator; subscriptions.actor_session_id→author. It drops legacy occupancy/waiting indexes and creates `assignee_occupancy`, `task_assignments_assignee` and `subscriptions_waiting_orchestrator`; it adds `operations.invocation` and creates `update_notices` with `update_notices_task` / `update_notices_pending`. Notification event JSON is migrated from `actor_session_id` to `actor`, and saved `task_assign` operation input/result JSON moves `executor` to `assignee`. The migration is roll-forward only; older installed modules reject user_version 9 with `SCHEMA_TOO_NEW`.
 
 Schema version 8 (source only, not yet packaged) adds append-only
 `retro_handlings(id, task_id, outcome_id REFERENCES outcomes(id), status, note, refs, author, at)`
@@ -341,14 +341,21 @@ consumption, immutable transition event and `pending` delivery together.
 Same-status reports and failed transitions do not trigger; an unmatched terminal
 transition expires the wait. Waiting cancellation races through the same
 transaction boundary and cannot revoke an already triggered event.
+An important description update requested with `task_edit notify_assignee:true`
+commits the new definition and one `update_notices` row in the same local write
+after validating an assigned unfinished Agent Task, changed description and non-assignee
+caller; failed applicability rejects the whole edit.
 
 The delivery record is a bounded durable outbox, not a second native queue or
 scheduler. A passive `session/get` lookup first checks the original orchestrator exists.
-Missing/unavailable orchestrators produce `not_sent` evidence; no replacement is created.
+For update notices the recipient column is the assignee instead. Missing/unavailable
+recipients produce `not_sent` evidence; no replacement is created.
 A compare-and-set claim persists `unknown` before the non-idempotent host send.
 The only message is `[Task status updated](task:<uuid>?event=status_changed)`
-(or, for a dependency notice, the dependent's `event=ready` / `event=blocker_cancelled` card).
-Accepted/queued responses update evidence; ambiguous or interrupted sends remain
+(or, for a dependency notice, the dependent's `event=ready` / `event=blocker_cancelled` card;
+for an update notice, the fixed `[Task updated]` card and read/ACK instruction).
+Update notices call host `prompt` with `mode:"immediate"`; the other notices use the
+default queued prompt. Accepted/queued responses update evidence; ambiguous or interrupted sends remain
 unknown and are never automatically retried. Busy orchestrator enqueue is normal and
 does not interrupt, clear messages or prove reading.
 
@@ -363,15 +370,18 @@ runtime is started and HTTP is listening so resumed sessions can connect MCP.
 Activation, pre-listen agent events and inbound reads do not trigger it.
 Recovery uses bounded batches through a fixed high-water mark without waiting
 for new Task traffic. Waiting subscriptions survive restart; only known-unattempted
-pending notices recover. Unknown, accepted, queued and known failed attempts do
-not replay. Shutdown prevents new claims and keeps storage open until in-flight
-work records its outcome. There is no exactly-once guarantee for host prompt.
+pending subscription/dependency/child notices recover. Pending `update_notices`
+expire on restart as `UPDATE_NOTICE_EXPIRED` and are not delivered late. Unknown,
+accepted, queued and known failed attempts do not replay. Shutdown prevents new
+claims and keeps storage open until in-flight work records its outcome. There is
+no exactly-once guarantee for host prompt.
 
 ## Read boundaries and reference
 
 Read views are fixed, not arbitrary projections:
 `list`, `overview`, `execution`, `definition`, `changelog`, `activity`, `outcomes`,
-`subscriptions`, `dependency_notices`, `automation_log`, `operation`. orchestrator discovers through an explicit
+`subscriptions`, `dependency_notices`, `child_notices`, `update_notices`,
+`automation_log`, `operation`. orchestrator discovers through an explicit
 orchestrator-filtered list and selects single-Task content by purpose; assignee reads full
 execution requirements at start/resumption and synchronization checkpoints.
 These are information choices, not ACLs.
@@ -433,7 +443,7 @@ checked against retained fields too, not merely the supplied patch.
 | --- | --- |
 | Ordinary reference | `[Task](task:<uuid>)` |
 | Entire first assignment message | `[Task assigned to you](task:<uuid>?event=assigned)` |
-| Explicit important-update notice to assignee | `[Task updated](task:<uuid>?event=updated)` |
+| Service-sent important-update notice to assignee (`task_edit notify_assignee:true`) | `[Task updated](task:<uuid>?event=updated)` |
 | Explicit subscription's system notice to orchestrator | `[Task status updated](task:<uuid>?event=status_changed)` |
 | Dependent ready notice to orchestrator | `[Subtask ready](task:<uuid>?event=ready)` |
 | Dependent blocker-cancelled notice to orchestrator | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` |

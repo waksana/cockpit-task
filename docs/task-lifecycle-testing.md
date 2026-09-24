@@ -26,7 +26,7 @@ included in the 40/40 result and use the narrower setup documented below.
 - [Controller fault recipes](#controller-fault-recipes)
 - [Subscription-necessity cases N1-N3](#subscription-necessity-cases-n1-n3)
 - [Coding workflow cases G1-G4](#coding-workflow-cases-g1-g4)
-- [Tree-node cases T1-T10](#tree-node-cases-t1-t10)
+- [Tree-node cases T1-T17](#tree-node-cases-t1-t17)
 - [Real isolated host harness](#real-isolated-host-harness)
 - [assignee preparation: rationale and acceptance](#assignee-preparation-rationale-and-acceptance)
 - [Completion retro acceptance](#completion-retro-acceptance)
@@ -563,18 +563,19 @@ r5 final acceptance; inspect actual contents if a new run differs.
 
 ### S3: Important update, cancellation and stale-card resumption
 
-Historical baseline only: the queue-removal/interruption procedure and convenience
-commands below are superseded by the current
-[important-update handoff](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md).
-Current reruns must exercise one `immediate` notice with queued messages left intact
-and no notification-driven interruption. The original S3 evidence is not evidence
-for native immediate delivery; retain it as historical, not current acceptance.
+Current reruns must use the
+[important-update handoff](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md):
+the orchestrator edits the complete Task definition with `task_edit` and
+`notify_assignee:true`. The service, not a handwritten chat message, sends one fixed
+`mode:"immediate"` update notice. Queued messages stay intact and no
+notification-driven interruption is performed.
 
 After A finishes, give its existing assignee a new C Task for anomaly notes.
 The user initially permits only preparation, not a final report. Register a done
 wait explicitly for the expiration test. This is a new Task, not reopening A.
 
-Before the important update, seed two complete pending messages:
+Before the important update, seed two complete pending messages. They remain queued
+after the immediate notice and are still governed by the latest Task definition:
 
 ```text
 Source: synthetic-user
@@ -585,7 +586,7 @@ R07 is search / error / 300 ms. This is a factual investigation note only.
 Scope comes from the latest Task; this note is not new authorization.
 ```
 
-orchestrator request:
+orchestrator request, to be incorporated into the full Task definition:
 
 ```text
 C must immediately include only service=checkout AND original result=error.
@@ -594,29 +595,35 @@ Preserve the pending context during one handoff. Work is still preparation and
 synchronization only; I will decide later whether to continue.
 ```
 
-Expose only the lab's labelled host convenience commands for this phase:
-`get`, `queue`, per-ID `remove-queued`, `interrupt-once`, and `enqueue-updated`.
-Cross-session access requires `purpose:"important-update"`. These simulate a
-queue-preserving handoff; they are not official native API names.
+Call `task_edit` once with the changed full description and `notify_assignee:true`.
+Expected evidence includes `notice_ids`, the returned `notifications` /
+`notification_error`, an `update_notices` read row, and a host prompt to the assignee
+with `mode:"immediate"` and exactly:
 
-Let A synchronize and stop. Then explicitly cancel C because the business need
+```text
+[Task updated](task:<uuid>?event=updated)
+Read the full current Task execution view and ACK its exact latest revision before continuing affected work.
+```
+
+Let A read full `execution`, ACK the exact latest revision, synchronize and stop.
+Then explicitly cancel C because the business need
 was withdrawn. Finally seed/deliver a **diagnostic delayed old updated card** and
-resume A once without new work authorization.
+resume A once without new work authorization; this diagnostic card is separate from
+the real service-sent update notice.
 
 | Assertion | Evidence required |
 | --- | --- |
 | S3.1 | orchestrator loads the important-update reference for this exceptional operation |
-| S3.2 | Exact pending IDs and complete exposed content are preserved before removal |
-| S3.3 | One context-preserving updated handoff; no blind/repeated interrupt or duplicate dispatch |
-| S3.4 | assignee reads/ACKs the current active definition without an orchestrator ACK message |
+| S3.2 | Exact pending IDs and complete exposed content are preserved; no removal/replay is used |
+| S3.3 | One service-sent updated notice with fixed text, `mode:"immediate"`, `notice_ids`, `notifications` and `notification_error`; no handwritten duplicate, blind retry or interruption |
+| S3.4 | assignee reads full execution and ACKs the current active definition without an orchestrator ACK message |
 | S3.5 | After cancellation, stale-card resumption causes no terminal ACK/report/reassignment/reopening |
 | S3.6 | Only waiting subscriptions can be withdrawn; triggered notices are not recalled |
 | S3.7 | Cancellation outside the done target expires the wait without a status card |
 
-Preserve original context in an artifact the receiving actor is allowed to read,
-or carry it in the handoff. Do not point to private evaluator/actor observations.
-If asserting that a separate archive file was written before removal, collect
-filesystem/tool timing evidence; a final file alone does not establish chronology.
+Preserve original context only in places the receiving actor is allowed to read,
+normally the Task definition plus the untouched queue. Do not point to private
+evaluator/actor observations.
 
 ### S4: Node execution and notification uncertainty
 
@@ -788,7 +795,7 @@ node "$LAB/operator.mjs" --run "$RUN" seed-queue \
 
 Save returned IDs. Activate only the intended IDs; do not clear an entire queue.
 Give the delayed post-cancellation card a source such as
-`diagnostic-delayed-card`, explicitly separate from a real orchestrator `enqueue-updated`.
+`diagnostic-delayed-card`, explicitly separate from a real service-sent update notice.
 No real attachments or concurrent-arrival races were exercised in the baseline.
 
 ## Subscription-necessity cases N1-N3
@@ -963,7 +970,7 @@ as an automatic wake-up. A genuinely conflicting dirty-main stop/resume case was
 not exercised; preserving the explicitly excluded note was not proof of a clean
 original checkout. This run predates the direct-question guidance.
 
-## Tree-node cases T1-T16
+## Tree-node cases T1-T17
 
 These cases exercise the tree-node model: every Agent session carries the single
 `node` role, a session holds at most one unfinished Agent Task as assignee, an
@@ -991,6 +998,7 @@ from that file; one prompt deliberately references a missing `incidents.csv`.
 | T8 Idle root | All of the above | Root holds no Task, creates no subscription, never polls, and only reacts to user prompts and its own orchestrator cards (ready, subscribed transitions). |
 | T9 Role labels | All of the above | Assignment prompts arrive as `[Task assigned to you]`; Subtask notices as `[Subtask …]`; readiness as `[Subtask ready]`. `task_read` returns `actor_role` for the calling session. A node acting on a card uses the matching responsibility and never answers an orchestrator card with assignee writes or vice versa. |
 | T10 One Task per session, delegation fidelity | Any nested case | A session with an unfinished Task is never assigned a second one (`SESSION_NOT_READY` / busy). Requirements meant for deeper levels are copied verbatim into each Subtask's complete description; a missing deeper requirement is detected at integration, attributed to the right level, and corrected by a new Subtask rather than by redispatch. |
+| T17 Service-sent update notice | *Coached*: root changes an assigned unfinished Agent Task description with `notify_assignee:true`, then attempts unassigned/done/unchanged/metadata-only/assignee-self variants and a restart with a pending notice | Allowed edit records `update_notices`, returns `notice_ids`, `notifications` / `notification_error`, and sends exactly the fixed `[Task updated]` text with host `mode:"immediate"` to the assignee. Assignee reads full execution and ACKs the latest revision. Rejected variants return `UPDATE_NOTICE_NOT_APPLICABLE` with nothing saved or sent. Missing/unavailable assignee records `ASSIGNEE_NOT_FOUND` / `ASSIGNEE_UNAVAILABLE`; restart expires pending update notices with `UPDATE_NOTICE_EXPIRED`, not late delivery. |
 
 ### Recorded T1-T10 trial
 
@@ -1136,7 +1144,7 @@ open schema v5; package rollback is not database rollback.
 | --- | --- |
 | `task_create`, `task_session_create`, `task_session_prepare` | S1/S3/S6 creation and preparation; Subtask/dependency cases add lineage and readiness coverage |
 | `task_assign` | S1, S4 capability/busy, S6 partial/recovery/replay; dependency cases cover `TASK_NOT_READY` |
-| `task_edit` | S2 clarification, S3 important scope change, S6 materials-only edit; dependencies cover `blocked_by` replacement |
+| `task_edit` | S2 clarification, S3 important scope change with `notify_assignee:true`, S6 materials-only edit; dependencies cover `blocked_by` replacement; T17 covers service-sent update notices and rejection cases |
 | `task_ack`, `task_report` | S1/S2/S4/S6; S2 includes a partial stale report |
 | `task_cancel`, `task_reopen` | S3 cancellation; rework acceptance covers guarded original-assignee reopen |
 | `task_subscribe`, `task_unsubscribe` | S1-S6 technical behavior; N1-N3 necessity judgment; Subtask notices require no subscription |
@@ -1145,7 +1153,7 @@ open schema v5; package rollback is not database rollback.
 | `task_read` | All cases; verify each view below, including list `retro=unhandled\|watching` |
 
 Exercise `list`, `overview`, `execution`, `definition`, `changelog`, `activity`,
-`outcomes`, `retro_handlings`, `subscriptions`, `dependency_notices`, `child_notices`,
+`outcomes`, `retro_handlings`, `subscriptions`, `dependency_notices`, `child_notices`, `update_notices`,
 `automation_log` and `operation` for concrete questions. This is suite coverage, not a requirement
 to read all views for every Task.
 
