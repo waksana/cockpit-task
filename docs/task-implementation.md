@@ -340,8 +340,9 @@ transaction boundary and cannot revoke an already triggered event.
 An assignee notice commits with the local write that caused it. A non-assignee description or `blocked_by` change, reopen, cancel, or dependency resolution/cancellation on an assigned unfinished Agent Task writes one `assignee_notices` row; failed authorization or lifecycle checks reject the original write.
 
 The delivery record is a bounded durable outbox, not a second native queue or
-scheduler. A passive `session/get` lookup first checks the original orchestrator exists.
-For update notices the recipient column is the assignee instead. Missing/unavailable
+scheduler. A passive `session/get` lookup first checks that the notice's original recipient
+exists: the subscriber for subscription cards, the orchestrator for dependency and Subtask
+cards, and the assignee for updated and cancelled notices. Missing/unavailable
 recipients produce `not_sent` evidence; no replacement is created.
 A compare-and-set claim persists `unknown` before the non-idempotent host send.
 The subscription message is `[Subscribed Task status changed](task:<uuid>?event=status_changed)`
