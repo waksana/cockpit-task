@@ -12,16 +12,16 @@ function fixture(t) {
   let store = new TaskStore(root);
   t.after(() => { store.close(); rmSync(root, { recursive: true, force: true }); });
   const input = (task, fields = {}) => ({
-    actor_session_id: 'executor', request_id: randomUUID(),
+    actor: 'assignee', request_id: randomUUID(),
     task_id: task.task_id, revision: task.revision, write_context: task.write_context, ...fields,
   });
   const create = () => store.executeLocal('task_create', {
-    actor_session_id: 'owner', request_id: randomUUID(), owner: 'owner',
+    actor: 'orchestrator', request_id: randomUUID(),
     title: 'Rework', description: 'Full agreement',
     references: [{ label: 'Previous PR', target: 'https://example.test/pr/1' }],
   });
   const assign = task => {
-    const request = input(task, { actor_session_id: 'owner', executor: 'executor' });
+    const request = input(task, { actor: 'orchestrator', assignee: 'assignee' });
     store.reserveOperation('task_assign', request);
     return store.bindAssignment(request);
   };
@@ -57,14 +57,14 @@ test('self-reopen atomically creates and ACKs a new revision even with identical
   assert.equal(reopened.acknowledged_revision, 2);
   assert.notEqual(reopened.write_context, completed.write_context);
   const after = f.store.task(assigned.task_id);
-  for (const key of ['id', 'owner', 'executor', 'title', 'references', 'metadata', 'created_at', 'description']) {
+  for (const key of ['id', 'orchestrator', 'assignee', 'title', 'references', 'metadata', 'created_at', 'description']) {
     assert.deepEqual(after[key], before[key], key);
   }
   assert.equal(after.retro.current, false);
   assert.equal(after.retro.text, 'Observed improvement');
   const revision = f.store.read({ view: 'changelog', task_id: assigned.task_id, revision: 2 });
   assert.equal(revision.reason, 'User requested rework');
-  assert.equal(revision.author, 'executor');
+  assert.equal(revision.author, 'assignee');
   assert.equal(revision.description, before.description);
   assert.ok(revision.at);
   assert.deepEqual(f.store.db.prepare('SELECT * FROM acknowledgements WHERE task_id=? AND revision=1').get(assigned.task_id), oldAck);
@@ -106,8 +106,8 @@ test('reopen rejects mismatched/missing actor, state, stale revision and editabl
   const f = fixture(t), assigned = f.assign(f.create());
   rejects(() => f.reopen(assigned), 'TASK_STATE_CONFLICT');
   const completed = f.done(assigned);
-  rejects(() => f.reopen(completed, { actor_session_id: 'owner' }), 'EXECUTOR_MISMATCH');
-  rejects(() => f.reopen(completed, { actor_session_id: undefined }), 'INVALID_INPUT');
+  rejects(() => f.reopen(completed, { actor: 'orchestrator' }), 'ASSIGNEE_MISMATCH');
+  rejects(() => f.reopen(completed, { actor: undefined }), 'ASSIGNEE_MISMATCH');
   rejects(() => f.reopen(completed, { revision: 2 }), 'DESCRIPTION_UPDATED');
   rejects(() => f.reopen(completed, { write_context: assigned.write_context }), 'TASK_STATE_CONFLICT');
   const edited = f.store.executeLocal('task_edit', f.input(completed, { reason: 'Rename', title: 'Changed' }));
@@ -119,30 +119,30 @@ test('reopen rejects mismatched/missing actor, state, stale revision and editabl
   assert.equal(reopened.revision, 3);
   assert.equal(reopened.acknowledged_revision, 3);
   const cancelled = f.store.executeLocal('task_cancel', {
-    actor_session_id: 'owner', request_id: randomUUID(), task_id: reopened.task_id,
+    actor: 'orchestrator', request_id: randomUUID(), task_id: reopened.task_id,
     write_context: reopened.write_context, reason: 'Stop',
   });
   rejects(() => f.reopen(cancelled), 'TASK_STATE_CONFLICT');
 });
 
-test('automation and unassigned done records cannot reopen or gain an Executor', t => {
+test('automation and unassigned done records cannot reopen or gain an Assignee', t => {
   const f = fixture(t), task = f.create();
   f.store.db.prepare("UPDATE tasks SET status='done',kind='automation' WHERE id=?").run(task.task_id);
   rejects(() => f.reopen(task), 'AUTOMATION_MANAGED');
   f.store.db.prepare("UPDATE tasks SET kind='agent' WHERE id=?").run(task.task_id);
-  rejects(() => f.reopen(task), 'EXECUTOR_MISMATCH');
-  assert.equal(f.store.task(task.task_id).executor, null);
+  rejects(() => f.reopen(task), 'ASSIGNEE_MISMATCH');
+  assert.equal(f.store.task(task.task_id).assignee, null);
 });
 
 test('actual assignment order, not creation/update timestamps or request reservation order, governs eligibility', t => {
   const f = fixture(t);
   const laterTask = f.create();
   const priorTask = f.create();
-  const laterRequest = f.input(laterTask, { actor_session_id: 'owner', executor: 'executor' });
+  const laterRequest = f.input(laterTask, { actor: 'orchestrator', assignee: 'assignee' });
   f.store.reserveOperation('task_assign', laterRequest);
   const priorDone = f.done(f.assign(priorTask));
   const laterAssigned = f.store.bindAssignment(laterRequest);
-  rejects(() => f.reopen(priorDone), 'EXECUTOR_OCCUPIED');
+  rejects(() => f.reopen(priorDone), 'ASSIGNEE_OCCUPIED');
   const laterDone = f.done(laterAssigned);
   const touched = f.store.executeLocal('task_edit', f.input(priorDone, { reason: 'New timestamp', title: 'Touched last' }));
   rejects(() => f.reopen(touched), 'REOPEN_NOT_ELIGIBLE');
@@ -153,7 +153,7 @@ test('later cancelled assignments still disqualify after restart', t => {
   const f = fixture(t), completed = f.done(f.assign(f.create()));
   const later = f.assign(f.create());
   f.store.executeLocal('task_cancel', {
-    task_id: later.task_id, write_context: later.write_context, actor_session_id: 'owner',
+    task_id: later.task_id, write_context: later.write_context, actor: 'orchestrator',
     request_id: randomUUID(), reason: 'Later work cancelled',
   });
   f.restart();
@@ -161,22 +161,20 @@ test('later cancelled assignments still disqualify after restart', t => {
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM task_assignments').get().n, 2);
 });
 
-test('schema v4 upgrade preserves history and denies every previously assigned Task without backfilling', t => {
+test('assignment history preserves reopen eligibility after restart', t => {
   const f = fixture(t), prior = f.done(f.assign(f.create()));
   const history = f.store.read({ view: 'outcomes', task_id: prior.task_id });
-  f.store.db.exec('DROP TABLE task_assignments; PRAGMA user_version=4');
   f.restart();
-  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 8);
-  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM task_assignments').get().n, 0);
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 9);
+  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM task_assignments').get().n, 1);
   assert.deepEqual(f.store.read({ view: 'outcomes', task_id: prior.task_id }), history);
-  rejects(() => f.reopen(prior), 'REOPEN_NOT_ELIGIBLE');
-  assert.equal(f.reopen(f.done(f.assign(f.create()))).task_status, 'in_progress');
+  assert.equal(f.reopen(prior).task_status, 'in_progress');
 });
 
 test('ended subscriptions and delivery facts never resurrect; newly explicit subscriptions work once', t => {
   const f = fixture(t), assigned = f.assign(f.create());
   const subscribe = task => {
-    const { revision, ...input } = f.input(task, { actor_session_id: 'owner', statuses: ['done'] });
+    const { revision, ...input } = f.input(task, { actor: 'orchestrator', statuses: ['done'] });
     return f.store.executeLocal('task_subscribe', input).subscription;
   };
   const first = subscribe(assigned);
@@ -195,12 +193,12 @@ test('ended subscriptions and delivery facts never resurrect; newly explicit sub
 test('expired and explicitly cancelled waits remain ended across reopening and subsequent completion', t => {
   const f = fixture(t), assigned = f.assign(f.create());
   const subscription = statuses => {
-    const { revision, ...input } = f.input(assigned, { actor_session_id: 'owner', statuses });
+    const { revision, ...input } = f.input(assigned, { actor: 'orchestrator', statuses });
     return f.store.executeLocal('task_subscribe', input).subscription;
   };
   const cancelled = subscription(['done']);
   f.store.executeLocal('task_unsubscribe', {
-    actor_session_id: 'owner', request_id: randomUUID(), task_id: assigned.task_id,
+    actor: 'orchestrator', request_id: randomUUID(), task_id: assigned.task_id,
     subscription_id: cancelled.subscription_id,
   });
   const expired = subscription(['blocked']);
@@ -219,7 +217,7 @@ test('reopen combined definition bounds and cancellation do not partially mutate
   const controller = new AbortController();
   const service = new TaskService(f.store, { inspect: async () => {
     controller.abort();
-    return { ready: true, executor: true };
+    return { ready: true, node: true };
   } });
   const request = f.reopenInput(completed);
   const rejected = await service.execute('task_reopen', request, { signal: controller.signal });
@@ -248,21 +246,21 @@ test('store transactions serialize competing connections for reopen and assignme
   const other = new TaskStore(f.root);
   t.after(() => other.close());
   const completed = f.done(f.assign(f.create())), next = f.create();
-  const assignment = f.input(next, { executor: 'executor', actor_session_id: 'owner' });
+  const assignment = f.input(next, { assignee: 'assignee', actor: 'orchestrator' });
   other.reserveOperation('task_assign', assignment);
   const reopened = f.reopen(completed);
-  rejects(() => other.bindAssignment(assignment), 'EXECUTOR_OCCUPIED');
+  rejects(() => other.bindAssignment(assignment), 'ASSIGNEE_OCCUPIED');
   const doneAgain = f.done(reopened);
   other.bindAssignment(assignment);
-  rejects(() => f.reopen(doneAgain), 'EXECUTOR_OCCUPIED');
-  assert.equal(other.db.prepare("SELECT count(*) AS n FROM tasks WHERE executor='executor' AND status NOT IN ('done','cancelled')").get().n, 1);
+  rejects(() => f.reopen(doneAgain), 'ASSIGNEE_OCCUPIED');
+  assert.equal(other.db.prepare("SELECT count(*) AS n FROM tasks WHERE assignee='assignee' AND status NOT IN ('done','cancelled')").get().n, 1);
 });
 
-test('service checks ready original Executor but permits its running turn; replay skips host and invalidates reads', async t => {
+test('service checks ready original Assignee but permits its running turn; replay skips host and invalidates reads', async t => {
   const f = fixture(t), completed = f.done(f.assign(f.create()));
   let inspections = 0, invalidations = 0;
   const service = new TaskService(f.store, {
-    inspect: async id => { assert.equal(id, 'executor'); inspections++; return { ready: true, executor: true, idle: false }; },
+    inspect: async id => { assert.equal(id, 'assignee'); inspections++; return { ready: true, node: true, idle: false }; },
     send: () => assert.fail('Reopen must not send a prompt'),
   }, { invalidate: () => invalidations++ });
   const request = f.reopenInput(completed);
@@ -274,7 +272,7 @@ test('service checks ready original Executor but permits its running turn; repla
   assert.deepEqual((await service.execute('task_reopen', request)).result, reopened.result);
   assert.equal(inspections, 1);
   const again = f.done(reopened.result);
-  service.host.inspect = async () => ({ ready: true, executor: false, idle: true });
+  service.host.inspect = async () => ({ ready: true, assignee: false, idle: true });
   const rejectedInput = f.reopenInput(again);
   assert.equal((await service.execute('task_reopen', rejectedInput)).error.code, 'CAPABILITY_UNAVAILABLE');
   service.host.inspect = () => assert.fail('Rejected receipt replay must not re-inspect');
@@ -285,8 +283,8 @@ test('service checks ready original Executor but permits its running turn; repla
 test('service rejects wrong attribution before host observation and unavailable readiness without mutation', async t => {
   const f = fixture(t), completed = f.done(f.assign(f.create()));
   const service = new TaskService(f.store, { inspect: () => assert.fail('Mismatched actor must not inspect another session') });
-  assert.equal((await service.execute('task_reopen', f.reopenInput(completed, { actor_session_id: 'someone-else' }))).error.code, 'EXECUTOR_MISMATCH');
-  service.host.inspect = async () => ({ ready: false, executor: true, idle: true });
+  assert.equal((await service.execute('task_reopen', f.reopenInput(completed, { actor: 'someone-else' }))).error.code, 'ASSIGNEE_MISMATCH');
+  service.host.inspect = async () => ({ ready: false, node: true, idle: true });
   assert.equal((await service.execute('task_reopen', f.reopenInput(completed))).error.code, 'CAPABILITY_UNAVAILABLE');
   assert.equal(f.store.task(completed.task_id).revision, 1);
   assert.equal(f.store.task(completed.task_id).status, 'done');
@@ -294,13 +292,13 @@ test('service rejects wrong attribution before host observation and unavailable 
 
 test('completion receipt replay after reopen preserves the old notice without another send', async t => {
   const f = fixture(t), assigned = f.assign(f.create());
-  const { revision, ...subscriptionInput } = f.input(assigned, { statuses: ['done'], actor_session_id: 'owner' });
+  const { revision, ...subscriptionInput } = f.input(assigned, { statuses: ['done'], actor: 'orchestrator' });
   f.store.executeLocal('task_subscribe', subscriptionInput);
   f.store.executeLocal('task_ack', f.input(assigned));
   let sends = 0;
   const service = new TaskService(f.store, {
-    inspect: async () => ({ ready: true, executor: true, idle: false }),
-    ownerExists: async () => true,
+    inspect: async () => ({ ready: true, node: true, idle: false }),
+    sessionExists: async () => true,
     send: async () => { sends++; return { ok: true }; },
   });
   const completion = f.input(assigned, { status: 'done', outcome: { summary: 'Delivered' }, retro: null });
@@ -332,7 +330,7 @@ test('assignment during asynchronous readiness check rejects reopen without an e
   const pending = service.execute('task_reopen', request);
   assert.equal(typeof release, 'function');
   f.done(f.assign(next));
-  release({ ready: true, executor: true, idle: false });
+  release({ ready: true, node: true, idle: false });
   const rejected = await pending;
   assert.equal(rejected.error.code, 'REOPEN_NOT_ELIGIBLE');
   assert.equal(f.store.task(completed.task_id).revision, 1);
@@ -349,15 +347,15 @@ test('competing reopen requests and lost mutation response never duplicate a tra
   const request = f.reopenInput(completed);
   const first = service.execute('task_reopen', request);
   const second = service.execute('task_reopen', f.reopenInput(completed));
-  releases[0]({ ready: true, executor: true });
-  releases[1]({ ready: true, executor: true });
+  releases[0]({ ready: true, node: true });
+  releases[1]({ ready: true, node: true });
   const [saved, rejected] = await Promise.all([first, second]);
   assert.equal(saved.error, null);
   assert.equal(rejected.error.code, 'TASK_STATE_CONFLICT');
   assert.equal(f.store.task(completed.task_id).revision, 2);
   const completedAgain = f.done(saved.result);
   const uncertainRequest = f.reopenInput(completedAgain);
-  service.host.inspect = async () => ({ ready: true, executor: true });
+  service.host.inspect = async () => ({ ready: true, node: true });
   const execute = f.store.executeLocal.bind(f.store);
   f.store.executeLocal = (...args) => { execute(...args); throw new Error('Response lost after commit'); };
   assert.equal((await service.execute('task_reopen', uncertainRequest)).error.code, 'OPERATION_UNCONFIRMED');

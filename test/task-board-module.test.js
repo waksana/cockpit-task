@@ -15,15 +15,15 @@ function fixture() {
   const errors = [];
   let invalidations = 0;
   let meta = {
-    sessionId: 'executor', status: 'idle', loaded: true, nativeProcessing: false,
+    sessionId: 'assignee', status: 'idle', loaded: true, nativeProcessing: false,
     activeOperations: 0, queue: [], ask: null,
   };
-  let capability = { sessionId: 'executor', ready: true, loaded: true, roles: [], reasons: [],
+  let capability = { sessionId: 'assignee', ready: true, loaded: true, roles: [], reasons: [],
     rolesNeedReload: false, appliedRoles: [{ moduleId: 'cockpit-task', roleId: 'node' }] };
   const host = {
     async call(name, body) {
       calls.push({ name, body });
-      if (name === 'session/new') return { sessionId: 'executor' };
+      if (name === 'session/new') return { sessionId: 'assignee' };
       if (name === 'session/get') return { meta };
       if (name === 'roles/readiness') return capability;
       if (name === 'prompt') return { ok: true, queued: false };
@@ -54,7 +54,7 @@ function fixture() {
     },
     async write(name, input) {
       return module.routes.find(route => route.path === '/tools/:name').handler({
-        params: { name }, body: { request_id: `op-${++request}`, actor_session_id: 'owner', ...input },
+        params: { name }, body: { request_id: `op-${++request}`, actor: 'orchestrator', ...input },
         signal: controller.signal,
       });
     },
@@ -67,10 +67,10 @@ test('HTTP completion requires explicit valid retro with atomic effects and dura
   const f = fixture();
   try {
     for (const retro of [null, 'A useful automation candidate.']) {
-      const create = await f.write('task_create', { title: 'Retro', description: 'Synthetic only', owner: 'owner' });
+      const create = await f.write('task_create', { title: 'Retro', description: 'Synthetic only' });
       const id = create.body.result.task_id;
       let task = (await f.read(id)).body.result;
-      await f.write('task_assign', { task_id: id, revision: 1, executor: 'executor', write_context: task.write_context });
+      await f.write('task_assign', { task_id: id, revision: 1, assignee: 'assignee', write_context: task.write_context });
       task = (await f.read(id)).body.result;
       const base = { task_id: id, revision: 1, write_context: task.write_context };
       await f.write('task_ack', base);
@@ -94,13 +94,13 @@ test('HTTP completion requires explicit valid retro with atomic effects and dura
   } finally { f.close(); }
 });
 
-test('HTTP reopen checks real host readiness while the Executor is running and does not dispatch', async () => {
+test('HTTP reopen checks real host readiness while the Assignee is running and does not dispatch', async () => {
   const f = fixture();
   try {
-    const created = (await f.write('task_create', { owner: 'owner', title: 'Reopen', description: 'Agreement' })).body.result;
-    await f.write('task_assign', { task_id: created.task_id, revision: 1, write_context: created.write_context, executor: 'executor' });
+    const created = (await f.write('task_create', { title: 'Reopen', description: 'Agreement' })).body.result;
+    await f.write('task_assign', { task_id: created.task_id, revision: 1, write_context: created.write_context, assignee: 'assignee' });
     const task = (await f.read(created.task_id)).body.result;
-    const base = { task_id: task.id, revision: 1, write_context: task.write_context, actor_session_id: 'executor' };
+    const base = { task_id: task.id, revision: 1, write_context: task.write_context, actor: 'assignee' };
     await f.write('task_ack', base);
     const completed = (await f.write('task_report', { ...base, status: 'done', outcome: { summary: 'Original result' }, retro: null })).body.result;
     f.meta = { ...f.meta, status: 'running', nativeProcessing: true, activeOperations: 1 };
@@ -108,17 +108,15 @@ test('HTTP reopen checks real host readiness while the Executor is running and d
     const reopened = await f.write('task_reopen', {
       ...base, write_context: completed.write_context, description: 'Revised agreement', reason: 'Explicit user request',
     });
-    assert.equal(reopened.status, 200);
-    assert.equal(reopened.body.result.revision, 2);
-    assert.equal(reopened.body.result.task_status, 'in_progress');
-    assert.equal(reopened.body.definition_check.tasks[0].needs_ack, false);
-    assert.deepEqual(f.calls.slice(before).map(call => call.name), ['roles/readiness', 'session/get']);
-    assert.equal(f.invalidations, invalidations + 1);
+    assert.equal(reopened.status, 409);
+    assert.equal(reopened.body.error.code, 'ASSIGNEE_MISMATCH');
+    assert.deepEqual(f.calls.slice(before).map(call => call.name), []);
+    assert.equal(f.invalidations, invalidations);
     f.restart();
     const current = (await f.read(task.id)).body.result;
-    assert.equal(current.description, 'Revised agreement');
-    assert.equal(current.retro.current, false);
-    assert.equal((await f.read(task.id, 'outcomes')).body.result.items[0].current, false);
+    assert.equal(current.description, 'Agreement');
+    assert.equal(current.retro.current, true);
+    assert.equal((await f.read(task.id, 'outcomes')).body.result.items[0].current, true);
     assert.deepEqual(f.errors, []);
   } finally { f.close(); }
 });
@@ -126,10 +124,10 @@ test('HTTP reopen checks real host readiness while the Executor is running and d
 test('HTTP selective reads preserve legacy defaults, errors, revision checks and exact chosen groups', async () => {
   const f = fixture();
   try {
-    const create = await f.write('task_create', { title: 'Selective HTTP', description: 'Synthetic only', owner: 'owner' });
+    const create = await f.write('task_create', { title: 'Selective HTTP', description: 'Synthetic only' });
     const id = create.body.result.task_id;
     let task = (await f.read(id)).body.result;
-    await f.write('task_assign', { task_id: id, revision: 1, executor: 'executor', write_context: task.write_context });
+    await f.write('task_assign', { task_id: id, revision: 1, assignee: 'assignee', write_context: task.write_context });
     task = (await f.read(id)).body.result;
     const base = { task_id: id, revision: 1, write_context: task.write_context };
     const fresh = await f.read(id, 'overview', { include: ['activity', 'outcome', 'retro'] });
@@ -195,7 +193,7 @@ test('module publishes one Node role with every tool, the tree Skill and the sha
   assert.deepEqual(node.skillDirectories, ['skills/cockpit-task-tree', 'skills/github-coding']);
 });
 
-test('automation HTTP views never fabricate or inspect a native Executor session', async () => {
+test('automation HTTP views never fabricate or inspect a native Assignee session', async () => {
   const f = fixture();
   try {
     const path = join(f.root, 'automation.mjs');
@@ -206,7 +204,7 @@ test('automation HTTP views never fabricate or inspect a native Executor session
     });
     assert.equal(registered.body.error, null);
     const created = await f.write('task_create', {
-      owner: 'owner', title: 'Automated', description: 'Synthetic only',
+      title: 'Automated', description: 'Synthetic only',
       automation: { script_id: 'native-free', parameters: {} },
     });
     assert.equal(created.body.error, null);
@@ -214,7 +212,7 @@ test('automation HTTP views never fabricate or inspect a native Executor session
     const native = await f.native(id);
     assert.equal(native.body.available, false);
     assert.equal(native.body.session_id, null);
-    assert.equal(native.body.error.code, 'NO_NATIVE_EXECUTOR');
+    assert.equal(native.body.error.code, 'NO_NATIVE_ASSIGNEE');
     assert.equal((await f.read(id)).body.result.automation.state, 'created');
     assert.equal(f.calls.length, 0);
   } finally { f.close(); }
@@ -265,21 +263,21 @@ test('unsupported service-ready capability rejects before creating or migrating 
 test('module HTTP and host bridge preserve registration, creation, assignment and cold reads', async () => {
   const f = fixture();
   try {
-    const created = await f.write('task_create', { owner: 'owner', title: 'Integration', description: 'Complete the whole Task' });
+    const created = await f.write('task_create', { title: 'Integration', description: 'Complete the whole Task' });
     assert.equal(created.status, 200);
     const id = created.body.result.task_id;
     assert.deepEqual(f.calls, []);
-    assert.equal((await f.native(id)).body.error.code, 'NO_EXECUTOR');
+    assert.equal((await f.native(id)).body.error.code, 'NO_ASSIGNEE');
     const session = await f.write('task_session_create', { cwd: '/tmp' });
     assert.equal(session.body.result.operation.capability, 'ready');
     assert.deepEqual(f.calls[0], {
       name: 'session/new', body: { cwd: '/tmp', roles: [{ moduleId: 'cockpit-task', roleId: 'node' }] },
     });
     const execution = (await f.read(id)).body.result;
-    const assigned = await f.write('task_assign', { task_id: id, revision: 1, executor: 'executor', write_context: execution.write_context });
+    const assigned = await f.write('task_assign', { task_id: id, revision: 1, assignee: 'assignee', write_context: execution.write_context });
     assert.equal(assigned.body.result.operation.message, 'accepted');
     assert.deepEqual(f.calls.filter(call => call.name === 'prompt'), [{
-      name: 'prompt', body: { sessionId: 'executor', text: `[As Executor: Task assigned to you](task:${id}?event=assigned)`, mode: 'enqueue' },
+      name: 'prompt', body: { sessionId: 'assignee', text: `[Task assigned](task:${id}?event=assigned)`, mode: 'enqueue' },
     }]);
     f.meta = { ...f.meta, loaded: false, status: 'unloaded' };
     const before = f.calls.length;
@@ -287,9 +285,9 @@ test('module HTTP and host bridge preserve registration, creation, assignment an
     assert.equal(native.loaded, false);
     assert.equal(native.available, true);
     assert.equal(native.source, 'native');
-    assert.deepEqual(f.calls.slice(before), [{ name: 'session/get', body: { sessionId: 'executor' } }]);
+    assert.deepEqual(f.calls.slice(before), [{ name: 'session/get', body: { sessionId: 'assignee' } }]);
     f.restart();
-    assert.equal((await f.read(id)).body.result.executor, 'executor');
+    assert.equal((await f.read(id)).body.result.assignee, 'assignee');
     assert.equal(f.invalidations, 3);
     assert.deepEqual(f.errors, []);
     assert.equal(existsSync(join(f.root, 'work.db')), false);
@@ -300,7 +298,7 @@ test('on-demand capability checks remain separate from native idle evidence and 
   const f = fixture();
   try {
     const adapter = createHostAdapter(f.host);
-    const initial = await adapter.inspect('executor');
+    const initial = await adapter.inspect('assignee');
     assert.equal(initial.ready, true);
     assert.equal(initial.idle, true);
     assert.ok(Number.isFinite(Date.parse(initial.details.observed_at)));
@@ -326,26 +324,26 @@ test('on-demand capability checks remain separate from native idle evidence and 
     ]) {
       const original = f.meta;
       f.meta = { ...original, ...patch };
-      const inspected = await adapter.inspect('executor');
+      const inspected = await adapter.inspect('assignee');
       assert.equal(inspected.ready, true);
       assert.equal(inspected.idle, false);
       assert.deepEqual(inspected.details.availability_reasons, [reason]);
       assert.doesNotMatch(JSON.stringify(inspected.details), /private|requestId/);
       f.meta = original;
     }
-    f.capability = { sessionId: 'executor', loaded: true, ready: false, roles: [], reasons: ['Missing role Skill'] };
-    const unavailable = await adapter.inspect('executor');
+    f.capability = { sessionId: 'assignee', loaded: true, ready: false, roles: [], reasons: ['Missing role Skill'] };
+    const unavailable = await adapter.inspect('assignee');
     assert.equal(unavailable.ready, false);
     assert.equal(unavailable.idle, true);
     assert.deepEqual(unavailable.details.reasons, ['Missing role Skill']);
     assert.deepEqual(unavailable.details.availability_reasons, []);
     f.meta = { ...f.meta, loaded: false, status: 'unloaded' };
-    const unloaded = await adapter.inspect('executor');
+    const unloaded = await adapter.inspect('assignee');
     assert.equal(unloaded.ready, false);
     assert.equal(unloaded.idle, false);
     assert.deepEqual(unloaded.details.availability_reasons, ['session_not_loaded', 'session_not_idle']);
     f.meta = null;
-    const missing = await adapter.inspect('executor');
+    const missing = await adapter.inspect('assignee');
     assert.equal(missing.ready, false);
     assert.equal(missing.idle, false);
     assert.deepEqual(missing.details.availability_reasons, ['session_not_found']);
@@ -357,7 +355,7 @@ test('HTTP dispatch failures retain bounded native reasons before and after bind
   for (const afterBinding of [false, true]) {
     const f = fixture();
     try {
-      const created = await f.write('task_create', { owner: 'owner', title: 'Dispatch evidence', description: 'Complete this Task' });
+      const created = await f.write('task_create', { title: 'Dispatch evidence', description: 'Complete this Task' });
       const task = (await f.read(created.body.result.task_id)).body.result;
       const idle = f.meta;
       const call = f.host.call;
@@ -372,16 +370,16 @@ test('HTTP dispatch failures retain bounded native reasons before and after bind
         return call(name, body);
       };
       const input = {
-        request_id: 'busy-dispatch', task_id: task.id, executor: 'executor',
+        request_id: 'busy-dispatch', task_id: task.id, assignee: 'assignee',
         revision: task.revision, write_context: task.write_context,
       };
       const failed = await f.write('task_assign', input);
-      assert.equal(failed.body.error.code, 'EXECUTOR_NOT_READY');
+      assert.equal(failed.body.error.code, 'SESSION_NOT_READY');
       assert.equal(failed.body.result.operation.assignment, afterBinding ? 'applied' : 'not_applied');
       assert.equal(failed.body.result.operation.message, 'not_sent');
       assert.deepEqual(failed.body.result.operation.details.availability_reasons, ['queued_messages', 'pending_user_question']);
       assert.doesNotMatch(JSON.stringify(failed.body), /private|requestId/);
-      assert.equal((await f.read(task.id)).body.result.executor, afterBinding ? 'executor' : null);
+      assert.equal((await f.read(task.id)).body.result.assignee, afterBinding ? 'assignee' : null);
       assert.equal(f.calls.filter(entry => entry.name === 'prompt').length, 0);
       f.meta = idle;
       f.restart();
@@ -400,12 +398,12 @@ test('native observations do not collect capabilities and explicit checks do not
   const f = fixture();
   try {
     const adapter = createHostAdapter(f.host);
-    await adapter.observe('executor');
+    await adapter.observe('assignee');
     assert.deepEqual(f.calls.map(call => call.name), ['session/get']);
-    assert.equal((await adapter.inspect('executor')).ready, true);
-    f.capability = { sessionId: 'executor', loaded: true, ready: false, roles: [], reasons: ['MCP disconnected'] };
-    assert.equal((await adapter.inspect('executor')).ready, false);
-    await adapter.observe('executor');
+    assert.equal((await adapter.inspect('assignee')).ready, true);
+    f.capability = { sessionId: 'assignee', loaded: true, ready: false, roles: [], reasons: ['MCP disconnected'] };
+    assert.equal((await adapter.inspect('assignee')).ready, false);
+    await adapter.observe('assignee');
     assert.deepEqual(f.calls.map(call => call.name), [
       'session/get', 'roles/readiness', 'session/get', 'roles/readiness', 'session/get', 'session/get',
     ]);
@@ -415,9 +413,9 @@ test('native observations do not collect capabilities and explicit checks do not
 test('native observation distinguishes a missing session and an unavailable host', async () => {
   const f = fixture();
   try {
-    const id = (await f.write('task_create', { owner: 'owner', title: 'Native', description: 'Observe current state' })).body.result.task_id;
+    const id = (await f.write('task_create', { title: 'Native', description: 'Observe current state' })).body.result.task_id;
     const task = (await f.read(id)).body.result;
-    await f.write('task_assign', { task_id: id, executor: 'executor', revision: 1, write_context: task.write_context });
+    await f.write('task_assign', { task_id: id, assignee: 'assignee', revision: 1, write_context: task.write_context });
     f.meta = null;
     const missing = (await f.native(id)).body;
     assert.equal(missing.available, false);

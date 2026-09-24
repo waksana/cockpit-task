@@ -11,7 +11,7 @@ test('reopen public schema requires a full explicit revision agreement and exclu
   const { client } = await fixture(t);
   const schema = (await client.listTools()).tools.find(tool => tool.name === 'task_reopen').inputSchema;
   const input = {
-    actor_session_id: 'executor', request_id: 'rework', task_id, write_context: 'context',
+    request_id: 'rework', task_id, write_context: 'context',
     revision: 1, description: 'Full revised agreement', reason: 'User requested rework',
   };
   assert.deepEqual(schema.required, Object.keys(input));
@@ -25,7 +25,7 @@ test('reopen public schema requires a full explicit revision agreement and exclu
     assert.equal((await client.callTool({ name: 'task_reopen', arguments: missing })).isError, true, key);
   }
   for (const change of [
-    { executor: 'replacement' }, { owner: 'replacement' }, { status: 'todo' },
+    { assignee: 'replacement' }, { orchestrator: 'replacement' }, { status: 'todo' },
     { description: '' }, { reason: ' ' }, { description: 'x'.repeat(24001) },
   ]) assert.equal((await client.callTool({ name: 'task_reopen', arguments: { ...input, ...change } })).isError, true);
 });
@@ -56,11 +56,11 @@ test('official MCP tools/list publishes all Task read selectors and a required v
   assert.equal(schema.additionalProperties, false);
   assert.deepEqual(schema.required, ['view']);
   assert.deepEqual(Object.keys(schema.properties).sort(), [
-    'actor_session_id', 'cursor', 'executor', 'include', 'limit', 'offset', 'owner', 'parent_task_id', 'query',
+    'cursor', 'assignee', 'include', 'limit', 'offset', 'orchestrator', 'parent_task_id', 'query',
     'request_id', 'retro', 'revision', 'status', 'task_id', 'view',
   ].sort());
   assert.deepEqual(schema.properties.view.enum, [
-    'list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'automation_log', 'operation',
+    'list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'update_notices', 'automation_log', 'operation',
   ]);
   assert.equal(schema.properties.task_id.type, 'string');
   assert.equal(schema.properties.task_id.format, 'uuid');
@@ -72,7 +72,7 @@ test('official MCP tools/list publishes all Task read selectors and a required v
   assert.deepEqual(schema.properties.retro.enum, ['unhandled', 'watching']);
   const handle = listed.tools.find(tool => tool.name === 'task_retro_handle').inputSchema;
   assert.deepEqual(handle.properties.status.enum, ['fixed', 'followup', 'watching', 'dismissed']);
-  assert.deepEqual([...handle.required].sort(), ['actor_session_id', 'note', 'outcome_id', 'request_id', 'status', 'task_id']);
+  assert.deepEqual([...handle.required].sort(), ['note', 'outcome_id', 'request_id', 'status', 'task_id']);
   for (const tool of listed.tools) assert.ok(Object.keys(tool.inputSchema.properties).length > 0, tool.name);
 });
 
@@ -80,7 +80,7 @@ test('official MCP tools/call retains strict per-view requirements despite the p
   const { client, calls } = await fixture(t);
   const valid = [
     { view: 'list' },
-    { view: 'list', actor_session_id: 'executor', owner: 'owner', executor: 'executor', status: 'unfinished', query: 'word', limit: 50 },
+    { view: 'list', orchestrator: 'orchestrator', assignee: 'assignee', status: 'unfinished', query: 'word', limit: 50 },
     ...['overview', 'execution', 'definition'].map(view => ({ view, task_id })),
     { view: 'overview', task_id, include: ['context'] },
     { view: 'overview', task_id, include: ['activity', 'outcome', 'retro'] },
@@ -107,7 +107,7 @@ test('official MCP tools/call retains strict per-view requirements despite the p
     { view: 'overview', task_id, include: ['summary'] },
     { view: 'overview', task_id, include: ['activity'], cursor: 'cursor' },
     { view: 'execution', task_id, include: ['context'] },
-    { view: 'execution', task_id, owner: 'owner' },
+    { view: 'execution', task_id, orchestrator: 'orchestrator' },
     { view: 'definition', task_id, revision: 1 },
     { view: 'changelog', task_id, revision: 1, limit: 1 },
     { view: 'changelog', task_id, revision: 1, cursor: 'cursor' },
@@ -116,7 +116,7 @@ test('official MCP tools/call retains strict per-view requirements despite the p
     { view: 'subscriptions', task_id, limit: 11 }, { view: 'subscriptions' },
     { view: 'subscriptions', task_id, status: 'done' },
     { view: 'operation' }, { view: 'operation', request_id: 'id', task_id },
-    { view: 'list', actor_session_id: '' },
+    { view: 'list', actor: '' },
   ];
   for (const input of invalid) {
     assert.equal(schemas.task_read.safeParse(input).success, false);
@@ -132,16 +132,16 @@ test('official MCP publishes optional selections for both preparation entrypoint
   const listed = await client.listTools();
   for (const [name, target] of [['task_session_create', 'cwd'], ['task_session_prepare', 'session_id']]) {
     const schema = listed.tools.find(tool => tool.name === name).inputSchema;
-    assert.deepEqual(schema.required, ['actor_session_id', 'request_id', target]);
+    assert.deepEqual(schema.required, ['request_id', target]);
     assert.deepEqual(Object.keys(schema.properties).sort(), [
-      'actor_session_id', 'request_id', target, 'skills', 'mcp_servers',
+      'request_id', target, 'skills', 'mcp_servers',
     ].sort());
     assert.equal(schema.additionalProperties, false);
     assert.equal(schema.properties.skills.maxItems, 64);
     assert.equal(schema.properties.mcp_servers.maxItems, 64);
     assert.equal(schema.properties.mcp_servers.items.properties.tools.maxItems, 256);
     const input = {
-      actor_session_id: 'owner', request_id: name, [target]: 'synthetic',
+      request_id: name, [target]: 'synthetic',
       skills: ['synthetic-work'], mcp_servers: [{ name: 'synthetic-tools', tools: ['read'] }],
     };
     const response = await client.callTool({ name, arguments: input });
@@ -157,7 +157,7 @@ test('official MCP publishes nullable bounded retro and requires explicit comple
   assert.match(schema.properties.retro.description, /Required with done only/);
   assert.ok(schema.properties.retro.anyOf.some(branch => branch.type === 'null'));
   assert.ok(schema.properties.retro.anyOf.some(branch => branch.type === 'string' && branch.maxLength === 2000));
-  const base = { actor_session_id: 'executor', request_id: 'retro-schema', task_id, write_context: 'context', revision: 1 };
+  const base = { request_id: 'retro-schema', task_id, write_context: 'context', revision: 1 };
   const completed = { ...base, status: 'done', outcome: { summary: 'Delivered' } };
   for (const input of [
     completed, { ...completed, retro: '' }, { ...completed, retro: ' \n' },

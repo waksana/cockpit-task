@@ -25,12 +25,12 @@ function fixture({ ready = true, platform } = {}) {
   let request = 0;
   const sent = [], errors = [];
   const open = () => {
-    service = new TaskService(store, { ownerExists: async () => true, send: async (id, text) => { sent.push({ id, text }); return { ok: true, queued: false }; } },
+    service = new TaskService(store, { sessionExists: async () => true, send: async (id, text) => { sent.push({ id, text }); return { ok: true, queued: false }; } },
       { report: error => errors.push(error) });
     if (ready) service.automation.recover();
   };
   open();
-  const write = (name, input = {}) => service.execute(name, { actor_session_id: 'owner', request_id: `auto-${++request}`, ...input });
+  const write = (name, input = {}) => service.execute(name, { actor: 'orchestrator', request_id: `auto-${++request}`, ...input });
   const change = (name, id, input = {}) => write(name, {
     task_id: id, write_context: store.task(id).write_context,
     ...(['task_automation_start', 'task_edit', 'task_ack', 'task_report', 'task_assign'].includes(name) ? { revision: store.task(id).revision } : {}),
@@ -51,7 +51,7 @@ function fixture({ ready = true, platform } = {}) {
     },
     async create(script_id, parameters = {}) {
       const result = await write('task_create', {
-        title: 'Automation test', description: 'Run only this synthetic script', owner: 'owner',
+        title: 'Automation test', description: 'Run only this synthetic script',
         automation: { script_id, parameters },
       });
       assert.equal(result.error, null, JSON.stringify(result));
@@ -96,7 +96,7 @@ test('registration/create do not execute; typed literal argv, optional pre-subsc
     await delay(30);
     const task = f.store.task(id);
     assert.equal(task.kind, 'automation');
-    assert.equal(task.executor, null);
+    assert.equal(task.assignee, null);
     assert.equal(task.acknowledged_revision, null);
     assert.equal(task.automation.state, 'created');
     assert.deepEqual(task.automation.parameters, values);
@@ -118,13 +118,13 @@ test('registration/create do not execute; typed literal argv, optional pre-subsc
     assert.match(log.text, /stderr/);
     const outcomes = f.store.read({ view: 'outcomes', task_id: id }).items;
     assert.equal(outcomes.length, 1);
-    assert.equal(outcomes[0].executor, null);
+    assert.equal(outcomes[0].assignee, null);
     assert.equal(outcomes[0].source, 'automation');
     assert.deepEqual(outcomes[0].retro, { status: 'not_applicable' });
     assert.equal(outcomes[0].run_id, done.automation.run_id);
     await until(() => f.sent.length === 1);
     assert.equal(f.store.read({ view: 'subscriptions', task_id: id }).items[0].event.source, 'automation');
-    assert.equal(f.store.read({ view: 'subscriptions', task_id: id }).items[0].event.actor_session_id, null);
+    assert.equal(f.store.read({ view: 'subscriptions', task_id: id }).items[0].event.actor, null);
     assert.equal(f.store.definitionCheck({ task_id: id }).tasks[0].needs_ack, false);
     assert.deepEqual(f.errors, []);
   } finally { await f.close(); }
@@ -144,7 +144,7 @@ test('slow notification delivery cannot stall the execution queue or unrelated r
     assert.equal((await f.finished(first)).status, 'done');
     assert.equal((await f.finished(second)).status, 'done');
     assert.equal(f.store.read({ view: 'subscriptions', task_id: first }).items[0].notification.status, 'unknown');
-    assert.equal((await f.service.execute('task_script_read', {})).result.items.length, 1);
+    assert.equal((await f.service.execute('task_script_read', {}, { actor: 'orchestrator' })).result.items.length, 1);
     release();
     await until(() => f.store.read({ view: 'subscriptions', task_id: first }).items[0].notification.status === 'accepted');
   } finally { release(); await f.close(); }
@@ -162,7 +162,7 @@ test('strict script catalog and parameters reject changes, unknown fields and mi
     assert.equal((await f.write('task_script_register', definition)).error.code, 'SCRIPT_EXISTS');
     for (const parameters of [{}, { count: '3' }, { count: 3, extra: true }]) {
       assert.equal((await f.write('task_create', {
-        title: 'Bad', description: 'Bad', owner: 'owner', automation: { script_id: 'catalog', parameters },
+        title: 'Bad', description: 'Bad', automation: { script_id: 'catalog', parameters },
       })).error.code, 'INVALID_PARAMETERS');
     }
     assert.equal(f.store.read({ view: 'list' }).items.length, 0);
@@ -170,7 +170,7 @@ test('strict script catalog and parameters reject changes, unknown fields and mi
     const id = await f.create('catalog', { count: 1 });
     for (const name of ['task_ack', 'task_report', 'task_assign']) {
       const extra = name === 'task_report' ? { status: 'done', outcome: { summary: 'Forged' }, retro: null }
-        : name === 'task_assign' ? { executor: 'fake' } : {};
+        : name === 'task_assign' ? { assignee: 'fake' } : {};
       assert.equal((await f.change(name, id, extra)).error.code, 'AUTOMATION_MANAGED');
     }
     assert.equal((await f.change('task_edit', id, { reason: 'Clarify before start', description: 'Updated agreement' })).error, null);
@@ -200,12 +200,12 @@ test('non-Linux platforms reject registration, automation creation and start ear
         assert.match(result.error.message, /Linux or WSL2/);
         assert.match(result.error.message, new RegExp(platform));
       };
-      const register = { actor_session_id: 'owner', request_id: `register-${platform}`, ...definition };
+      const register = { actor: 'orchestrator', request_id: `register-${platform}`, ...definition };
       expectRejected(await f.service.execute('task_script_register', register));
       expectRejected(await f.service.execute('task_script_register', register));
       expectRejected(await f.service.execute('task_script_register', { ...register, request_id: `register-existing-${platform}`, script_id: 'existing' }));
       const create = {
-        actor_session_id: 'owner', request_id: `create-${platform}`, title: 'Automation', description: 'Blocked', owner: 'owner',
+        actor: 'orchestrator', request_id: `create-${platform}`, title: 'Automation', description: 'Blocked',
         automation: { script_id: 'existing', parameters: {} },
       };
       expectRejected(await f.service.execute('task_create', create));
@@ -217,13 +217,13 @@ test('non-Linux platforms reject registration, automation creation and start ear
       assert.equal(f.store.task(existing).kind, 'automation');
       assert.equal(f.store.task(existing).status, 'todo');
       assert.equal(f.store.automation.run(existing).state, 'created');
-      const agent = await f.write('task_create', { title: 'Agent', description: 'Ordinary work', owner: 'owner' });
+      const agent = await f.write('task_create', { title: 'Agent', description: 'Ordinary work' });
       assert.equal(agent.error, null, JSON.stringify(agent));
       assert.equal(f.store.task(agent.result.task_id).kind, 'agent');
     }
     await f.restart({ platform: 'linux' });
     assert.equal((await f.service.execute('task_script_register', {
-      actor_session_id: 'owner', request_id: 'register-linux', ...definition,
+      actor: 'orchestrator', request_id: 'register-linux', ...definition,
     })).error, null);
     const id = await f.create('fresh');
     await f.start(id);
@@ -283,7 +283,7 @@ test('queue is serial, HTTP-style reads remain responsive, definitions freeze, a
     await until(() => f.store.automation.run(first).state === 'running');
     await f.start(second);
     await f.start(third);
-    const read = await f.service.execute('task_read', { view: 'execution', task_id: first });
+    const read = await f.service.execute('task_read', { view: 'execution', task_id: first }, { actor: 'orchestrator' });
     assert.equal(read.error, null);
     assert.equal(f.store.automation.run(second).state, 'queued');
     for (const id of [first, second]) {
@@ -421,27 +421,22 @@ test('changing group membership cannot look absent while descendants fork and pa
   }
 });
 
-test('v2 migration preserves Agent outcomes and defaults while allowing null-Executor service outcomes', async () => {
+test('v2 migration preserves Agent outcomes and defaults while allowing null-Assignee service outcomes', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'automation-migration-'));
   let store;
   try {
     store = new TaskStore(directory);
-    const task = store.executeLocal('task_create', { owner: 'owner', actor_session_id: 'owner', request_id: 'old', title: 'Agent', description: 'Existing' });
-    store.db.exec(`
-      DROP TABLE automation_runs; DROP TABLE scripts;
-      ALTER TABLE tasks DROP COLUMN kind;
-      ALTER TABLE outcomes DROP COLUMN run_id;
-      PRAGMA user_version=2;
-    `);
-    store.db.prepare('INSERT INTO outcomes(id,task_id,revision,executor,author,summary,refs,at) VALUES(?,?,?,?,?,?,?,?)')
-      .run('old-outcome', task.task_id, 1, 'executor', 'executor', 'Legacy result', '[]', new Date().toISOString());
+    const task = store.executeLocal('task_create', { actor: 'orchestrator', request_id: 'old', title: 'Agent', description: 'Existing' });
+    store.db.prepare('INSERT INTO outcomes(id,task_id,revision,assignee,author,summary,refs,at) VALUES(?,?,?,?,?,?,?,?)')
+      .run('old-outcome', task.task_id, 1, 'assignee', 'assignee', 'Legacy result', '[]', new Date().toISOString());
     store.close();
+    store = null;
     store = new TaskStore(directory);
     assert.equal(store.task(task.task_id).kind, 'agent');
     assert.equal(store.task(task.task_id).automation, null);
     assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items[0].summary, 'Legacy result');
     assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items[0].source, 'reported');
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 8);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 9);
     assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
   } finally {
     store?.close();
@@ -455,7 +450,7 @@ test('automation respects blocked_by: start waits for readiness and a finished b
     await f.register('dependency', 'console.log("done");');
     const blocker = await f.create('dependency');
     const created = await f.write('task_create', {
-      title: 'Dependent automation', description: 'Runs after the blocker', owner: 'owner',
+      title: 'Dependent automation', description: 'Runs after the blocker',
       automation: { script_id: 'dependency', parameters: {} }, blocked_by: [blocker],
     });
     assert.equal(created.error, null, JSON.stringify(created));
@@ -465,7 +460,7 @@ test('automation respects blocked_by: start waits for readiness and a finished b
     await f.start(blocker);
     assert.equal((await f.finished(blocker)).status, 'done');
     await until(() => f.sent.length === 1);
-    assert.deepEqual(f.sent, [{ id: 'owner', text: `[As Owner: Task ready](task:${dependent}?event=ready)` }]);
+    assert.deepEqual(f.sent, [{ id: 'orchestrator', text: `[Subtask ready](task:${dependent}?event=ready)` }]);
     const [notice] = f.store.read({ view: 'dependency_notices', task_id: dependent }).items;
     assert.equal(notice.event.source, 'automation');
     assert.equal(f.store.task(dependent).status, 'todo', 'ready never starts automation');
@@ -475,18 +470,18 @@ test('automation respects blocked_by: start waits for readiness and a finished b
   } finally { await f.close(); }
 });
 
-test('an automation child reaching done or blocked notifies the executing parent Owner once', async () => {
+test('an automation child reaching done or blocked notifies the executing parent Orchestrator once', async () => {
   const f = fixture();
   try {
-    // Make 'owner' execute an Agent Task so its automation Tasks become children.
-    const root = f.store.executeLocal('task_create', { actor_session_id: 'user', request_id: 'parent', owner: 'user', title: 'Parent', description: 'Coordinate' }).task_id;
-    const assign = { actor_session_id: 'user', request_id: 'parent-assign', task_id: root, write_context: f.store.task(root).write_context, revision: 1, executor: 'owner' };
+    // Make 'orchestrator' execute an Agent Task so its automation Tasks become children.
+    const root = f.store.executeLocal('task_create', { actor: 'user', request_id: 'parent', title: 'Parent', description: 'Coordinate' }).task_id;
+    const assign = { actor: 'user', request_id: 'parent-assign', task_id: root, write_context: f.store.task(root).write_context, revision: 1, assignee: 'orchestrator' };
     f.store.reserveOperation('task_assign', assign);
     f.store.bindAssignment(assign);
-    f.store.executeLocal('task_ack', { actor_session_id: 'owner', request_id: 'parent-ack', task_id: root, revision: 1, write_context: f.store.task(root).write_context });
+    f.store.executeLocal('task_ack', { actor: 'orchestrator', request_id: 'parent-ack', task_id: root, revision: 1, write_context: f.store.task(root).write_context });
     await f.register('ok', 'console.log("ok")');
     await f.register('bad', 'process.exit(3)');
-    const cards = () => f.sent.filter(entry => entry.id === 'owner').map(entry => entry.text);
+    const cards = () => f.sent.filter(entry => entry.id === 'orchestrator').map(entry => entry.text);
     const ok = await f.create('ok');
     assert.equal(f.store.task(ok).parent_task_id, root);
     await f.start(ok);
@@ -497,18 +492,18 @@ test('an automation child reaching done or blocked notifies the executing parent
     assert.equal((await f.finished(bad)).status, 'blocked');
     await until(() => cards().length === 2);
     assert.deepEqual(cards(), [
-      `[As Owner: child Task done](task:${ok}?event=child_done)`,
-      `[As Owner: child Task blocked](task:${bad}?event=child_blocked)`,
+      `[Subtask done](task:${ok}?event=child_done)`,
+      `[Subtask blocked](task:${bad}?event=child_blocked)`,
     ]);
     const [notice] = f.store.read({ view: 'child_notices', task_id: ok }).items;
     assert.equal(notice.event.source, 'automation');
-    assert.equal(notice.event.actor_session_id, null);
+    assert.equal(notice.event.actor, null);
     assert.equal(notice.parent_task_id, root);
     const queued = await f.create('ok');
     const cancelled = await f.write('task_cancel', { task_id: queued, write_context: f.store.task(queued).write_context, reason: 'Not needed' });
     assert.equal(cancelled.error, null);
     await until(() => cards().length === 3);
-    assert.equal(cards()[2], `[As Owner: child Task cancelled](task:${queued}?event=child_cancelled)`);
+    assert.equal(cards()[2], `[Subtask cancelled](task:${queued}?event=child_cancelled)`);
     assert.equal(f.store.read({ view: 'child_notices', task_id: queued }).items.length, 1, 'Automation cancellation notifies once');
   } finally { await f.close(); }
 });

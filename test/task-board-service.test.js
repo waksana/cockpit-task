@@ -7,25 +7,35 @@ import { join } from 'node:path';
 import { TaskStore } from '../src/task-board/store.js';
 import { TaskService } from '../src/task-board/service.js';
 
+function testService(store, host, options) {
+  const service = new TaskService(store, host, options);
+  const execute = service.execute.bind(service);
+  service.execute = (name, input = {}, callOptions = {}) => {
+    const { actor, ...fields } = input;
+    return execute(name, fields, { ...callOptions, actor: callOptions.actor ?? actor ?? 'orchestrator' });
+  };
+  return service;
+}
+
 function fixture(host = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'task-board-service-'));
   const store = new TaskStore(directory);
   const sent = [];
   const reports = [];
-  const service = new TaskService(store, {
-    create: async () => ({ sessionId: 'executor' }),
+  const service = testService(store, {
+    create: async () => ({ sessionId: 'assignee' }),
     inspect: async () => ({ ready: true, idle: true }),
     send: async (id, text) => { sent.push({ id, text }); return { ok: true, queued: false }; },
     ...host,
   }, { report: error => reports.push(error) });
   let sequence = 0;
-  const write = (name, input, actor = 'owner') => service.execute(name, {
-    request_id: `request-${++sequence}`, actor_session_id: actor, ...input,
-  });
+  const write = (name, input, actor = 'orchestrator') => service.execute(name, {
+    request_id: `request-${++sequence}`, ...input,
+  }, { actor });
   return {
     directory, store, service, sent, reports, write,
     async create() {
-      const result = await write('task_create', { owner: 'owner', title: 'Synthetic Task', description: 'Complete the work' });
+      const result = await write('task_create', { title: 'Synthetic Task', description: 'Complete the work' });
       assert.equal(result.error, null);
       return store.task(result.result.task_id);
     },
@@ -38,32 +48,32 @@ test('Task service integrates assignment, ACK, revision reminders and partial re
   try {
     const task = await f.create();
     const assigned = await f.write('task_assign', {
-      task_id: task.id, executor: 'executor', revision: 1, write_context: task.write_context,
+      task_id: task.id, assignee: 'assignee', revision: 1, write_context: task.write_context,
     });
     assert.equal(assigned.error, null);
     assert.equal(assigned.result.operation.message, 'accepted');
-    assert.match(assigned.definition_check.tasks[0].message, /Awaiting the assigned Executor's acknowledgement/);
+    assert.match(assigned.definition_check.tasks[0].message, /Awaiting the assignee's acknowledgement/);
     assert.doesNotMatch(assigned.definition_check.tasks[0].message, /read it and acknowledge it/);
     assert.equal(f.sent.length, 1);
     const bound = f.store.task(task.id);
-    const ack = await f.write('task_ack', { task_id: task.id, revision: 1, write_context: bound.write_context }, 'executor');
+    const ack = await f.write('task_ack', { task_id: task.id, revision: 1, write_context: bound.write_context }, 'assignee');
     assert.equal(ack.result.task_status, 'todo');
-    await f.write('task_report', { task_id: task.id, revision: 1, write_context: bound.write_context, status: 'in_progress' }, 'executor');
+    await f.write('task_report', { task_id: task.id, revision: 1, write_context: bound.write_context, status: 'in_progress' }, 'assignee');
     const current = f.store.task(task.id);
     await f.write('task_edit', { task_id: task.id, revision: 1, write_context: current.write_context, description: 'Updated complete work', reason: 'Clarified scope' });
     const report = {
-      request_id: 'old-activity', actor_session_id: 'executor', task_id: task.id,
+      request_id: 'old-activity', actor: 'assignee', task_id: task.id,
       revision: 1, write_context: current.write_context,
       activity: { text: 'Work performed before the update' }, status: 'done', outcome: { summary: 'Old result' }, retro: null,
     };
     const partial = await f.service.execute('task_report', report);
     assert.equal(partial.error.code, 'DESCRIPTION_UPDATED');
-    assert.match(partial.error.message, /acknowledgement belongs to the assigned Executor/);
+    assert.match(partial.error.message, /acknowledgement belongs to the assignee/);
     assert.equal(partial.definition_check.tasks[0].needs_ack, true);
-    assert.match(partial.definition_check.tasks[0].message, /changed; awaiting the assigned Executor's acknowledgement/);
+    assert.match(partial.definition_check.tasks[0].message, /changed; awaiting the assignee's acknowledgement/);
     assert.equal(f.store.task(task.id).status, 'in_progress');
     const updated = f.store.task(task.id);
-    await f.write('task_ack', { task_id: task.id, revision: 2, write_context: updated.write_context }, 'executor');
+    await f.write('task_ack', { task_id: task.id, revision: 2, write_context: updated.write_context }, 'assignee');
     const replay = await f.service.execute('task_report', report);
     assert.deepEqual(replay.result, partial.result);
     assert.equal(replay.definition_check.tasks[0].needs_ack, false);
@@ -83,24 +93,24 @@ test('failed dispatch observations survive restart and replay without becoming l
   try {
     const task = await f.create();
     const request = {
-      request_id: 'busy-receipt', actor_session_id: 'owner', task_id: task.id,
-      revision: 1, executor: 'executor', write_context: task.write_context,
+      request_id: 'busy-receipt', actor: 'orchestrator', task_id: task.id,
+      revision: 1, assignee: 'assignee', write_context: task.write_context,
     };
     const first = await f.service.execute('task_assign', request);
-    assert.equal(first.error.code, 'EXECUTOR_NOT_READY');
+    assert.equal(first.error.code, 'SESSION_NOT_READY');
     assert.deepEqual(first.result.operation.details, details);
     assert.equal(first.result.operation.assignment, 'not_applied');
     assert.equal(first.result.operation.message, 'not_sent');
-    assert.equal(f.store.task(task.id).executor, null);
+    assert.equal(f.store.task(task.id).assignee, null);
     f.service.close();
-    replacement = new TaskService(new TaskStore(f.directory), {
+    replacement = testService(new TaskStore(f.directory), {
       inspect: () => assert.fail('Receipt replay must not inspect current availability'),
       send: () => assert.fail('Receipt replay must not send'),
     });
     const replay = await replacement.execute('task_assign', request);
     assert.deepEqual(replay.result, first.result);
     const read = await replacement.execute('task_read', {
-      view: 'operation', request_id: request.request_id, actor_session_id: 'owner',
+      view: 'operation', request_id: request.request_id, actor: 'orchestrator',
     });
     assert.deepEqual(read.result.result.operation.details, details);
     assert.equal(f.sent.length, 0);
@@ -113,11 +123,11 @@ test('unknown dispatch stays unknown across service restart and cannot be resent
   let replacement;
   try {
     const task = await f.create();
-    const request = { request_id: 'unknown-send', actor_session_id: 'owner', task_id: task.id, revision: 1, executor: 'executor', write_context: task.write_context };
+    const request = { request_id: 'unknown-send', actor: 'orchestrator', task_id: task.id, revision: 1, assignee: 'assignee', write_context: task.write_context };
     const first = await f.service.execute('task_assign', request);
     assert.equal(first.result.operation.message, 'unknown');
     f.service.close();
-    replacement = new TaskService(new TaskStore(f.directory), {
+    replacement = testService(new TaskStore(f.directory), {
       inspect: () => assert.fail('replay must not inspect'), send: () => assert.fail('replay must not send'),
     });
     const replay = await replacement.execute('task_assign', request);
@@ -135,14 +145,14 @@ test('a confirmed not-sent assignment can resume explicitly without rebinding', 
   try {
     const task = await f.create();
     const first = await f.service.execute('task_assign', {
-      request_id: 'not-sent', actor_session_id: 'owner', task_id: task.id,
-      executor: 'executor', revision: 1, write_context: task.write_context,
+      request_id: 'not-sent', actor: 'orchestrator', task_id: task.id,
+      assignee: 'assignee', revision: 1, write_context: task.write_context,
     });
     assert.equal(first.result.operation.message, 'not_sent');
     assert.equal(first.result.operation.assignment, 'applied');
     const bound = f.store.task(task.id);
     const resumed = await f.write('task_assign', {
-      task_id: task.id, executor: 'executor', revision: 1,
+      task_id: task.id, assignee: 'assignee', revision: 1,
       write_context: bound.write_context, resume_request_id: 'not-sent',
     });
     assert.equal(resumed.error, null);
@@ -157,15 +167,15 @@ test('failed-operation reads retain their Task and check its current definition 
   let replacement;
   try {
     const task = await f.create();
-    await f.write('task_assign', { task_id: task.id, executor: 'executor', revision: 1, write_context: task.write_context });
+    await f.write('task_assign', { task_id: task.id, assignee: 'assignee', revision: 1, write_context: task.write_context });
     const bound = f.store.task(task.id);
     const failed = await f.service.execute('task_report', {
-      request_id: 'report-before-ack', actor_session_id: 'executor', task_id: task.id,
+      request_id: 'report-before-ack', actor: 'assignee', task_id: task.id,
       revision: 1, write_context: bound.write_context, status: 'in_progress',
     });
     assert.equal(failed.error.code, 'ACK_REQUIRED');
     assert.equal(failed.result, null);
-    const read = { view: 'operation', request_id: 'report-before-ack', actor_session_id: 'owner' };
+    const read = { view: 'operation', request_id: 'report-before-ack', actor: 'orchestrator' };
     const operation = await f.service.execute('task_read', read);
     assert.equal(operation.error, null);
     assert.equal(operation.result.task_id, task.id);
@@ -175,7 +185,7 @@ test('failed-operation reads retain their Task and check its current definition 
     assert.equal(operation.definition_check.tasks[0].task_id, task.id);
     assert.equal(operation.definition_check.tasks[0].needs_ack, true);
 
-    await f.write('task_ack', { task_id: task.id, revision: 1, write_context: bound.write_context }, 'executor');
+    await f.write('task_ack', { task_id: task.id, revision: 1, write_context: bound.write_context }, 'assignee');
     const acknowledged = await f.service.execute('task_read', read);
     assert.equal(acknowledged.result.error.code, 'ACK_REQUIRED');
     assert.equal(acknowledged.definition_check.tasks[0].needs_ack, false);
@@ -184,7 +194,7 @@ test('failed-operation reads retain their Task and check its current definition 
       description: 'New complete requirements', reason: 'Scope clarified',
     });
     f.service.close();
-    replacement = new TaskService(new TaskStore(f.directory), {});
+    replacement = testService(new TaskStore(f.directory), {});
     const restored = await replacement.execute('task_read', read);
     assert.deepEqual(restored.result, operation.result);
     assert.equal(restored.definition_check.tasks[0].revision, 2);
@@ -193,18 +203,18 @@ test('failed-operation reads retain their Task and check its current definition 
   } finally { replacement?.close(); f.close(); }
 });
 
-test('business validation failures and unrelated reads still check the acting Executor Task', async () => {
+test('business validation failures and unrelated reads still check the acting Assignee Task', async () => {
   const f = fixture();
   try {
     const task = await f.create();
-    await f.write('task_assign', { task_id: task.id, executor: 'executor', revision: 1, write_context: task.write_context });
+    await f.write('task_assign', { task_id: task.id, assignee: 'assignee', revision: 1, write_context: task.write_context });
     const failure = await f.service.execute('task_report', {
-      actor_session_id: 'executor', task_id: task.id, request_id: 'malformed',
+      actor: 'assignee', task_id: task.id, request_id: 'malformed',
       write_context: f.store.task(task.id).write_context, revision: 1, status: 'done', retro: null,
     });
     assert.equal(failure.error.code, 'INVALID_INPUT');
     assert.equal(failure.definition_check.tasks[0].needs_ack, true);
-    const list = await f.service.execute('task_read', { view: 'list', owner: 'unrelated', actor_session_id: 'executor' });
+    const list = await f.service.execute('task_read', { view: 'list', orchestrator: 'unrelated', actor: 'assignee' });
     assert.equal(list.result.items.length, 0);
     assert.equal(list.definition_check.tasks[0].task_id, task.id);
   } finally { f.close(); }
@@ -224,7 +234,7 @@ test('module close drains admitted external calls, persists their outcome and re
     f.service.close();
     const rejected = await f.service.execute('task_read', { view: 'list' });
     assert.equal(rejected.error.code, 'MODULE_CLOSING');
-    finish({ sessionId: 'executor' });
+    finish({ sessionId: 'assignee' });
     const completed = await pending;
     assert.equal(completed.result.operation.creation, 'created');
     const reopened = new TaskStore(f.directory);
@@ -239,11 +249,39 @@ test('Task storage is private and a newer schema is rejected rather than overwri
     assert.equal(statSync(join(f.directory, 'task-board.sqlite')).mode & 0o777, 0o600);
     f.service.close();
     const future = new DatabaseSync(join(f.directory, 'task-board.sqlite'));
-    future.exec('PRAGMA user_version=9');
+    future.exec('PRAGMA user_version=10');
     future.close();
     assert.throws(() => new TaskStore(f.directory), error => error.code === 'SCHEMA_TOO_NEW');
     const unchanged = new DatabaseSync(join(f.directory, 'task-board.sqlite'));
-    try { assert.equal(unchanged.prepare('PRAGMA user_version').get().user_version, 9); }
+    try { assert.equal(unchanged.prepare('PRAGMA user_version').get().user_version, 10); }
     finally { unchanged.close(); }
   } finally { f.close(); }
+});
+
+test('subagent invocations attribute to the containing session and replay by session actor', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'task-board-service-invocation-'));
+  const store = new TaskStore(directory);
+  const service = new TaskService(store, {});
+  try {
+    const invocation = { sessionId: 'container', runtimeSessionId: 'subagent-a', subagent: true, agentName: 'worker-a' };
+    const input = { request_id: 'subagent-create', title: 'Subagent Task', description: 'Record invocation' };
+    const created = await service.execute('task_create', input, { invocation });
+    assert.equal(created.error, null);
+    assert.equal(store.task(created.result.task_id).orchestrator, 'container');
+    const replay = await service.execute('task_create', input, {
+      invocation: { sessionId: 'container', runtimeSessionId: 'subagent-b', subagent: true, agentName: 'worker-b' },
+    });
+    assert.deepEqual(replay.result, created.result);
+    assert.equal(replay.error, null);
+    const conflict = await service.execute('task_create', input, {
+      invocation: { sessionId: 'other-container', runtimeSessionId: 'subagent-c', subagent: true, agentName: 'worker-c' },
+    });
+    assert.equal(conflict.error.code, 'REQUEST_ID_CONFLICT');
+    const operation = await service.execute('task_read', { view: 'operation', request_id: input.request_id }, { actor: 'container' });
+    assert.equal(operation.result.actor, 'container');
+    assert.deepEqual(operation.result.invocation, invocation);
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

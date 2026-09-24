@@ -19,7 +19,7 @@ import {
 const taskId = 'd10c0c92-3580-4cdd-85bf-d7fcf22ab3ff';
 const input = { view: 'overview', task_id: taskId };
 const result = {
-  id: taskId, title: 'Synthetic Task', owner: 'synthetic-owner', executor: null,
+  id: taskId, title: 'Synthetic Task', orchestrator: 'synthetic-orchestrator', assignee: null,
   status: 'todo', revision: 1, acknowledged_revision: null, activity: null,
 };
 const response = (data = result, error = null, status = 200) =>
@@ -107,7 +107,7 @@ test('Task references claim only exact link targets with canonical UUIDs', () =>
 test('reference URLs allow only explicit safe protocols and no credentials', () => {
   assert.equal(safeReferenceHref('https://example.test/path?q=one#two'), 'https://example.test/path?q=one#two');
   assert.equal(safeReferenceHref('http://example.test'), 'http://example.test/');
-  assert.equal(safeReferenceHref('mailto:owner@example.test'), 'mailto:owner@example.test');
+  assert.equal(safeReferenceHref('mailto:orchestrator@example.test'), 'mailto:orchestrator@example.test');
   for (const target of [
     'javascript:alert(1)', 'JaVaScRiPt:alert(1)', 'data:text/html,hello', 'file:///etc/passwd',
     'blob:https://example.test/123', '//example.test/path', '/relative', 'https://user:pass@example.test',
@@ -153,7 +153,7 @@ test('activation requires public compatibility and preserves native fallback on 
     assert.equal(renderer.matches(node), true);
     assert.equal(renderer.component({ node, fallback }).props.event, event);
   }
-  const unknown = { kind: 'link', target: `task:${taskId}?event=deleted`, label: 'As Executor: Task assigned to you' };
+  const unknown = { kind: 'link', target: `task:${taskId}?event=deleted`, label: 'Task assigned' };
   assert.equal(renderer.matches(unknown), false);
   assert.equal(renderer.component({ node: unknown, fallback }), fallback);
 });
@@ -181,36 +181,37 @@ test('card event headings come from the message and survive loading, failure and
   };
   const heading = card => card.children.find(child => child?.props?.className === 'tb-card-event');
   assert.equal(render('assigned').props.className, 'ck-button tb-card');
-  assert.deepEqual(heading(render('assigned')).children, ['As Executor: Task assigned to you']);
-  assert.deepEqual(heading(render('status_changed')).children, ['As Owner: Task status updated']);
+  assert.deepEqual(heading(render('assigned')).children, ['Task assigned']);
+  assert.deepEqual(heading(render('status_changed')).children, ['Subtask status changed']);
   snapshot = { phase: 'ready', data: { ...result, status: 'done', revision: 4 }, error: null };
-  assert.deepEqual(heading(render('assigned', 'As Executor: Task updated')).children, ['As Executor: Task assigned to you']);
-  assert.deepEqual(heading(render('updated', 'As Executor: Task assigned to you')).children, ['As Executor: Task updated']);
-  const notification = render('status_changed', 'As Executor: Task updated');
-  assert.deepEqual(heading(notification).children, ['As Owner: Task status updated']);
-  assert.match(heading(notification).props.title, /not an Executor requirement update/);
-  assert.ok(notification.children.some(child => child?.children?.includes('Owner subscription triggered · current state shown below')));
+  assert.deepEqual(heading(render('assigned', 'Task updated')).children, ['Task assigned']);
+  assert.deepEqual(heading(render('updated', 'Task assigned')).children, ['Task updated']);
+  const notification = render('status_changed', 'Task updated');
+  assert.deepEqual(heading(notification).children, ['Subtask status changed']);
+  assert.match(heading(notification).props.title, /not a requirement update for its assignee/);
+  assert.ok(notification.children.some(child => child?.children?.includes('Orchestrator subscription triggered · current state shown below')));
   snapshot = { phase: 'ready', data: { ...result, status: 'in_progress', revision: 5 }, error: null };
-  assert.deepEqual(heading(render('status_changed')).children, ['As Owner: Task status updated']);
-  assert.equal(heading(render(null, 'As Executor: Task updated')), undefined);
+  assert.deepEqual(heading(render('status_changed')).children, ['Subtask status changed']);
+  assert.equal(heading(render(null, 'Task updated')), undefined);
   const ready = render('ready');
-  assert.deepEqual(heading(ready).children, ['As Owner: Task ready']);
+  assert.deepEqual(heading(ready).children, ['Subtask ready']);
   assert.match(heading(ready).props.title, /Nothing was assigned or started/);
-  assert.ok(ready.children.some(child => child?.children?.includes('Dependency notice to Owner · not assigned or started · current state shown below')));
-  assert.deepEqual(heading(render('blocker_cancelled')).children, ['As Owner: Task blocker cancelled']);
+  assert.ok(ready.children.some(child => child?.children?.includes('Dependency notice to orchestrator · not assigned or started · current state shown below')));
+  assert.deepEqual(heading(render('blocker_cancelled')).children, ['Subtask blocker cancelled']);
   for (const status of ['done', 'blocked', 'cancelled']) {
     const child = render(`child_${status}`, 'An unrelated label');
-    assert.deepEqual(heading(child).children, [`As Owner: child Task ${status}`]);
+    assert.deepEqual(heading(child).children, [`Subtask ${status}`]);
     assert.match(heading(child).props.title, /once per transition without a subscription/);
-    assert.ok(child.children.some(entry => entry?.children?.includes('Child Task notice to Owner · integrate before completing the parent · current state shown below')));
+    assert.ok(child.children.some(entry => entry?.children?.includes('Subtask notice to orchestrator · integrate before completing the parent · current state shown below')));
   }
+  assert.deepEqual(heading(render('child_done', 'As Owner: child Task done')).children, ['Subtask done']);
   snapshot = { phase: 'ready', data: { ...result, blocked_by: [{ task_id: taskId, status: 'cancelled' }], ready: false }, error: null };
-  assert.ok(render(null).children.some(child => child?.children?.includes('Blocked by 1 Task · 0 done · 1 cancelled (Owner decision needed) · not ready')));
+  assert.ok(render(null).children.some(child => child?.children?.includes('Blocked by 1 Task · 0 done · 1 cancelled (orchestrator decision needed) · not ready')));
   snapshot = { phase: 'ready', data: { ...result, blocked_by: [], ready: true }, error: null };
   assert.equal(render(null).children.some(child => String(child?.children?.[0] ?? '').startsWith('Blocked by')), false);
   snapshot = { phase: 'missing', data: null, error: new Error('Missing Task') };
-  assert.deepEqual(heading(render('updated')).children, ['As Executor: Task updated']);
-  assert.deepEqual(heading(render('status_changed')).children, ['As Owner: Task status updated']);
+  assert.deepEqual(heading(render('updated')).children, ['Task updated']);
+  assert.deepEqual(heading(render('status_changed')).children, ['Subtask status changed']);
 });
 
 test('HTTP reads use the scoped POST contract, without reported actor or chat requests', async () => {
@@ -357,7 +358,7 @@ test('history and selected revision reads stay separate and pass opaque cursors 
     const input = JSON.parse(init.body);
     requests.push(input);
     return response(input.revision ? {
-      revision: input.revision, description: 'Full earlier definition', author: 'synthetic-owner',
+      revision: input.revision, description: 'Full earlier definition', author: 'synthetic-orchestrator',
       at: '2026-09-20T01:02:03Z', reason: 'Updated requirements',
     } : { items: [], next_cursor: null });
   } };
@@ -378,7 +379,7 @@ test('execution and selected revisions preserve the whole definition and referen
   const read = await readTask({ request: async () => response(execution) }, { view: 'execution', task_id: taskId });
   assert.equal(read.description, description);
   assert.deepEqual(read.references, execution.references);
-  const revision = { revision: 1, author: 'synthetic-owner', at: '2026-09-20T01:02:03Z', reason: 'Created', description };
+  const revision = { revision: 1, author: 'synthetic-orchestrator', at: '2026-09-20T01:02:03Z', reason: 'Created', description };
   const earlier = await readTask({ request: async () => response(revision) }, { view: 'changelog', task_id: taskId, revision: 1 });
   assert.equal(earlier.description, description);
 });
@@ -392,7 +393,7 @@ test('malformed history and selected revision results fail rather than imply emp
 });
 
 const native = {
-  source: 'native', session_id: 'synthetic-executor', loaded: true, status: 'idle',
+  source: 'native', session_id: 'synthetic-assignee', loaded: true, status: 'idle',
   observed_at: '2026-09-20T01:02:03Z', available: true,
 };
 const nativeResponse = (data = native, status = 200) => new Response(JSON.stringify(data), { status });
@@ -466,7 +467,7 @@ const automatedExecution = {
 };
 const automatedOutcome = {
   revision: 1, at: '2026-09-20T01:02:05Z', author: `automation:${automation.run_id}`,
-  source: 'automation', run_id: automation.run_id, executor: null, summary: 'Script exited with code 0.', references: [],
+  source: 'automation', run_id: automation.run_id, assignee: null, summary: 'Script exited with code 0.', references: [],
   retro: { status: 'not_applicable' },
 };
 const automationLog = {
@@ -474,17 +475,17 @@ const automationLog = {
   next_offset: 4096, retained_characters: 5000, omitted_characters: 12, complete: false,
 };
 
-test('automation reads preserve snapshots and runner-authored outcomes without a fake Executor or ACK', async () => {
+test('automation reads preserve snapshots and runner-authored outcomes without a fake Assignee or ACK', async () => {
   const { source, run_id, ...ordinaryOutcome } = automatedOutcome;
   for (const [view, data] of [
     ['overview', automatedOverview], ['overview', { ...automatedOverview, automation: null }],
     ['execution', automatedExecution], ['outcomes', { items: [automatedOutcome], next_cursor: null }],
-    ['outcomes', { items: [{ ...ordinaryOutcome, author: 'worker', executor: 'worker' }], next_cursor: null }],
+    ['outcomes', { items: [{ ...ordinaryOutcome, author: 'worker', assignee: 'worker' }], next_cursor: null }],
   ]) {
     assert.deepEqual(await readTask({ request: async () => response(data) }, { view, task_id: taskId }), data);
   }
   for (const data of [
-    { ...automatedOverview, executor: 'fake-native-session' },
+    { ...automatedOverview, assignee: 'fake-native-session' },
     { ...automatedOverview, acknowledged_revision: 1 },
     { ...automatedOverview, automation: {} },
     { ...automatedOverview, kind: 'unknown' },
@@ -663,7 +664,7 @@ test('mounted automation UI shows immutable facts and logs, paginates on demand,
     assert.match(textContent(tree), /Source: Automation/);
     assert.match(textContent(tree), /Not applicable to script automation/);
     assert.match(textContent(tree), new RegExp(`Reported author: automation:${automation.run_id}`));
-    assert.doesNotMatch(textContent(tree), /Executor: null/);
+    assert.doesNotMatch(textContent(tree), /Assignee: null/);
     assert.equal(f.requests.every(request => request.path === '/read'), true);
     assert.equal(f.requests.length, 7);
   } finally {
@@ -711,8 +712,8 @@ test('legacy agent details retain ACK, activity and lazy native session observat
 test('retro detail reads reject malformed recorded content instead of presenting no findings', async () => {
   const execution = { ...result, description: 'Definition', references: [], metadata: {} };
   const recorded = {
-    status: 'recorded', text: null, has_findings: false, revision: 1, executor: 'executor',
-    author: 'executor', source: 'reported', outcome_id: 'outcome-id', at: '2026-09-20T01:02:05Z', current: true,
+    status: 'recorded', text: null, has_findings: false, revision: 1, assignee: 'assignee',
+    author: 'assignee', source: 'reported', outcome_id: 'outcome-id', at: '2026-09-20T01:02:05Z', current: true,
   };
   for (const retro of [
     { ...recorded, text: undefined }, { ...recorded, text: '' }, { ...recorded, has_findings: true, text: ' ' },
@@ -727,7 +728,7 @@ test('mounted retro detail and outcomes distinguish findings, null, historical m
   globalThis.document = { body: {} };
   const recorded = {
     status: 'recorded', text: '<script>Automate repeated setup</script>', has_findings: true,
-    revision: 1, executor: 'executor', author: 'executor', source: 'reported',
+    revision: 1, assignee: 'assignee', author: 'assignee', source: 'reported',
     outcome_id: 'outcome-id', at: '2026-09-20T01:02:05Z', current: false,
   };
   try {
@@ -755,7 +756,7 @@ test('mounted retro detail and outcomes distinguish findings, null, historical m
         button(tree, 'Outcomes').props.onClick();
         harness.render();
         f.requests[2].resolve(response({ items: [{
-          id: 'outcome-id', revision: 1, executor: 'executor', author: 'executor', source: 'reported',
+          id: 'outcome-id', revision: 1, assignee: 'assignee', author: 'assignee', source: 'reported',
           at: recorded.at, summary: 'Delivered result', references: [], retro,
         }], next_cursor: null }));
         await settle();
@@ -776,19 +777,19 @@ test('reopen invalidation replaces cached done card and marks prior delivery ret
   const f = fixture();
   const resource = createReadResource(f.context, input);
   const retro = {
-    status: 'recorded', has_findings: false, revision: 1, executor: 'executor', author: 'executor',
+    status: 'recorded', has_findings: false, revision: 1, assignee: 'assignee', author: 'assignee',
     source: 'reported', outcome_id: 'prior-outcome', at: '2026-09-20T01:02:05Z', current: true,
   };
   resource.start();
   f.requests[0].resolve(response({
-    ...result, executor: 'executor', status: 'done', acknowledged_revision: 1,
+    ...result, assignee: 'assignee', status: 'done', acknowledged_revision: 1,
     outcome: { available: true, revision: 1, current: true }, retro,
   }));
   await settle();
   assert.equal(resource.getSnapshot().data.status, 'done');
   f.invalidate();
   f.requests[1].resolve(response({
-    ...result, executor: 'executor', status: 'in_progress', revision: 2, acknowledged_revision: 2,
+    ...result, assignee: 'assignee', status: 'in_progress', revision: 2, acknowledged_revision: 2,
     outcome: { available: true, revision: 1, current: false }, retro: { ...retro, current: false },
   }));
   await settle();
@@ -809,7 +810,7 @@ test('detail refresh preserves Agent history cursors and automation log offsets'
       const overview = automated ? automatedOverview : result;
       const execution = automated ? automatedExecution : { ...result, description: 'Agent definition', references: [], metadata: {} };
       const firstPage = automated ? automationLog : {
-        items: [{ revision: 1, author: 'executor', executor: 'executor', at: '2026-09-20T01:02:05Z', summary: 'First', references: [] }],
+        items: [{ revision: 1, author: 'assignee', assignee: 'assignee', at: '2026-09-20T01:02:05Z', summary: 'First', references: [] }],
         next_cursor: 'history-page-two',
       };
       const secondPage = automated ? { ...automationLog, offset: 4096, text: 'Second page', next_offset: null }
@@ -865,10 +866,10 @@ test('dependency labels stay compact and never imply dispatch', () => {
   assert.equal(dependencyLabel([{ task_id: 'a', status: 'done' }, { task_id: 'b', status: 'in_progress' }], false), 'Blocked by 2 Tasks · 1 done · not ready');
 });
 
-test('delegation lineage shows parent and lazily reads direct child Tasks without extra eager reads', async () => {
+test('delegation lineage shows parent and lazily reads direct Subtasks without extra eager reads', async () => {
   assert.equal(delegationLabel(null, 1), null);
   assert.equal(delegationLabel(undefined, undefined), null);
-  assert.equal(delegationLabel('parent', 2), 'Child Task · delegation level 2');
+  assert.equal(delegationLabel('parent', 2), 'Subtask · delegation level 2');
   const parentId = '6f1c0c92-3580-4cdd-85bf-d7fcf22ab3ff';
   const childId = '7a2c0c92-3580-4cdd-85bf-d7fcf22ab3ff';
   const f = fixture();
@@ -880,7 +881,7 @@ test('delegation lineage shows parent and lazily reads direct child Tasks withou
     f.requests[0].resolve(response({ ...result, parent_task_id: parentId, depth: 2 }));
     await settle();
     let tree = harness.render();
-    assert.match(textContent(tree), /Child Task · delegation level 2/);
+    assert.match(textContent(tree), /Subtask · delegation level 2/);
     elements(tree).find(node => node.props.className === 'ck-button tb-card').props.onClick();
     harness.render();
     f.requests[1].resolve(response({ ...result, parent_task_id: parentId, depth: 2, description: 'Child definition', references: [], metadata: {} }));
@@ -890,14 +891,14 @@ test('delegation lineage shows parent and lazily reads direct child Tasks withou
     assert.match(textContent(tree), new RegExp(parentId));
     assert.equal(f.requests.length, 2, 'Parent and child lineage are not read until disclosed');
     const disclosures = elements(tree).filter(node => node.type === 'details');
-    const children = disclosures.find(node => textContent(node).includes('Child Tasks delegated from this Task'));
+    const children = disclosures.find(node => textContent(node).includes('Subtasks delegated from this Task'));
     children.props.onToggle({ currentTarget: { open: true } });
     harness.render();
     assert.deepEqual(JSON.parse(f.requests[2].init.body), { view: 'list', parent_task_id: taskId, status: 'all', limit: 50 });
-    f.requests[2].resolve(response({ items: [{ task_id: childId, title: 'Specific child', status: 'in_progress', executor: 'worker', parent_task_id: taskId, depth: 3 }], next_cursor: null }));
+    f.requests[2].resolve(response({ items: [{ task_id: childId, title: 'Specific child', status: 'in_progress', assignee: 'worker', parent_task_id: taskId, depth: 3 }], next_cursor: null }));
     await settle();
     tree = harness.render();
-    assert.match(textContent(tree), /Specific child · In progress · Executor: worker/);
+    assert.match(textContent(tree), /Specific child · In progress · Assignee: worker/);
     assert.equal(f.requests.length, 3);
   } finally {
     harness.stop();
