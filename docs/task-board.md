@@ -48,7 +48,7 @@ Source support is not a release or deployment claim.
 
 ## Roles and records
 
-Every session is a Task tree node and receives the single `node` role (Task node)
+Every session is a Task tree node and receives the single `node` role (Node)
 through the host's role management. The host assembles its System Prompt, Skills and
 all sixteen HTTP MCP tools, persists the selection and reassembles it on cold resume.
 The former `owner` and `executor` roles are removed without aliases. Before a host

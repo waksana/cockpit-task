@@ -14,7 +14,7 @@ Task 提供一个树节点角色 `node` 与一个合并 Skill
 
 | 角色 | 常驻指令 | 注入的 Task 工具 |
 | --- | --- | --- |
-| Task node | [task-node.md](../roles/task-node.md) | 全部十六个：`task_read`、`task_create`、`task_session_create`、`task_session_prepare`、`task_assign`、`task_edit`、`task_cancel`、`task_subscribe`、`task_unsubscribe`、`task_script_read`、`task_script_register`、`task_automation_start`、`task_automation_reconcile`、`task_ack`、`task_report`、`task_reopen` |
+| Node | [task-node.md](../roles/task-node.md) | 全部十六个：`task_read`、`task_create`、`task_session_create`、`task_session_prepare`、`task_assign`、`task_edit`、`task_cancel`、`task_subscribe`、`task_unsubscribe`、`task_script_read`、`task_script_register`、`task_automation_start`、`task_automation_reconcile`、`task_ack`、`task_report`、`task_reopen` |
 
 每个 session 都是 Task 树中的节点：有被指派的 Task 就负责完成它（亲自做或编排子 Task），
 没有就作为根节点委派交付。Owner/Executor 是针对某个 Task 的事实（`owner`/`executor`
