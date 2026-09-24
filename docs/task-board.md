@@ -4,11 +4,11 @@ Task is a Cockpit module for independent work records shared by orchestrator and
 Its module ID and HTTP MCP key are `cockpit-task`, version `0.2.0` (source preparation; no deployment implied).
 It runs in Cockpit, not a standalone daemon or dashboard.
 
-This preparation packages per-Task hierarchical delegation and the tree-node model
+Version 0.1.13 packaged per-Task hierarchical delegation and the tree-node model
 merged through #75 (#71, #72, #74). Schema v7 adds nullable
 `tasks.parent_task_id`, `tasks.depth` default 1 and `child_notices` through a
 forward migration that only adds columns and a table; existing Tasks stay top-level.
-It replaces the orchestrator/assignee roles with one `node` role and one merged
+It replaced the `owner`/`executor` roles with one `node` role and one merged
 `cockpit-task-tree` Skill. Schema v7 is roll-forward only: installed 0.1.12 cannot
 open v7 data, and switching back to an older package is not a database rollback.
 Validate migration on an isolated consistent copy before authorized deployment;

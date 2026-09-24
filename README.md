@@ -121,16 +121,16 @@ npm run package:module
 
 模块 ID、MCP key 和包名均为 `cockpit-task`；唯一角色为 `node`（Node），合并 Skill 为
 [cockpit-task-tree](skills/cockpit-task-tree/cockpit-task-tree/SKILL.md)，
-按执行、委派、读取、写入、链接、重要更新和自动化分类组织参考。
+核心操作约定在 Skill 正文中，可信脚本 Task 另有 automation reference。
 节点同时通过现有装载机制发现 `github-coding` 工作 Skill，
 选择角色不等于每次都加载正文。准备包版本为 `0.2.0`；不同内容使用新版本，
 不覆盖同版本的既有安装。源码合并、CI 归档均不会自动升级线上。
 持久化仅使用宿主提供的模块目录，不自动导入其他数据库或修改既有安装。
-本次准备打包 #71/#72/#74（经 #75 合入）的按 Task 层级委派与 tree-node 模型：新增
+已发行 0.1.13 打包 #71/#72/#74（经 #75 合入）的按 Task 层级委派与 tree-node 模型：新增
 schema v7（`tasks.parent_task_id`、`tasks.depth`，最多 3 层，超出返回
 `DELEGATION_DEPTH_EXCEEDED`；新表 `child_notices`），以唯一 `node` 角色和合并 Skill
 `cockpit-task-tree` 取代 legacy owner/executor 角色。schema v7 只能向前滚动：已安装的
-`0.1.12` 不能打开 v7；切回旧包不等于数据库回退。0.1.13 删除 `orchestrator`/`assignee`
+`0.1.12` 不能打开 v7；切回旧包不等于数据库回退。0.1.13 删除 `owner`/`executor`
 角色且不提供别名；宿主冷启动到 0.1.13 前，操作者须备份并迁移每个 session 的
 `$COCKPIT_HOME/session-roles/<sessionId>.json`，把 `cockpit-task/owner` 和
 `cockpit-task/executor` 替换为去重后的 `cockpit-task/node`，保留其他角色；回滚到 0.1.12
