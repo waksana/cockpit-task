@@ -241,12 +241,12 @@ export async function assignTask({ input, inspect, bind, recheck, send, save, si
     current = await inspect(input.assignee);
     recheck();
   } catch (error) {
-    return finish('partially_applied', errorDetail(error, 'EXECUTOR_NOT_READY'));
+    return finish('partially_applied', errorDetail(error, 'SESSION_NOT_READY'));
   }
   operation.capability = current.ready ? 'ready' : 'unavailable';
   if (!current.ready || !current.idle) {
     return finish('partially_applied', fault(
-      current.ready ? 'EXECUTOR_NOT_READY' : 'CAPABILITY_UNAVAILABLE',
+      current.ready ? 'SESSION_NOT_READY' : 'CAPABILITY_UNAVAILABLE',
       'Assignment was saved, but the target cannot receive a dispatch; nothing sent',
     ), current.details);
   }

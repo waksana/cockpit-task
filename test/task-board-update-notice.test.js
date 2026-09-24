@@ -40,7 +40,7 @@ function fixture(t, { sessionExists = async () => true, send } = {}) {
 test('notify_assignee sends one fixed immediate update card to the assignee, who then ACKs the new revision', async t => {
   const f = fixture(t);
   const id = await f.assigned();
-  const edited = await f.edit('orchestrator', id, { description: 'v2', notify_node: true });
+  const edited = await f.edit('orchestrator', id, { description: 'v2', notify_assignee: true });
   assert.equal(edited.error, null, JSON.stringify(edited.error));
   assert.equal(edited.result.revision, 2);
   assert.equal(edited.result.notice_ids.length, 1);
@@ -85,7 +85,7 @@ test('notify_assignee is rejected, saving nothing, when no update notice applies
   cases.push(['terminal', done, 'orchestrator', { description: 'v2' }]);
   for (const [label, id, actor, fields] of cases) {
     const before = f.store.task(id);
-    const result = await f.edit(actor, id, { ...fields, notify_node: true });
+    const result = await f.edit(actor, id, { ...fields, notify_assignee: true });
     assert.equal(result.error?.code, 'UPDATE_NOTICE_NOT_APPLICABLE', label);
     const after = f.store.task(id);
     assert.equal(after.revision, before.revision, label);
@@ -98,7 +98,7 @@ test('notify_assignee is rejected, saving nothing, when no update notice applies
 test('notify_assignee rejects free-text notes at the contract', async t => {
   const f = fixture(t);
   const id = await f.assigned();
-  const result = await f.edit('orchestrator', id, { description: 'v2', notify_node: true, note: 'Pause now' });
+  const result = await f.edit('orchestrator', id, { description: 'v2', notify_assignee: true, note: 'Pause now' });
   assert.equal(result.error?.code, 'INVALID_INPUT');
   const text = await f.edit('orchestrator', id, { description: 'v2', notify_assignee: 'Pause now' });
   assert.equal(text.error?.code, 'INVALID_INPUT');
@@ -110,7 +110,7 @@ test('update notice failures keep the saved edit and report notification_error',
   const f = fixture(t, { sessionExists: async () => exists });
   const id = await f.assigned();
   exists = false;
-  const edited = await f.edit('orchestrator', id, { description: 'v2', notify_node: true });
+  const edited = await f.edit('orchestrator', id, { description: 'v2', notify_assignee: true });
   assert.equal(edited.error, null);
   assert.equal(edited.result.revision, 2);
   assert.equal(edited.notifications[0].notification.status, 'not_sent');
