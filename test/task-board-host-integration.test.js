@@ -151,7 +151,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
               id: `synthetic-${event}-${action}-${taskId}`, type: 'function',
               function: {
                 name: tools[0].function.name,
-                arguments: JSON.stringify({ task_id: taskId, actor: actor[1], ...input }),
+                arguments: JSON.stringify({ task_id: taskId, ...input }),
               },
             };
           };
@@ -209,7 +209,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
             }
             const tools = message.tools.filter(tool => tool.type === 'function' && tool.function.name.endsWith(name));
             assert.equal(tools.length, 1, `Orchestrator must have exactly one native ${name} tool`);
-            const args = { task_id: taskId, actor: actor[1], ...input };
+            const args = { task_id: taskId, ...input };
             nativeOrchestratorCalls.push({ key, name, input: args });
             toolCall = { id, type: 'function', function: { name: tools[0].function.name, arguments: JSON.stringify(args) } };
             return null;
@@ -245,7 +245,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
             toolCall = { id: callId, type: 'function', function: {
               name: tools[0].function.name,
               arguments: JSON.stringify({
-                actor: actor[1], request_id: callId, session_id: sessionId,
+                request_id: callId, session_id: sessionId,
                 skills: ['github-coding'], mcp_servers: [{ name: 'cockpit-task', tools: ['task_read', 'task_report'] }],
               }),
             } };
@@ -385,7 +385,11 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(typeof transport.sessionId, 'string');
     assert.deepEqual((await mcp.listTools()).tools.map(tool => tool.name).sort(), allTools);
     const tool = async (name, input) => {
-      const response = await mcp.callTool({ name, arguments: input });
+      const { actor, ...arguments_ } = input;
+      const response = await mcp.callTool({
+        name, arguments: arguments_,
+        _meta: { 'cockpit/invocation': { sessionId: actor ?? orchestratorId, runtimeSessionId: actor ?? orchestratorId, subagent: false } },
+      });
       const envelope = response.structuredContent;
       assert.ok(envelope, JSON.stringify(response));
       assert.deepEqual(JSON.parse(response.content[0].text), envelope);
@@ -524,8 +528,8 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       ['filtered', { mcp_servers: [{ name: 'cockpit-task', tools: ['task_synthetic_unoffered'] }] }],
     ]) {
       const failed = await mcp.callTool({ name: 'task_session_prepare', arguments: {
-        request_id: `integration-prepare-${suffix}`, actor: orchestratorId, session_id: assigneeId, ...selections,
-      } });
+        request_id: `integration-prepare-${suffix}`, session_id: assigneeId, ...selections,
+      }, _meta: { 'cockpit/invocation': { sessionId: orchestratorId, runtimeSessionId: orchestratorId, subagent: false } } });
       assert.equal(failed.isError, true);
       assert.equal(failed.structuredContent.error.code, 'RESOURCE_PREPARATION_FAILED');
       assert.equal(failed.structuredContent.result.operation.session_id, assigneeId);
@@ -548,7 +552,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
 
     stage = 'assigning exactly one native Task reference';
     const created = await tool('task_create', {
-      request_id: 'integration-task-create', actor: orchestratorId, orchestrator: orchestratorId,
+      request_id: 'integration-task-create', actor: orchestratorId,
       title: 'Synthetic packaged integration', description: 'Synthetic complete requirements. No external work.',
     });
     const taskId = created.result.task_id;
@@ -613,9 +617,10 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const invalidReport = await mcp.callTool({
       name: 'task_report',
       arguments: {
-        request_id: 'integration-invalid-report', actor: assigneeId, task_id: taskId,
+        request_id: 'integration-invalid-report', task_id: taskId,
         revision: 1, write_context: updated.write_context, status: 'invented-status',
       },
+      _meta: { 'cockpit/invocation': { sessionId: assigneeId, runtimeSessionId: assigneeId, subagent: false } },
     });
     assert.equal(invalidReport.isError, true);
     assert.equal(invalidReport.structuredContent.error.code, 'INVALID_INPUT');
@@ -689,7 +694,9 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       actor: unionId, task_id: taskId, write_context: subscribedTask.write_context,
     };
     const already = await mcp.callTool({
-      name: 'task_subscribe', arguments: { ...subscriptionInput, request_id: 'already-in-progress', statuses: ['in_progress'] },
+      name: 'task_subscribe',
+      arguments: { task_id: subscriptionInput.task_id, write_context: subscriptionInput.write_context, request_id: 'already-in-progress', statuses: ['in_progress'] },
+      _meta: { 'cockpit/invocation': { sessionId: unionId, runtimeSessionId: unionId, subagent: false } },
     });
     assert.equal(already.isError, true);
     assert.equal(already.structuredContent.error.code, 'ALREADY_IN_TARGET_STATUS');

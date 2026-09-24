@@ -168,7 +168,7 @@ test('a status notification needs only one selective MCP read for done, blocked 
       assert.deepEqual(sent[index], { orchestrator: 'orchestrator', text: `[Subtask status changed](task:${task.task_id}?event=status_changed)` });
       const count = reads.length;
       const response = await f.client.callTool({ name: 'task_read', arguments: {
-        view: 'overview', task_id: task.task_id, actor: 'orchestrator', include: ['activity', 'outcome', 'retro'],
+        view: 'overview', task_id: task.task_id, include: ['activity', 'outcome', 'retro'],
       } });
       assert.notEqual(response.isError, true);
       assert.equal(reads.length, count + 1);
@@ -188,7 +188,7 @@ test('a status notification needs only one selective MCP read for done, blocked 
       for (const key of ['activity', 'outcome', 'retro']) assert.equal(key in context.structuredContent.result, false);
       for (const invalid of [{ include: ['outcome', 'outcome'] }, { view: 'execution', include: ['outcome'] }, { include: ['summary'] }]) {
         const rejected = await f.client.callTool({ name: 'task_read', arguments: {
-          view: 'overview', task_id: task.task_id, actor: task.assignee, ...invalid,
+          view: 'overview', task_id: task.task_id, ...invalid,
         } });
         assert.equal(rejected.isError, true);
         assert.equal(rejected.structuredContent.error.code, 'INVALID_INPUT');
@@ -268,7 +268,7 @@ test('official MCP discovers, registers and executes an automation Task without 
   let sequence = 0;
   const call = async (name, input) => {
     const response = await f.client.callTool({
-      name, arguments: name.endsWith('_read') ? input : { actor: 'orchestrator', request_id: `mcp-auto-${++sequence}`, ...input },
+      name, arguments: name.endsWith('_read') ? input : { request_id: `mcp-auto-${++sequence}`, ...input },
     });
     assert.equal(response.isError, undefined, JSON.stringify(response));
     return response.structuredContent.result;
@@ -323,6 +323,46 @@ test('official MCP discovers, registers and executes an automation Task without 
   }
 });
 
+test('MCP invocation metadata supplies caller identity and rejects identity arguments before effects', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'task-mcp-invocation-'));
+  const store = new TaskStore(root);
+  const service = new TaskService(store, {});
+  const f = fixture((name, input, options) => service.execute(name, input, options), undefined, toolSchemas, { injectMeta: false });
+  try {
+    await f.connect();
+    const missing = await f.client.callTool({
+      name: 'task_create',
+      arguments: { request_id: 'missing', title: 'No meta', description: 'No write' },
+    });
+    assert.equal(missing.isError, true);
+    assert.equal(missing.structuredContent.error.code, 'INVOCATION_REQUIRED');
+    assert.equal(store.read({ view: 'list', status: 'all' }).items.length, 0);
+
+    for (const identity of [{ actor: 'victim' }, { invocation: { sessionId: 'victim' } }]) {
+      const rejected = await f.client.callTool({
+        name: 'task_create',
+        arguments: { request_id: randomUUID(), title: 'Legacy identity', description: 'Reject', ...identity },
+        _meta: invocationMeta,
+      });
+      assert.equal(rejected.isError, true);
+      assert.equal(rejected.structuredContent.error.code, 'INVALID_INPUT');
+      assert.equal(store.read({ view: 'list', status: 'all' }).items.length, 0);
+    }
+
+    const created = await f.client.callTool({
+      name: 'task_create',
+      arguments: { request_id: 'with-meta', title: 'With meta', description: 'Caller wins' },
+      _meta: invocationMeta,
+    });
+    assert.notEqual(created.isError, true, JSON.stringify(created));
+    assert.equal(store.task(created.structuredContent.result.task_id).orchestrator, 'orchestrator');
+  } finally {
+    await f.close();
+    service.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('real notification failure crosses MCP without erasing Task effects or resending on inspection/replay', async () => {
   const root = mkdtempSync(join(tmpdir(), 'task-mcp-subscription-'));
   const store = new TaskStore(root);
@@ -332,43 +372,9 @@ test('real notification failure crosses MCP without erasing Task effects or rese
     async send(orchestrator, text) { sent.push({ orchestrator, text }); throw new Error('Synthetic lost acceptance response'); },
   });
 
-  test('MCP invocation metadata supplies caller identity and strict schemas reject legacy identity arguments', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'task-mcp-invocation-'));
-    const store = new TaskStore(root);
-    const service = new TaskService(store, {});
-    const f = fixture((name, input, options) => service.execute(name, input, options), undefined, toolSchemas, { injectMeta: false });
-    try {
-      await f.connect();
-      const missing = await f.client.callTool({ name: 'task_create', arguments: { request_id: 'missing', title: 'No meta', description: 'No write' } });
-      assert.equal(missing.isError, true);
-      assert.equal(missing.structuredContent.error.code, 'INVOCATION_REQUIRED');
-      assert.equal(store.read({ view: 'list', status: 'all' }).items.length, 0);
-
-      const created = await f.client.callTool({
-        name: 'task_create',
-        arguments: { request_id: 'with-meta', title: 'With meta', description: 'Caller wins' },
-        _meta: invocationMeta,
-      });
-      assert.notEqual(created.isError, true, JSON.stringify(created));
-      assert.equal(store.task(created.structuredContent.result.task_id).orchestrator, 'orchestrator');
-      for (const legacy of [{ actor_session_id: 'x' }, { owner: 'x' }]) {
-        const rejected = await f.client.callTool({
-          name: 'task_create',
-          arguments: { request_id: randomUUID(), title: 'Legacy', description: 'Reject', ...legacy },
-          _meta: invocationMeta,
-        });
-        assert.equal(rejected.isError, true);
-        assert.equal(rejected.structuredContent.error.code, 'INVALID_INPUT');
-      }
-    } finally {
-      await f.close();
-      service.close();
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
   const f = fixture((name, input, options) => service.execute(name, input, options), undefined, toolSchemas);
   const call = async (name, input) => {
-    const response = await f.client.callTool({ name, arguments: { actor: 'actor', ...input } });
+    const response = await f.client.callTool({ name, arguments: input });
     assert.deepEqual(JSON.parse(response.content[0].text), response.structuredContent);
     assert.ok(response.structuredContent.definition_check);
     return response;

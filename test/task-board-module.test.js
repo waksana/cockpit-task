@@ -47,6 +47,11 @@ function fixture() {
         body: { task_id: taskId, view, ...fields }, signal: controller.signal,
       });
     },
+    async list(fields = {}) {
+      return module.routes.find(route => route.path === '/read').handler({
+        body: { view: 'list', ...fields }, signal: controller.signal,
+      });
+    },
     async native(taskId) {
       return module.routes.find(route => route.path === '/tasks/:id/native').handler({
         params: { id: taskId }, signal: controller.signal,
@@ -54,7 +59,7 @@ function fixture() {
     },
     async write(name, input) {
       return module.routes.find(route => route.path === '/tools/:name').handler({
-        params: { name }, body: { request_id: `op-${++request}`, actor: 'orchestrator', ...input },
+        params: { name }, body: { request_id: `op-${++request}`, ...input },
         signal: controller.signal,
       });
     },
@@ -70,7 +75,7 @@ test('HTTP completion requires explicit valid retro with atomic effects and dura
       const create = await f.write('task_create', { title: 'Retro', description: 'Synthetic only' });
       const id = create.body.result.task_id;
       let task = (await f.read(id)).body.result;
-      await f.write('task_assign', { task_id: id, revision: 1, assignee: 'assignee', write_context: task.write_context });
+      await f.write('task_assign', { task_id: id, revision: 1, assignee: 'user', write_context: task.write_context });
       task = (await f.read(id)).body.result;
       const base = { task_id: id, revision: 1, write_context: task.write_context };
       await f.write('task_ack', base);
@@ -94,13 +99,30 @@ test('HTTP completion requires explicit valid retro with atomic effects and dura
   } finally { f.close(); }
 });
 
+test('HTTP tool calls reject body identity fields and create Tasks as the signed-in user', async () => {
+  const f = fixture();
+  try {
+    const create = async body => f.write('task_create', body);
+    for (const identity of [{ actor: 'victim' }, { invocation: { sessionId: 'victim' } }]) {
+      const rejected = await create({ title: 'Rejected identity', description: 'Must not create', ...identity });
+      assert.equal(rejected.status, 400);
+      assert.equal(rejected.body.error.code, 'INVALID_INPUT');
+      assert.deepEqual((await f.list({ status: 'all' })).body.result.items, []);
+    }
+    const created = await create({ title: 'Plain HTTP', description: 'Records web user' });
+    assert.equal(created.status, 200);
+    const task = (await f.read(created.body.result.task_id)).body.result;
+    assert.equal(task.orchestrator, 'user');
+  } finally { f.close(); }
+});
+
 test('HTTP reopen checks real host readiness while the Assignee is running and does not dispatch', async () => {
   const f = fixture();
   try {
     const created = (await f.write('task_create', { title: 'Reopen', description: 'Agreement' })).body.result;
-    await f.write('task_assign', { task_id: created.task_id, revision: 1, write_context: created.write_context, assignee: 'assignee' });
+    await f.write('task_assign', { task_id: created.task_id, revision: 1, write_context: created.write_context, assignee: 'user' });
     const task = (await f.read(created.task_id)).body.result;
-    const base = { task_id: task.id, revision: 1, write_context: task.write_context, actor: 'assignee' };
+    const base = { task_id: task.id, revision: 1, write_context: task.write_context };
     await f.write('task_ack', base);
     const completed = (await f.write('task_report', { ...base, status: 'done', outcome: { summary: 'Original result' }, retro: null })).body.result;
     f.meta = { ...f.meta, status: 'running', nativeProcessing: true, activeOperations: 1 };
@@ -127,7 +149,7 @@ test('HTTP selective reads preserve legacy defaults, errors, revision checks and
     const create = await f.write('task_create', { title: 'Selective HTTP', description: 'Synthetic only' });
     const id = create.body.result.task_id;
     let task = (await f.read(id)).body.result;
-    await f.write('task_assign', { task_id: id, revision: 1, assignee: 'assignee', write_context: task.write_context });
+    await f.write('task_assign', { task_id: id, revision: 1, assignee: 'user', write_context: task.write_context });
     task = (await f.read(id)).body.result;
     const base = { task_id: id, revision: 1, write_context: task.write_context };
     const fresh = await f.read(id, 'overview', { include: ['activity', 'outcome', 'retro'] });
