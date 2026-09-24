@@ -64,7 +64,7 @@ export function createHostAdapter(host) {
         },
       };
     },
-    send: (sessionId, text) => host.call('prompt', { sessionId, text, mode: 'enqueue' }),
+    send: (sessionId, text, { mode = 'enqueue' } = {}) => host.call('prompt', { sessionId, text, mode }),
     async nameState(sessionId) {
       const meta = await get(sessionId);
       if (meta === null) throw new TaskError('SESSION_NOT_FOUND', 'The assignee session is no longer known to the host');

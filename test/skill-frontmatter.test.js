@@ -6,6 +6,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { schemas } from '../src/task-board/contracts.js';
+import { UPDATE_NOTICE_INSTRUCTION } from '../src/task-board/reference.js';
 
 // Enforce a small YAML-safe release format, not a replacement YAML parser:
 // kebab-case names and JSON-quoted descriptions (valid YAML double-quoted scalars).
@@ -293,7 +294,8 @@ test('role prompts stay short while the Skills preserve delegation, communicatio
   assert.match(owner, /A result request is not permission for personal implementation, even for small work/);
   assert.match(owner, /Split independent outcomes, not tightly coupled stages, resources or specialties/);
   assert.match(owner, /Do not chat with an assignee to ask for progress, clarify requirements, chase work or request confirmation/);
-  assert.match(owner, /Assignee-facing notices remain the initial assignment.*important-update handoff/);
+  assert.match(owner, /Assignee-facing notices are only the initial assignment sent by `task_assign` and the service-sent update card from `task_edit` with `notify_assignee`/);
+  assert.match(owner, /Put explanations in the definition; never add chat notes or relay the user's instructions/);
   assert.match(owner, /Ordinary edits\/reports are silent without an explicit status subscription/);
   assert.doesNotMatch(owner, /only two cross-session notices|there are no reminders or service final notifications/);
   assert.match(owner, /`task_assign` sends the first assigned reference itself; do not send a duplicate/);
@@ -419,42 +421,37 @@ test('explicit one-shot subscriptions preserve silent defaults, role boundaries 
   }
   const handoff = prose(readFileSync(join(root, treeDirectory, 'references/important-updates.md'), 'utf8'));
   assert.match(handoff, /`status_changed` subscription notice to the orchestrator is separate/);
-  assert.match(handoff, /does not trigger this assignee-directed `updated` handoff/);
+  assert.match(handoff, /does not trigger this assignee-directed `updated` notice/);
 });
 
-test('important updates use one immediate notice without queue intervention or interruption', () => {
+test('important updates are one service-sent fixed notice from task_edit, never a handwritten message', () => {
   const owner = prose(roleGuide('orchestrator'));
-  assert.match(owner, /one `immediate` notice/);
-  assert.doesNotMatch(owner, /before handling pending messages or interrupting/);
+  assert.doesNotMatch(owner, /cockpit_send_prompt|one `immediate` notice/);
   const source = readFileSync(join(root, treeDirectory, 'references/important-updates.md'), 'utf8');
   const handoff = prose(source);
   for (const requirement of [
     /cannot wait.*normal checkpoints/,
     /Ordinary edits, delayed ACKs and routine progress do not trigger/,
-    /Save the complete updated requirements in Task first/,
+    /Put every explanation in the Task definition/,
+    /never relay the user's instructions to the assignee/,
     /Freshly read Task context/,
-    /unfinished, still assigned to the same assignee/,
-    /latest revision is not already ACKed/,
-    /already aligned, do not send/,
-    /pending ask, plan or elicitation requires its native response/,
-    /`cockpit_send_prompt` once/,
-    /interjects into the current turn/,
+    /unfinished Agent Task still assigned to the same assignee/,
+    /one `task_edit` that changes the description and sets `notify_assignee: true`/,
+    /There is no free-text field/,
+    /`UPDATE_NOTICE_NOT_APPLICABLE`, saving nothing/,
+    /Without the parameter `task_edit` stays silent/,
+    /Never send the card yourself with `cockpit_send_prompt`/,
+    /does not start a fresh turn, answer a pending ask, plan or elicitation/,
     /Task remains the agreement authority/,
-    /`task_edit` remains silent/,
-    /Leave queued user and subagent messages intact: do not copy, remove or replay/,
-    /Do not stop or interrupt the main turn or background work merely to notify/,
-    /explicit user stop\/cancel or other authorized interruption is separate/,
+    /Leave queued user and subagent messages intact/,
+    /do not stop or interrupt the assignee's work merely to notify/,
     /Acceptance is not consumption or ACK/,
-    /bounded inspection/,
-    /No blind retry, duplicate prompt, replacement session, subscription, polling or automatic escalation to interruption/,
+    /no blind retry, handwritten duplicate, replacement session, subscription, polling or automatic escalation to interruption/,
+    /`UPDATE_NOTICE_EXPIRED`, not sent later/,
   ]) assert.match(handoff, requirement);
-  assert.doesNotMatch(handoff, /Remove only the saved|preserved-context summary|interrupt the main turn once|remove-queued|cockpit_cancel_turn/);
-  const example = JSON.parse(source.match(/```json\n([\s\S]*?)\n```/)[1]);
-  assert.equal(example.session_id, '<assignee-session-id>');
-  assert.equal(example.mode, 'immediate');
-  assert.ok(example.text.includes('[Task updated](task:<uuid>?event=updated)'));
-  assert.match(example.text, /full current Task execution view/);
-  assert.match(example.text, /ACK its exact latest revision before continuing affected work/);
+  assert.doesNotMatch(source, /```json|<assignee-session-id>|remove-queued|cockpit_cancel_turn/);
+  const card = source.match(/```text\n([\s\S]*?)\n```/)[1];
+  assert.equal(card, `[Task updated](task:<uuid>?event=updated)\n${UPDATE_NOTICE_INSTRUCTION}`);
 });
 
 test('subscription guidance requires necessary orchestrator follow-up without gating assignee work', () => {
@@ -842,7 +839,7 @@ test('tree Skill follows the node-perspective structure with Subtask topology, c
     /same repository, the same files or the same scope\. This is your judgment; the service does not check it/,
     /For a Subtask not yet dispatched, add `blocked_by`/,
     /never to an ancestor of the dependent Task \(the service rejects that with `BLOCKER_ANCESTOR`/,
-    /write the coordination order into each one's requirements and send the affected assignee one \[important update\]/,
+    /write the coordination order into each one's requirements\s+with `task_edit` `notify_assignee` for an \[important update\]/,
     /makes an existing Subtask obsolete.*revise it, change its dependencies or cancel it with a recorded reason/,
     /Do not leave stale work running or waiting/,
     /The service rejects assigning a Task to its own orchestrator for every node/,

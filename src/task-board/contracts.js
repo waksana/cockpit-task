@@ -105,7 +105,7 @@ export const schemas = {
     ...['execution', 'definition'].map(taskRead),
     z.strictObject({ view: z.literal('changelog'), task_id: id, ...pagination, revision: revision.optional() })
       .refine(x => x.revision === undefined || (x.cursor === undefined && x.limit === undefined), 'A revision selector cannot be paginated'),
-    ...['activity', 'outcomes', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices'].map(view => z.strictObject({ view: z.literal(view), task_id: id, ...pagination })),
+    ...['activity', 'outcomes', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'update_notices'].map(view => z.strictObject({ view: z.literal(view), task_id: id, ...pagination })),
     z.strictObject({
       view: z.literal('automation_log'), task_id: id,
       offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
@@ -133,6 +133,7 @@ export const schemas = {
     ...existing, revision, reason: text(2000), title: text(240).optional(),
     description: text(LIMITS.description).optional(), references: references.optional(), metadata: metadata.optional(),
     blocked_by: blockedBy.optional().describe('Replaces the complete blocker set (add/remove by listing the new set; [] clears). Only while the Task awaits dispatch'),
+    notify_assignee: z.literal(true).optional().describe('Service sends the assignee one fixed immediate [Task updated] card for this description change; no free text. Only for an assigned unfinished Agent Task whose description changes; otherwise rejected before saving'),
   }).refine(x => ['title', 'description', 'references', 'metadata', 'blocked_by'].some(key => x[key] !== undefined), 'An editable field is required'),
   task_ack: z.strictObject({ ...existing, revision }),
   task_reopen: z.strictObject({
@@ -169,8 +170,8 @@ export const schemas = {
 };
 // The MCP SDK publishes properties only for object roots, not discriminated unions.
 const readToolSchema = z.strictObject({
-  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'automation_log', 'operation']),
-  task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes, retro_handlings, subscriptions, dependency_notices, child_notices and automation_log'),
+  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'update_notices', 'automation_log', 'operation']),
+  task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes, retro_handlings, subscriptions, dependency_notices, child_notices, update_notices and automation_log'),
   include: readInclude.optional(),
   request_id: request.optional().describe('Required only for the operation view'),
   orchestrator: session.optional().describe('List filter only: Tasks this session orchestrates'),

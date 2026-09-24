@@ -71,8 +71,9 @@ guidance, each for its own Tasks. Load only the reference needed, not the whole 
 ## Shared rules
 
 Ask real decisions of the user in your own session; never message another Task's
-orchestrator or assignee, directly or through other agents, except the explicit
-[important update](references/important-updates.md) for a Subtask. Task is the shared
+orchestrator or assignee, directly or through other agents; an
+[important update](references/important-updates.md) goes through `task_edit`
+`notify_assignee`, never a handwritten note. Task is the shared
 agreement and record. Use actual Task/session IDs, stable mutation request IDs and fresh
 returned `write_context`; inspect errors and `definition_check` as well as results.
 Use tool schemas for arguments.

@@ -9,7 +9,7 @@ or choosing a `task_read` view.
 | --- | --- |
 | Ordinary reference | `[Task](task:<uuid>)` |
 | Initial assignment to the assignee, sent by `task_assign` | `[Task assigned](task:<uuid>?event=assigned)` |
-| Orchestrator's important-definition-update notice to the assignee | `[Task updated](task:<uuid>?event=updated)` |
+| Service-sent important-update notice to the assignee (`task_edit` `notify_assignee`) | `[Task updated](task:<uuid>?event=updated)` |
 | System notice to the Task's orchestrator after an explicit status subscription matches | `[Subtask status changed](task:<uuid>?event=status_changed)` |
 | System notice to a dependent Task's orchestrator when its last `blocked_by` Task becomes done | `[Subtask ready](task:<uuid>?event=ready)` |
 | System notice to a dependent Task's orchestrator when one of its `blocked_by` Tasks is cancelled | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` |

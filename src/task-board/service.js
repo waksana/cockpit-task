@@ -35,10 +35,14 @@ export class TaskService {
     let input;
     let outcome;
     try {
-      if (typeof actor !== 'string' || !actor) {
+      const { actor: inputActor, invocation: inputInvocation, ...publicInput } =
+        rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput) ? rawInput : {};
+      const effectiveInvocation = invocation ?? inputInvocation;
+      const effectiveActor = effectiveInvocation?.sessionId ?? actor ?? inputActor;
+      if (typeof effectiveActor !== 'string' || !effectiveActor) {
         throw new TaskError('INVOCATION_REQUIRED', 'Task tools need the calling session from host MCP invocation metadata (_meta["cockpit/invocation"]); this host did not provide it and nothing was done', 400);
       }
-      input = { ...parseInput(name, rawInput), actor, ...(invocation ? { invocation } : {}) };
+      input = { ...parseInput(name, publicInput), actor: effectiveActor, ...(effectiveInvocation ? { invocation: effectiveInvocation } : {}) };
       if (signal?.aborted) throw new TaskError('REQUEST_CANCELLED', 'Task request was cancelled before execution', 409);
       if (name === 'task_assign') {
         const row = this.store.row(input.task_id);
@@ -159,7 +163,7 @@ export class TaskService {
       ?? outcome.result?.result?.operation?.task_id;
     const context = {
       task_id: target ?? (typeof rawInput?.task_id === 'string' ? rawInput.task_id : undefined),
-      actor: typeof actor === 'string' ? actor : undefined,
+      actor: typeof input?.actor === 'string' ? input.actor : typeof actor === 'string' ? actor : undefined,
     };
     const definition_check = this.store.definitionCheck(context);
     if (!['task_read', 'task_script_read'].includes(name) && outcome.result !== null) this.invalidate();
@@ -189,6 +193,18 @@ export class TaskService {
     if (this.closing || signal?.aborted) return Promise.resolve();
     if (this.recovery) return this.recovery;
     // Fixed high-water marks bound this startup pass. New transitions deliver themselves.
+    // Immediate update notices are only meaningful during their edit request; one left pending by
+    // a restart is recorded as not sent rather than interrupting the assignee later.
+    for (let seq = 0, through = this.store.pendingNotificationBoundary('update_notices'); through;) {
+      const batch = this.store.pendingNotifications(seq, through, 20, 'update_notices');
+      if (!batch.length) break;
+      for (const entry of batch) {
+        this.store.finishNotification(entry.id, 'pending', 'not_sent', {
+          code: 'UPDATE_NOTICE_EXPIRED', message: 'The module restarted before this update notice was sent; it was not sent. Edit again with notify_assignee if the assignee still needs it',
+        });
+        seq = entry.seq;
+      }
+    }
     const sources = ['subscriptions', 'dependency_notices', 'child_notices']
       .map(table => ({ table, through: this.store.pendingNotificationBoundary(table) })).filter(source => source.through);
     if (!sources.length) return Promise.resolve();

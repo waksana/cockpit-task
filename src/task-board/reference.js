@@ -22,6 +22,10 @@ export function taskReference(id, event) {
   return `[${event === undefined ? 'Task' : TASK_EVENTS[event]}](task:${id}${event === undefined ? '' : `?event=${event}`})`;
 }
 
+// The fixed service-sent important-update notice: a card plus one fixed instruction, never free text.
+export const UPDATE_NOTICE_INSTRUCTION = 'Read the full current Task execution view and ACK its exact latest revision before continuing affected work.';
+export const updateNoticeText = id => `${taskReference(id, 'updated')}\n${UPDATE_NOTICE_INSTRUCTION}`;
+
 export function parseTaskTarget(target) {
   if (typeof target !== 'string') return null;
   const match = taskTarget.exec(target);

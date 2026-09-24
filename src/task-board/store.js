@@ -20,7 +20,7 @@ const hash = value => createHash('sha256').update(canonical(value)).digest('hex'
 const fingerprint = (tool, { invocation, ...input }) => hash({ tool, input });
 const fail = (code, message, status = 409, result = null) => { throw new TaskError(code, message, status, result); };
 const notificationTable = table => {
-  if (!['subscriptions', 'dependency_notices', 'child_notices'].includes(table)) throw new Error('Unknown notification table');
+  if (!['subscriptions', 'dependency_notices', 'child_notices', 'update_notices'].includes(table)) throw new Error('Unknown notification table');
   return table;
 };
 function decode(value, code) {
@@ -221,6 +221,17 @@ export class TaskStore {
       ALTER TABLE dependency_notices RENAME COLUMN owner TO orchestrator;
       ALTER TABLE child_notices RENAME COLUMN owner TO orchestrator;
       ALTER TABLE operations ADD COLUMN invocation TEXT;
+      -- Service-sent important-update notices to a Task's assignee, requested through task_edit.
+      CREATE TABLE update_notices (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+        task_id TEXT NOT NULL REFERENCES tasks(id), revision INTEGER NOT NULL, assignee TEXT NOT NULL,
+        event TEXT NOT NULL, created_at TEXT NOT NULL,
+        delivery_status TEXT NOT NULL DEFAULT 'pending'
+          CHECK(delivery_status IN ('pending','unknown','accepted','queued','not_sent')),
+        attempted_at TEXT, completed_at TEXT, delivery_error TEXT
+      );
+      CREATE INDEX update_notices_task ON update_notices(task_id,seq);
+      CREATE INDEX update_notices_pending ON update_notices(seq) WHERE delivery_status='pending';
       CREATE UNIQUE INDEX assignee_occupancy ON tasks(assignee)
         WHERE assignee IS NOT NULL AND status NOT IN ('done','cancelled');
       CREATE INDEX task_assignments_assignee ON task_assignments(assignee,seq);
@@ -493,6 +504,14 @@ export class TaskStore {
       fail('AUTOMATION_DEFINITION_LOCKED', 'Queued/running automation definitions are frozen; cancel rather than changing an in-flight agreement');
     }
     const descriptionChanged = input.description !== undefined && input.description !== row.description;
+    if (input.notify_assignee) {
+      // Rejecting before any write keeps the edit and its requested notice one decision.
+      if (row.kind === 'automation' || !row.assignee || terminal(row.status)) {
+        fail('UPDATE_NOTICE_NOT_APPLICABLE', 'notify_assignee needs an assigned, unfinished Agent Task; nothing was saved or sent');
+      }
+      if (!descriptionChanged) fail('UPDATE_NOTICE_NOT_APPLICABLE', 'notify_assignee needs a changed description; nothing was saved or sent');
+      if (row.assignee === input.actor) fail('UPDATE_NOTICE_NOT_APPLICABLE', 'The assignee does not notify itself; nothing was saved or sent');
+    }
     const references = input.references === undefined ? row.refs : JSON.stringify(input.references);
     const metadata = input.metadata === undefined ? row.metadata : JSON.stringify(input.metadata);
     if (!definitionFits({ description: input.description ?? row.description, references: JSON.parse(references), metadata: JSON.parse(metadata) })) {
@@ -512,10 +531,11 @@ export class TaskStore {
       this.recordDefinition(this.row(row.id), input.reason, input.actor, at);
       if (!terminal(row.status) && row.assignee === input.actor) this.recordAck(this.row(row.id), input.actor);
     }
+    const notice_ids = input.notify_assignee ? [this.recordUpdateNotice(this.row(row.id), input, at)] : [];
     return {
       result: {
         ...this.effects(this.row(row.id)), description_changed: descriptionChanged, metadata_changed: metadataChanged,
-        ...dependencyResult,
+        ...dependencyResult, ...(input.notify_assignee ? { notice_ids } : {}),
       },
     };
   }
@@ -734,6 +754,23 @@ export class TaskStore {
       VALUES(?,?,?,?,?,?,?,?)`).run(id, row.id, parent.id, child.lifecycle, row.orchestrator, status, JSON.stringify(event), at);
     return inserted.changes ? [id] : [];
   }
+  recordUpdateNotice(row, input, at) {
+    const id = randomUUID();
+    const event = { event_id: randomUUID(), revision: row.revision, request_id: input.request_id, at, actor: input.actor };
+    this.db.prepare('INSERT INTO update_notices(id,task_id,revision,assignee,event,created_at) VALUES(?,?,?,?,?,?)')
+      .run(id, row.id, row.revision, row.assignee, JSON.stringify(event), at);
+    return id;
+  }
+  updateNotice(row) {
+    return {
+      notice_id: row.id, task_id: row.task_id, assignee: row.assignee, kind: 'updated', revision: row.revision,
+      event: JSON.parse(row.event), created_at: row.created_at,
+      notification: {
+        status: row.delivery_status, attempted_at: row.attempted_at, completed_at: row.completed_at,
+        error: row.delivery_error ? JSON.parse(row.delivery_error) : null,
+      },
+    };
+  }
   childNotice(row) {
     return {
       notice_id: row.id, task_id: row.task_id, parent_task_id: row.parent_task_id, orchestrator: row.orchestrator,
@@ -763,6 +800,10 @@ export class TaskStore {
     // Subscriptions and dependency notices share one durable delivery discipline.
     if (this.db.prepare('SELECT 1 FROM subscriptions WHERE id=?').get(id)) {
       return { table: 'subscriptions', event: 'status_changed', read: () => this.getSubscription(id) };
+    }
+    if (this.db.prepare('SELECT 1 FROM update_notices WHERE id=?').get(id)) {
+      const read = () => this.updateNotice(this.db.prepare('SELECT * FROM update_notices WHERE id=?').get(id));
+      return { table: 'update_notices', event: 'updated', recipient: 'assignee', mode: 'immediate', read };
     }
     const child = this.db.prepare('SELECT * FROM child_notices WHERE id=?').get(id);
     if (child) {
@@ -1024,12 +1065,12 @@ export class TaskStore {
     }
     const row = this.row(input.task_id);
     if (input.view === 'automation_log') return this.automation.log(input);
-    if (['subscriptions', 'dependency_notices', 'child_notices'].includes(input.view)) {
+    if (['subscriptions', 'dependency_notices', 'child_notices', 'update_notices'].includes(input.view)) {
       const scope = hash({ view: input.view, task_id: row.id });
       const limit = input.limit ?? 5;
       const rows = this.db.prepare(`SELECT * FROM ${notificationTable(input.view)} WHERE task_id=? AND seq < ? ORDER BY seq DESC LIMIT ?`)
         .all(row.id, this.cursor(input, scope), limit + 1);
-      return this.page(rows, limit, scope, entry => ({ subscriptions: this.subscription, dependency_notices: this.notice, child_notices: this.childNotice })[input.view].call(this, entry), { task_id: row.id });
+      return this.page(rows, limit, scope, entry => ({ subscriptions: this.subscription, dependency_notices: this.notice, child_notices: this.childNotice, update_notices: this.updateNotice })[input.view].call(this, entry), { task_id: row.id });
     }
     if (input.view === 'overview') return withRole(this.overview(row));
     if (input.view === 'execution' || input.view === 'definition') return withRole(this.task(row.id));

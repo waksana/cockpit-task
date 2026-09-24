@@ -96,7 +96,7 @@ For a Subtask not yet dispatched, add `blocked_by` on the Task that must finish 
 blockers may belong to any orchestrator, but never to an ancestor of the dependent Task
 (the service rejects that with `BLOCKER_ANCESTOR`, since the ancestor waits for it).
 For Subtasks already executing, write the coordination order into each one's requirements
-and send the affected assignee one [important update](important-updates.md). For a
+with `task_edit` `notify_assignee` for an [important update](important-updates.md). For a
 conflicting Task you do not orchestrate, order your own Subtask after it, or ask the user.
 
 ## Re-plan when things change
@@ -136,14 +136,13 @@ request confirmation; read or update Task instead. The assignee communicates wit
 user in its own session, not back to you, directly or through other agents.
 This keeps requirements and decisions out of a second conversation channel.
 
-Assignee-facing notices remain the initial assignment sent by `task_assign`
-and an explicit important-update handoff when normal checkpoints cannot wait.
-Ordinary edits/reports are silent without an explicit status subscription;
-`task_edit` does not send an updated notice. Subscriptions do not restore default
-progress/final notifications or permit assignee-to-orchestrator messages.
-For the exceptional handoff, read [important updates](important-updates.md)
-before sending one `immediate` notice; leave queued messages and ongoing work intact,
-without starting a monitoring or conversation loop.
+Assignee-facing notices are only the initial assignment sent by `task_assign` and the
+service-sent update card from `task_edit` with `notify_assignee` when normal checkpoints
+cannot wait; read [important updates](important-updates.md) first. Put explanations in the
+definition; never add chat notes or relay the user's instructions. Ordinary edits/reports
+are silent without an explicit status subscription. Subscriptions do not restore default
+progress/final notifications or permit assignee-to-orchestrator messages. Do not start a
+monitoring or conversation loop.
 
 ## Follow up and integrate
 
