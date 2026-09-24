@@ -28,8 +28,8 @@ async function prepareSelected({ input, operation, inspect, prepare, preflight, 
   const current = await inspect(operation.session_id);
   operation.capability = current.ready ? 'ready' : 'unavailable';
   if (current.details !== undefined) operation.details = current.details;
-  if (!current.idle) return fault('EXECUTOR_NOT_READY', 'Preparation requires an already loaded idle Executor');
-  if (!current.executor) return fault('EXECUTOR_ROLE_REQUIRED', 'The Node role must already be applied without a pending role reload');
+  if (!current.idle) return fault('SESSION_NOT_READY', 'Preparation requires an already loaded idle session');
+  if (!current.node) return fault('NODE_ROLE_REQUIRED', 'The Node role must already be applied without a pending role reload');
   const cancelled = cancellation(signal);
   if (cancelled) return cancelled;
   preflight(operation.session_id);
@@ -53,8 +53,8 @@ async function prepareSelected({ input, operation, inspect, prepare, preflight, 
   operation.capability = after.ready ? 'ready' : 'unavailable';
   if (after.details !== undefined) operation.details = after.details;
   else delete operation.details;
-  if (!after.ready) return fault('CAPABILITY_UNAVAILABLE', 'Resources were prepared, but Executor capability is not ready');
-  if (!after.idle) return fault('EXECUTOR_NOT_READY', 'Resources were prepared, but the Executor is no longer idle');
+  if (!after.ready) return fault('CAPABILITY_UNAVAILABLE', 'Resources were prepared, but Node capability is not ready');
+  if (!after.idle) return fault('SESSION_NOT_READY', 'Resources were prepared, but the session is no longer idle');
   preflight(operation.session_id);
   delete operation.details;
   return null;
@@ -83,7 +83,7 @@ async function runPreparation(options, finish) {
   return error ? finish(preparationFailureStatus(options.operation), error) : finish('applied');
 }
 
-export async function prepareExecutor(options) {
+export async function prepareNodeSession(options) {
   const { input, preparationSupported, save, signal } = options;
   const operation = {
     request_id: input.request_id, status: 'running', session_id: input.session_id,
@@ -101,7 +101,7 @@ export async function prepareExecutor(options) {
   return runPreparation({ ...options, operation }, finish);
 }
 
-export async function createExecutor(options) {
+export async function createNodeSession(options) {
   const { input, create, inspect, save, signal, preparationSupported } = options;
   const operation = {
     request_id: input.request_id, status: 'running',
@@ -150,12 +150,12 @@ export async function createExecutor(options) {
   operation.capability = capability.ready ? 'ready' : 'unavailable';
   if (!capability.ready) {
     operation.details = capability.details;
-    return finish('partially_applied', fault('CAPABILITY_UNAVAILABLE', 'Session exists, but Executor capability is not ready'));
+    return finish('partially_applied', fault('CAPABILITY_UNAVAILABLE', 'Session exists, but Node capability is not ready'));
   }
   return finish('applied');
 }
 
-async function retitleExecutor({ operation, title, retitle, save, signal }) {
+async function retitleAssignee({ operation, title, retitle, save, signal }) {
   const record = value => {
     operation.session_title = value;
     save({ result: { operation: { ...operation } }, error: null });
@@ -167,7 +167,7 @@ async function retitleExecutor({ operation, title, retitle, save, signal }) {
   let state;
   let previous;
   try {
-    state = await retitle.nameState(operation.executor);
+    state = await retitle.nameState(operation.assignee);
     previous = retitle.previous();
   } catch (error) {
     return record({ status: 'failed', error: errorDetail(error, 'TITLE_PROVENANCE_UNAVAILABLE') });
@@ -183,7 +183,7 @@ async function retitleExecutor({ operation, title, retitle, save, signal }) {
   record({ status: 'unknown' });
   let result;
   try {
-    result = await retitle.rename(operation.executor, title);
+    result = await retitle.rename(operation.assignee, title);
   } catch (error) {
     return record({ status: 'unconfirmed', error: errorDetail(error, 'TITLE_UNCONFIRMED') });
   }
@@ -193,9 +193,9 @@ async function retitleExecutor({ operation, title, retitle, save, signal }) {
   return record({ status: 'renamed', title: result.title });
 }
 
-export async function assignExecutor({ input, inspect, bind, recheck, send, save, signal, retitle }) {
+export async function assignTask({ input, inspect, bind, recheck, send, save, signal, retitle }) {
   const operation = {
-    request_id: input.request_id, task_id: input.task_id, status: 'running', executor: input.executor,
+    request_id: input.request_id, task_id: input.task_id, status: 'running', assignee: input.assignee,
     capability: 'unchecked', assignment: 'not_applied', message: 'not_sent',
   };
   const finish = (status, error = null, details) => {
@@ -213,16 +213,16 @@ export async function assignExecutor({ input, inspect, bind, recheck, send, save
   if (initialStop) return initialStop;
   let current;
   try {
-    current = await inspect(input.executor);
+    current = await inspect(input.assignee);
   } catch (error) {
     return finish('rejected', errorDetail(error, 'CAPABILITY_UNAVAILABLE'));
   }
   operation.capability = current.ready ? 'ready' : 'unavailable';
   if (!current.ready) {
-    return finish('rejected', fault('CAPABILITY_UNAVAILABLE', 'Selected session lacks ready Executor capability'), current.details);
+    return finish('rejected', fault('CAPABILITY_UNAVAILABLE', 'Selected session lacks ready Node capability'), current.details);
   }
   if (!current.idle) {
-    return finish('rejected', fault('EXECUTOR_NOT_READY', 'Selected Executor is not idle and available; nothing sent'), current.details);
+    return finish('rejected', fault('SESSION_NOT_READY', 'Selected session is not idle and available; nothing sent'), current.details);
   }
   const beforeBind = stopped();
   if (beforeBind) return beforeBind;
@@ -236,9 +236,9 @@ export async function assignExecutor({ input, inspect, bind, recheck, send, save
   }
   save({ result: { operation: { ...operation } }, error: null });
   // Title is a separate best-effort step: it never changes the assignment result.
-  if (retitle) await retitleExecutor({ operation, title: task.title, retitle, save, signal });
+  if (retitle) await retitleAssignee({ operation, title: task.title, retitle, save, signal });
   try {
-    current = await inspect(input.executor);
+    current = await inspect(input.assignee);
     recheck();
   } catch (error) {
     return finish('partially_applied', errorDetail(error, 'EXECUTOR_NOT_READY'));
@@ -257,7 +257,7 @@ export async function assignExecutor({ input, inspect, bind, recheck, send, save
   save({ result: { operation: { ...operation } }, error: null });
   let result;
   try {
-    result = await send(input.executor, taskReference(input.task_id, 'assigned'));
+    result = await send(input.assignee, taskReference(input.task_id, 'assigned'));
   } catch (error) {
     return finish('unconfirmed', errorDetail(error, 'OPERATION_UNCONFIRMED'));
   }

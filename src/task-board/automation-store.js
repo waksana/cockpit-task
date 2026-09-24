@@ -84,7 +84,7 @@ export class AutomationStore {
     }
     let script;
     try {
-      const { actor_session_id, request_id, ...definition } = input;
+      const { actor, invocation, request_id, ...definition } = input;
       script = resolveScript(definition);
     } catch (error) {
       if (error instanceof TaskError) throw error;
@@ -94,7 +94,7 @@ export class AutomationStore {
       throw error;
     }
     this.db.prepare('INSERT INTO scripts(script_id,definition,author,at) VALUES(?,?,?,?)')
-      .run(script.script_id, JSON.stringify(script), input.actor_session_id, now());
+      .run(script.script_id, JSON.stringify(script), input.actor, now());
     return { result: this.script({ script_id: script.script_id }) };
   }
   create(taskId, input) {
@@ -153,7 +153,7 @@ export class AutomationStore {
       return { run: this.run(taskId), subscription_ids };
     });
   }
-  actor(run) { return { request_id: `automation:${run.run_id}`, actor_session_id: null, source: 'automation', run_id: run.run_id }; }
+  actor(run) { return { request_id: `automation:${run.run_id}`, actor: null, source: 'automation', run_id: run.run_id }; }
   launched(taskId, pid) {
     this.db.prepare('UPDATE automation_runs SET pid=?,process_group=? WHERE task_id=?').run(pid, pid, taskId);
   }
@@ -174,7 +174,7 @@ export class AutomationStore {
         `Retained combined stdout/stderr: ${run.log.length} characters; omitted: ${run.omitted_characters}.`,
         'Read task_read(view="automation_log") for bounded output. No automatic retry.',
       ].filter(Boolean).join('\n');
-      this.db.prepare('INSERT INTO outcomes(id,task_id,revision,executor,author,summary,refs,at,run_id) VALUES(?,?,?,?,?,?,?,?,?)')
+      this.db.prepare('INSERT INTO outcomes(id,task_id,revision,assignee,author,summary,refs,at,run_id) VALUES(?,?,?,?,?,?,?,?,?)')
         .run(randomUUID(), taskId, run.revision ?? task.revision, null, `automation:${run.run_id}`, summary,
           JSON.stringify([{ label: 'Automation output (task_read automation_log)', target: `task:${taskId}` }]), at, run.run_id);
       this.db.prepare('UPDATE tasks SET status=?,lifecycle=lifecycle+?,updated_at=? WHERE id=?')
@@ -210,7 +210,7 @@ export class AutomationStore {
     // A missing PID means the worker never received its launch handshake.
     if (run.process_group && groupAlive(run.process_group)) fail('PROCESS_GROUP_ACTIVE', 'The process group may still be active; no queue barrier was cleared');
     this.db.prepare('UPDATE automation_runs SET barrier=0,reconciled_at=?,reconciled_by=?,reconciliation_reason=? WHERE task_id=?')
-      .run(now(), input.actor_session_id, input.reason, task.id);
+      .run(now(), input.actor, input.reason, task.id);
     return { result: this.store.effects(this.store.row(task.id)) };
   }
 }

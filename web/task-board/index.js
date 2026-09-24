@@ -40,12 +40,12 @@ export function dependencyLabel(blockedBy, ready) {
   const cancelled = blockedBy.filter((entry) => entry.status === 'cancelled').length;
   const count = `Blocked by ${blockedBy.length} Task${blockedBy.length === 1 ? '' : 's'}`;
   if (ready) return `${count} · all done · ready to dispatch`;
-  return `${count} · ${done} done${cancelled ? ` · ${cancelled} cancelled (Owner decision needed)` : ''} · not ready`;
+  return `${count} · ${done} done${cancelled ? ` · ${cancelled} cancelled (orchestrator decision needed)` : ''} · not ready`;
 }
 
 export function delegationLabel(parentTaskId, depth) {
   if (typeof parentTaskId !== 'string' || !parentTaskId) return null;
-  return `Child Task · delegation level ${Number.isSafeInteger(depth) ? depth : 'unknown'}`;
+  return `Subtask · delegation level ${Number.isSafeInteger(depth) ? depth : 'unknown'}`;
 }
 
 export function formatTimestamp(value) {
@@ -67,7 +67,7 @@ function validResult(input, data) {
   const entry = (value) => object(value) && revision(value.revision) && text(value.author) && text(value.at);
   const retro = (value, full) => value === undefined || (object(value) && (
     ['not_recorded', 'not_applicable'].includes(value.status) ||
-    (value.status === 'recorded' && entry(value) && text(value.executor) &&
+    (value.status === 'recorded' && entry(value) && text(value.assignee) &&
       text(value.outcome_id) && value.source === 'reported' && typeof value.current === 'boolean' &&
       typeof value.has_findings === 'boolean' && (!full ||
         (value.has_findings ? text(value.text) && value.text.trim().length > 0 && value.text.length <= 2000 : value.text === null)))
@@ -91,14 +91,14 @@ function validResult(input, data) {
       nonnegative(data.retained_characters) && nonnegative(data.omitted_characters) && typeof data.complete === 'boolean';
   }
   if (input.view === 'overview' || input.view === 'execution') {
-    if (data.id !== input.task_id || !text(data.title) || !text(data.owner) ||
-        !(data.executor === null || text(data.executor)) || !text(data.status) ||
+    if (data.id !== input.task_id || !text(data.title) || !text(data.orchestrator) ||
+        !(data.assignee === null || text(data.assignee)) || !text(data.status) ||
         !revision(data.revision) || !(data.acknowledged_revision === null || revision(data.acknowledged_revision))) return false;
     if (data.kind !== undefined && !['agent', 'automation'].includes(data.kind)) return false;
     if (!dependencies(data) || !lineage(data)) return false;
     if (!retro(data.retro, input.view === 'execution')) return false;
     if (data.kind === 'automation') {
-      if (data.executor !== null || data.acknowledged_revision !== null ||
+      if (data.assignee !== null || data.acknowledged_revision !== null ||
           !(data.automation === null || automation(data.automation))) return false;
       if (input.view === 'execution' && data.automation !== null) {
         const { script, parameters } = data.automation;
@@ -119,7 +119,7 @@ function validResult(input, data) {
   }
   if (!Array.isArray(data.items) || !(data.next_cursor === null || (text(data.next_cursor) && data.next_cursor.length > 0))) return false;
   return data.items.every((item) => entry(item) && (input.view === 'changelog' ? text(item.reason)
-    : (text(item.executor) || (input.view === 'outcomes' && item.executor === null &&
+    : (text(item.assignee) || (input.view === 'outcomes' && item.assignee === null &&
         item.source === 'automation' && text(item.run_id) && item.author === `automation:${item.run_id}`)) &&
       (input.view === 'activity' ? text(item.text) : text(item.summary) && references(item.references) && retro(item.retro, true))));
 }
@@ -303,7 +303,7 @@ export function activate(context) {
       h(ReadState, { state, subject: 'native session state' }, (data) => h(React.Fragment, null,
         h('dl', { className: 'tb-facts' },
           h('dt', null, 'Source'), h('dd', null, 'Native host'),
-          h('dt', null, 'Executor session'), h('dd', null, data.session_id ?? 'No Executor assigned'),
+          h('dt', null, 'Assignee session'), h('dd', null, data.session_id ?? 'No assignee'),
           h('dt', null, 'Native state'), h('dd', null, nativeStatusLabel(data)),
           h('dt', null, 'Observed at'), h('dd', null, formatTimestamp(data.observed_at))),
         data.error ? h('p', { role: 'alert', className: 'tb-read-error' },
@@ -333,8 +333,8 @@ export function activate(context) {
     const dependency = dependencyLabel(task.blocked_by, task.ready);
     return h('dl', { className: 'tb-facts' },
       h('dt', null, 'Task status'), h('dd', null, statusLabel(task.status)),
-      h('dt', null, 'Owner'), h('dd', null, task.owner),
-      h('dt', null, 'Executor'), h('dd', null, automated ? 'Automation (no native Executor)' : task.executor ?? 'Unassigned'),
+      h('dt', null, 'Orchestrator'), h('dd', null, task.orchestrator),
+      h('dt', null, 'Assignee'), h('dd', null, automated ? 'Automation (no native assignee)' : task.assignee ?? 'Unassigned'),
       h('dt', null, automated ? 'Definition' : 'Definition / ACK'),
       h('dd', null, automated ? `Definition v${task.revision}` : acknowledgementLabel(task.revision, task.acknowledged_revision)),
       dependency ? h(React.Fragment, null,
@@ -356,19 +356,19 @@ export function activate(context) {
 
   function ChildTaskList({ taskId }) {
     const state = useRead({ view: 'list', parent_task_id: taskId, status: 'all', limit: 50 });
-    return h(ReadState, { state, subject: 'child Tasks' }, (page) => page.items.length
+    return h(ReadState, { state, subject: 'Subtasks' }, (page) => page.items.length
       ? h(React.Fragment, null,
         h('ul', { className: 'tb-references' }, page.items.map((child) =>
           h('li', { key: child.task_id }, h(LazyTask, { taskId: child.task_id }),
-            h('span', { className: 'ck-text-secondary' }, `${child.title} · ${statusLabel(child.status)} · Executor: ${child.executor ?? 'Unassigned'}`)))),
-        page.next_cursor ? h('p', { className: 'ck-text-secondary' }, 'Showing the 50 newest child Tasks.') : null)
-      : h('p', null, 'No child Tasks recorded.'));
+            h('span', { className: 'ck-text-secondary' }, `${child.title} · ${statusLabel(child.status)} · Assignee: ${child.assignee ?? 'Unassigned'}`)))),
+        page.next_cursor ? h('p', { className: 'ck-text-secondary' }, 'Showing the 50 newest Subtasks.') : null)
+      : h('p', null, 'No Subtasks recorded.'));
   }
 
   function ChildTasks({ taskId }) {
     const [open, setOpen] = useState(false);
     return h('details', { onToggle: event => setOpen(event.currentTarget.open) },
-      h('summary', null, 'Child Tasks delegated from this Task'),
+      h('summary', null, 'Subtasks delegated from this Task'),
       open ? h(ChildTaskList, { taskId }) : null);
   }
 
@@ -377,7 +377,7 @@ export function activate(context) {
       h('h3', null, 'Completion retro'),
       retro?.status === 'recorded' ? h(React.Fragment, null,
         h('p', { className: 'ck-text-secondary' },
-          `Definition v${retro.revision} · Executor: ${retro.executor} · Reported author: ${retro.author} · ${formatTimestamp(retro.at)}`),
+          `Definition v${retro.revision} · Assignee: ${retro.assignee} · Reported author: ${retro.author} · ${formatTimestamp(retro.at)}`),
         !retro.current ? h('p', { className: 'ck-text-secondary' }, 'Historical retro; not a retrospective on the current definition.') : null,
         h('p', { className: 'tb-preserve' }, retro.has_findings ? retro.text : 'Explicitly reported no findings.'),
       ) : h('p', { className: 'ck-text-secondary' }, retro?.status === 'not_applicable'
@@ -511,8 +511,8 @@ export function activate(context) {
             : h(React.Fragment, null,
               h('p', { className: 'tb-preserve' }, view === 'activity' ? entry.text : entry.summary),
               h('p', { className: 'ck-text-secondary' }, entry.source === 'automation'
-                ? `Source: Automation · Run: ${entry.run_id} · No native Executor`
-                : `Executor: ${entry.executor}`),
+                ? `Source: Automation · Run: ${entry.run_id} · No native assignee`
+                : `Assignee: ${entry.assignee}`),
               view === 'outcomes' ? h(React.Fragment, null,
                 h(References, { references: entry.references }),
                 h(Retro, { retro: entry.retro })) : null),
@@ -559,7 +559,7 @@ export function activate(context) {
     kind === null ? h(ReadState, { state }, () => null) : h(React.Fragment, null,
         selected !== 'execution' ? h(ReadState, { state }, () => null) : null,
         h('p', { className: 'ck-text-secondary' }, automated
-          ? 'Current automation Task read, not a message-time snapshot. Execution uses an immutable script and parameter snapshot; no native Executor or manual ACK applies.'
+          ? 'Current automation Task read, not a message-time snapshot. Execution uses an immutable script and parameter snapshot; no native assignee or manual ACK applies.'
           : 'Current Task read, not a message-time snapshot. Activity and ACK authorship are reported, not authenticated. Reading does not ACK.'),
         !automated ? h('p', { className: 'ck-text-secondary' }, 'Reports do not establish what the session is doing now. Read a separate host observation in Native session.') : null,
         h('nav', { className: 'tb-sections', 'aria-label': 'Task detail sections' }, sections.map(([view, label]) =>
@@ -594,19 +594,19 @@ export function activate(context) {
       event ? h('span', {
         className: 'tb-card-event',
         title: event === 'status_changed'
-          ? 'An explicit Owner subscription matched a status change. This is not an Executor requirement update; current Task data is shown below.'
+          ? 'An explicit orchestrator subscription matched a status change of this Subtask. This is not a requirement update for its assignee; current Task data is shown below.'
           : event === 'ready' || event === 'blocker_cancelled'
-            ? 'A blocker of this Task reached a final state. Nothing was assigned or started; the Owner decides. Current Task data is shown below.'
+            ? 'A blocker of this Task reached a final state. Nothing was assigned or started; the orchestrator decides. Current Task data is shown below.'
             : event?.startsWith('child_')
-              ? 'This child Task changed status. The service notifies its Owner, the parent Task\'s Executor, once per transition without a subscription. Current Task data is shown below.'
+              ? 'This Subtask changed status. The service notifies its orchestrator, the parent Task\'s assignee, once per transition without a subscription. Current Task data is shown below.'
               : 'Why this message was sent; current Task data is shown below.',
       }, TASK_EVENTS[event]) : null,
       event === 'status_changed' ? h('span', { className: 'tb-card-meta' },
-        'Owner subscription triggered · current state shown below') : null,
+        'Orchestrator subscription triggered · current state shown below') : null,
       event === 'ready' || event === 'blocker_cancelled' ? h('span', { className: 'tb-card-meta' },
-        'Dependency notice to Owner · not assigned or started · current state shown below') : null,
+        'Dependency notice to orchestrator · not assigned or started · current state shown below') : null,
       event?.startsWith('child_') ? h('span', { className: 'tb-card-meta' },
-        'Child Task notice to Owner · integrate before completing the parent · current state shown below') : null,
+        'Subtask notice to orchestrator · integrate before completing the parent · current state shown below') : null,
       h('span', { className: 'tb-card-title' }, summary),
       task && dependencyLabel(task.blocked_by, task.ready) ? h('span', { className: 'tb-card-meta' }, dependencyLabel(task.blocked_by, task.ready)) : null,
       task && delegationLabel(task.parent_task_id, task.depth) ? h('span', { className: 'tb-card-meta' }, delegationLabel(task.parent_task_id, task.depth)) : null,
@@ -616,7 +616,7 @@ export function activate(context) {
           h('span', { className: 'tb-card-meta' }, `${statusLabel(task.status)} · ${task.automation?.state ?? 'Run state unavailable'}`),
           h('span', { className: 'tb-card-meta' }, `Definition v${task.revision} · Script: ${task.automation?.script_id ?? 'Unavailable'}`),
         ) : h(React.Fragment, null,
-          h('span', { className: 'tb-card-meta' }, `${statusLabel(task.status)} · Executor: ${task.executor ?? 'Unassigned'}`),
+          h('span', { className: 'tb-card-meta' }, `${statusLabel(task.status)} · Assignee: ${task.assignee ?? 'Unassigned'}`),
           h('span', { className: 'tb-card-meta' }, acknowledgementLabel(task.revision, task.acknowledged_revision)),
           h('span', { className: 'tb-card-activity' }, task.activity ? `Reported activity: ${task.activity.text}${task.activity.truncated ? ' (excerpt)' : ''}` : 'No reported activity.'),
           task.activity ? h('span', { className: 'tb-card-meta' }, `v${task.activity.revision} · ${formatTimestamp(task.activity.at)}`) : null),

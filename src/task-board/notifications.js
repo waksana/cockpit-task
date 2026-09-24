@@ -10,21 +10,21 @@ export async function deliverNotification({ store, host, id, stopped }) {
   let subscription = channel.read();
   if (subscription.notification.status !== 'pending' || stopped()) return subscription;
   try {
-    if (!await host.ownerExists(subscription.owner)) {
+    if (!await host.sessionExists(subscription.orchestrator)) {
       return store.finishNotification(id, 'pending', 'not_sent', {
-        code: 'OWNER_NOT_FOUND', message: 'Task Owner session does not exist; no replacement session was created and nothing was sent',
+        code: 'ORCHESTRATOR_NOT_FOUND', message: 'Task orchestrator session does not exist; no replacement session was created and nothing was sent',
       });
     }
   } catch (error) {
     // This read cannot send. Retain explicit known-unsent evidence rather than retrying the host.
-    return store.finishNotification(id, 'pending', 'not_sent', detail(error, 'OWNER_UNAVAILABLE'));
+    return store.finishNotification(id, 'pending', 'not_sent', detail(error, 'ORCHESTRATOR_UNAVAILABLE'));
   }
   if (stopped()) return channel.read();
   subscription = store.claimNotification(id);
   if (!subscription) return channel.read();
   let receipt;
   try {
-    receipt = await host.send(subscription.owner, taskReference(subscription.task_id, channel.event));
+    receipt = await host.send(subscription.orchestrator, taskReference(subscription.task_id, channel.event));
   } catch (error) {
     return store.finishNotification(id, 'unknown', 'unknown', detail(error, 'NOTIFICATION_UNCONFIRMED'));
   }

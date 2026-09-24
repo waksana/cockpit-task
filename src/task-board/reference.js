@@ -1,15 +1,16 @@
 const idPattern = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 const taskId = new RegExp(`^${idPattern}$`);
-// Card labels name the recipient's role for that Task; link targets stay unchanged.
+// Card labels name the relation, not a role or pronoun: the session's own Task, or a Subtask it
+// orchestrates. Link targets and event keys stay unchanged, so earlier cards still parse.
 export const TASK_EVENTS = Object.freeze({
-  assigned: 'As Executor: Task assigned to you',
-  updated: 'As Executor: Task updated',
-  status_changed: 'As Owner: Task status updated',
-  ready: 'As Owner: Task ready',
-  blocker_cancelled: 'As Owner: Task blocker cancelled',
-  child_done: 'As Owner: child Task done',
-  child_blocked: 'As Owner: child Task blocked',
-  child_cancelled: 'As Owner: child Task cancelled',
+  assigned: 'Task assigned',
+  updated: 'Task updated',
+  status_changed: 'Subtask status changed',
+  ready: 'Subtask ready',
+  blocker_cancelled: 'Subtask blocker cancelled',
+  child_done: 'Subtask done',
+  child_blocked: 'Subtask blocked',
+  child_cancelled: 'Subtask cancelled',
 });
 const taskTarget = new RegExp(`^task:(${idPattern})(?:\\?event=(${Object.keys(TASK_EVENTS).join('|')}))?$`);
 
