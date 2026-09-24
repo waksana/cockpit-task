@@ -99,7 +99,7 @@ activity.text 最长 4,000，outcome.summary 最长 8,000；每个 activity/outc
 
 ### task_read
 
-`view` 必须明确指定。orchestrator 查找任务用 `list` 并显式指定 `orchestrator=自己的 session ID`，
+`view` 必须明确指定。orchestrator 查找任务用 `list` 并显式指定 `orchestrator=自己的 session ID`；派出前的冲突检查用不带 orchestrator/assignee/parent 过滤的 `list` + `status=unfinished`（按需分页）。
 单项按目的用 `overview` 的 `include` 一次选择所需内容；省略 include 保持原视图响应。
 assignee 开始、恢复及执行要求同步仍读完整 `execution`，不能以选择输出代替。
 这些是信息选择，不限制任何持有工具者的读取范围。

@@ -33,7 +33,8 @@ into a running native turn; it does not start a fresh turn, answer a pending ask
 elicitation, or replace an authorized stop or cancel. Leave queued user and subagent messages
 intact, and do not stop or interrupt the assignee's work merely to notify.
 
-Inspect `notifications` and `notification_error` separately from the saved edit. Acceptance is
+Inspect `notifications` and `notification_error` separately from the saved edit; the
+`update_notices` view keeps each notice's delivery record. Acceptance is
 not consumption or ACK. On failure or an unconfirmed result, report uncertainty truthfully:
 no blind retry, handwritten duplicate, replacement session, subscription, polling or
 automatic escalation to interruption. A notice left pending by a module restart is recorded as

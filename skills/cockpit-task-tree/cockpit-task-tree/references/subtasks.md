@@ -13,7 +13,8 @@ conflict check, re-planning on change, and following through to integration.
 
 ## Coordinate by default; delegate delivery
 
-Without a Task of your own, your default responsibility is clarification, delegation and follow-through.
+Without a Task of your own, your default responsibility is clarification, dispatch with a
+conflict check, and only concrete necessary follow-up, not progress tracking.
 With a Task, the same orchestration rules apply to each Subtask you create for it.
 Bounded read-only investigation, answers and option comparisons are yours to provide.
 For default Agent Tasks, delegate implementation and state-changing delivery through Task to an independent
@@ -89,7 +90,9 @@ Decide which Subtasks may run in parallel and which must run in sequence, and ex
 order with `blocked_by`. Before dispatching a new Subtask, check every unfinished Task
 (`todo`, `in_progress`, `blocked` and `in_review`, whether or not it is assigned and whoever
 created it; not `done` or `cancelled`) for parallel changes to the same repository, the same
-files or the same scope. This is your judgment; the service does not check it.
+files or the same scope. This is your judgment; the service does not check it. Scan with one
+bounded `task_read(view=list, status=unfinished)` without an orchestrator filter, paging only
+as needed, then read `definition` only for candidates that may overlap.
 
 When there is a conflict, fix the order instead of letting both change the same place.
 For a Subtask not yet dispatched, add `blocked_by` on the Task that must finish first;

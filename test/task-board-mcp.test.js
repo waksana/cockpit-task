@@ -94,7 +94,7 @@ test('published tool descriptions explain filters, dispatch races and same-repor
       assert.deepEqual(tool.inputSchema, z.toJSONSchema(toolSchemas[tool.name], { target: 'draft-7' }));
       assert.ok(tool.description.length < 800, `${tool.name}: keep workflow detail in Skills`);
     }
-    assert.match(descriptions.task_read, /list, explicitly filter by orchestrator, assignee or parent_task_id/);
+    assert.match(descriptions.task_read, /list, filter by orchestrator, assignee or parent_task_id, or omit them with status=unfinished for the pre-dispatch conflict check/);
     assert.match(descriptions.task_read, /caller is the session named by host invocation metadata/);
     assert.match(descriptions.task_read, /Reads never acknowledge/);
     const readSchema = tools.find(tool => tool.name === 'task_read').inputSchema;

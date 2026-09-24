@@ -8,6 +8,8 @@ explanation. Familiar reads do not require reloading it. These are the implement
 
 For an overview of your Subtasks, use `view=list` with `orchestrator` set to your session ID.
 For one Task's direct Subtasks, use `view=list` with `parent_task_id` and `status=all`.
+For the pre-dispatch conflict check across all orchestrators, use `view=list` with
+`status=unfinished` and no orchestrator, assignee or parent filter.
 Add `retro="unhandled"` for Tasks whose latest retro has findings but no handling, or
 `retro="watching"`; with a retro filter, `status` defaults to `all`.
 For one Task, use `view=overview` with its `task_id` and select only needed groups
@@ -127,6 +129,7 @@ Selecting `definition` or any other overview groups cannot replace that requirem
 | Records for an explicit one-shot status subscription | `subscriptions` with `task_id` |
 | Ready/blocker-cancelled notices sent for a dependent Task | `dependency_notices` with the dependent's `task_id` |
 | Done/blocked/cancelled notices sent for a Subtask | `child_notices` with the Subtask's `task_id` |
+| Service-sent important-update notices and their delivery | `update_notices` with `task_id` |
 | Every orchestrator decision on a Task's retros | `retro_handlings` with `task_id` |
 
 `definition` and `execution` currently return the same complete Task projection:
