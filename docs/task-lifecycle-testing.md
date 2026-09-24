@@ -205,6 +205,11 @@ this file. These are synthetic observations, not production measurements.
 
 ### Actor and Task map
 
+This map records the protocol as run with the former role pair. On the tree-node model
+(`experiment/hierarchical-delegation`, #66) every actor instead holds the single `node`
+role; the column below then describes each actor's per-Task relation (`actor_role`),
+and "dual" means an actor that is Owner of some Tasks and Executor of its own.
+
 | Actor | Selected roles | Responsibility | Allowed output directory |
 | --- | --- | --- | --- |
 | Owner | `owner` | Delegate and coordinate A-E | `actors/owner/` for private observations; `handoffs/` for explicitly shared pending context |
@@ -548,7 +553,7 @@ r5 final acceptance; inspect actual contents if a new run differs.
 
 Historical baseline only: the queue-removal/interruption procedure and convenience
 commands below are superseded by the current
-[important-update handoff](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md).
+[important-update handoff](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md).
 Current reruns must exercise one `immediate` notice with queued messages left intact
 and no notification-driven interruption. The original S3 evidence is not evidence
 for native immediate delivery; retain it as historical, not current acceptance.
@@ -896,8 +901,8 @@ causality. Session-local review artifacts are not shipped in the module.
 Separately, `skill-frontmatter.test.js` checks concise guidance, role hooks,
 independent reference closure, unchanged subscription boundaries and actual archive
 contents. `task-board-module.test.js` checks declared roots and unchanged tool sets.
-The opt-in host integration above checks Owner, Executor, dual-role and cold-resume
-native discovery of one shared `github-coding`, plus provider-visible metadata.
+The opt-in host integration above checks `node`-role and cold-resume native
+discovery of the `cockpit-task-tree` Skill and one shared `github-coding`, plus provider-visible metadata.
 Its scripted provider and actual isolated SDK/Task effects prove wiring, not the
 model's GitHub choices. No production installation or GitHub operation is part of
 these evaluation fixtures.
@@ -972,7 +977,7 @@ every case or achieved measured tool-count savings.
 | Legacy/default creation | Omit selections; old creation/receipt still works on an older compatible host. Rename remains separate, with one assignment message and no initialization prompt. |
 | Explicit creation or reuse | Discoverable Skill/server names and raw tool names are explicit. Both paths retain requested resource effects and finish with separate ready/idle evidence; unrelated choices survive. |
 | Unsupported host | Any explicit selection, including empty arrays, and every prepare reject with `PREPARATION_UNSUPPORTED` before external effects; no success-shaped fallback. |
-| Candidate exclusion | Unloaded/busy targets, unapplied Executor roles and pending role reloads reject. Any unfinished Task binding rejects even if native idle; completed reuse remains eligible. |
+| Candidate exclusion | Unloaded/busy targets, an unapplied `node` role (formerly Executor) and pending role reloads reject. Any unfinished Task binding rejects even if native idle; completed reuse remains eligible. |
 | Stale tool metadata | Initialize once for null metadata or confirmed selected enablement, including non-null stale metadata after MCP enable. No-op/already-enabled selections with non-null metadata and genuinely missing tools still fail without speculative rebuild. Preserve effects; initialized is not ready and enabled Skill is not body loaded. |
 | Selection failure | Unknown names, `*`, duplicates/limits, filtered-out requested tools, and a server with omitted/empty tools but none offered fail explicitly without installing, authenticating or bypassing policy. |
 | Bounded receipt | Omitted/empty MCP tool selections return one actual offered raw-name witness, not a catalogue; explicit selections return only requested offered names. Errors are at most 2,000 characters and explicitly marked when truncated. |

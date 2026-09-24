@@ -597,12 +597,16 @@ export function activate(context) {
           ? 'An explicit Owner subscription matched a status change. This is not an Executor requirement update; current Task data is shown below.'
           : event === 'ready' || event === 'blocker_cancelled'
             ? 'A blocker of this Task reached a final state. Nothing was assigned or started; the Owner decides. Current Task data is shown below.'
-            : 'Why this message was sent; current Task data is shown below.',
+            : event?.startsWith('child_')
+              ? 'This child Task changed status. The service notifies its Owner, the parent Task\'s Executor, once per transition without a subscription. Current Task data is shown below.'
+              : 'Why this message was sent; current Task data is shown below.',
       }, TASK_EVENTS[event]) : null,
       event === 'status_changed' ? h('span', { className: 'tb-card-meta' },
         'Owner subscription triggered · current state shown below') : null,
       event === 'ready' || event === 'blocker_cancelled' ? h('span', { className: 'tb-card-meta' },
         'Dependency notice to Owner · not assigned or started · current state shown below') : null,
+      event?.startsWith('child_') ? h('span', { className: 'tb-card-meta' },
+        'Child Task notice to Owner · integrate before completing the parent · current state shown below') : null,
       h('span', { className: 'tb-card-title' }, summary),
       task && dependencyLabel(task.blocked_by, task.ready) ? h('span', { className: 'tb-card-meta' }, dependencyLabel(task.blocked_by, task.ready)) : null,
       task && delegationLabel(task.parent_task_id, task.depth) ? h('span', { className: 'tb-card-meta' }, delegationLabel(task.parent_task_id, task.depth)) : null,

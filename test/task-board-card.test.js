@@ -148,12 +148,12 @@ test('activation requires public compatibility and preserves native fallback on 
   const rendered = renderer.component({ node: { kind: 'link', target: `task:${taskId}` }, fallback });
   assert.equal(rendered.props.taskId, taskId);
   assert.equal(rendered.props.event, null);
-  for (const event of ['assigned', 'updated', 'status_changed', 'ready', 'blocker_cancelled']) {
+  for (const event of ['assigned', 'updated', 'status_changed', 'ready', 'blocker_cancelled', 'child_done', 'child_blocked', 'child_cancelled']) {
     const node = { kind: 'link', target: `task:${taskId}?event=${event}`, label: 'An unrelated label' };
     assert.equal(renderer.matches(node), true);
     assert.equal(renderer.component({ node, fallback }).props.event, event);
   }
-  const unknown = { kind: 'link', target: `task:${taskId}?event=deleted`, label: 'Task assigned to you' };
+  const unknown = { kind: 'link', target: `task:${taskId}?event=deleted`, label: 'As Executor: Task assigned to you' };
   assert.equal(renderer.matches(unknown), false);
   assert.equal(renderer.component({ node: unknown, fallback }), fallback);
 });
@@ -181,30 +181,36 @@ test('card event headings come from the message and survive loading, failure and
   };
   const heading = card => card.children.find(child => child?.props?.className === 'tb-card-event');
   assert.equal(render('assigned').props.className, 'ck-button tb-card');
-  assert.deepEqual(heading(render('assigned')).children, ['Task assigned to you']);
-  assert.deepEqual(heading(render('status_changed')).children, ['Task status updated']);
+  assert.deepEqual(heading(render('assigned')).children, ['As Executor: Task assigned to you']);
+  assert.deepEqual(heading(render('status_changed')).children, ['As Owner: Task status updated']);
   snapshot = { phase: 'ready', data: { ...result, status: 'done', revision: 4 }, error: null };
-  assert.deepEqual(heading(render('assigned', 'Task updated')).children, ['Task assigned to you']);
-  assert.deepEqual(heading(render('updated', 'Task assigned to you')).children, ['Task updated']);
-  const notification = render('status_changed', 'Task updated');
-  assert.deepEqual(heading(notification).children, ['Task status updated']);
+  assert.deepEqual(heading(render('assigned', 'As Executor: Task updated')).children, ['As Executor: Task assigned to you']);
+  assert.deepEqual(heading(render('updated', 'As Executor: Task assigned to you')).children, ['As Executor: Task updated']);
+  const notification = render('status_changed', 'As Executor: Task updated');
+  assert.deepEqual(heading(notification).children, ['As Owner: Task status updated']);
   assert.match(heading(notification).props.title, /not an Executor requirement update/);
   assert.ok(notification.children.some(child => child?.children?.includes('Owner subscription triggered · current state shown below')));
   snapshot = { phase: 'ready', data: { ...result, status: 'in_progress', revision: 5 }, error: null };
-  assert.deepEqual(heading(render('status_changed')).children, ['Task status updated']);
-  assert.equal(heading(render(null, 'Task updated')), undefined);
+  assert.deepEqual(heading(render('status_changed')).children, ['As Owner: Task status updated']);
+  assert.equal(heading(render(null, 'As Executor: Task updated')), undefined);
   const ready = render('ready');
-  assert.deepEqual(heading(ready).children, ['Task ready']);
+  assert.deepEqual(heading(ready).children, ['As Owner: Task ready']);
   assert.match(heading(ready).props.title, /Nothing was assigned or started/);
   assert.ok(ready.children.some(child => child?.children?.includes('Dependency notice to Owner · not assigned or started · current state shown below')));
-  assert.deepEqual(heading(render('blocker_cancelled')).children, ['Task blocker cancelled']);
+  assert.deepEqual(heading(render('blocker_cancelled')).children, ['As Owner: Task blocker cancelled']);
+  for (const status of ['done', 'blocked', 'cancelled']) {
+    const child = render(`child_${status}`, 'An unrelated label');
+    assert.deepEqual(heading(child).children, [`As Owner: child Task ${status}`]);
+    assert.match(heading(child).props.title, /once per transition without a subscription/);
+    assert.ok(child.children.some(entry => entry?.children?.includes('Child Task notice to Owner · integrate before completing the parent · current state shown below')));
+  }
   snapshot = { phase: 'ready', data: { ...result, blocked_by: [{ task_id: taskId, status: 'cancelled' }], ready: false }, error: null };
   assert.ok(render(null).children.some(child => child?.children?.includes('Blocked by 1 Task · 0 done · 1 cancelled (Owner decision needed) · not ready')));
   snapshot = { phase: 'ready', data: { ...result, blocked_by: [], ready: true }, error: null };
   assert.equal(render(null).children.some(child => String(child?.children?.[0] ?? '').startsWith('Blocked by')), false);
   snapshot = { phase: 'missing', data: null, error: new Error('Missing Task') };
-  assert.deepEqual(heading(render('updated')).children, ['Task updated']);
-  assert.deepEqual(heading(render('status_changed')).children, ['Task status updated']);
+  assert.deepEqual(heading(render('updated')).children, ['As Executor: Task updated']);
+  assert.deepEqual(heading(render('status_changed')).children, ['As Owner: Task status updated']);
 });
 
 test('HTTP reads use the scoped POST contract, without reported actor or chat requests', async () => {

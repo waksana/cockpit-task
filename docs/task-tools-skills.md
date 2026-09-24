@@ -7,25 +7,31 @@
 
 ## 1. 角色资源与工具
 
-Task 提供 [Owner Skill](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md)
-和 [Executor Skill](../skills/cockpit-task-executor/cockpit-task-executor/SKILL.md)，
-并随包提供独立工作 Skill [github-coding](../skills/github-coding/github-coding/SKILL.md)。
+Task 提供一个树节点角色 `node` 与一个合并 Skill
+[cockpit-task-tree](../skills/cockpit-task-tree/cockpit-task-tree/SKILL.md)，并随包提供独立工作 Skill
+[github-coding](../skills/github-coding/github-coding/SKILL.md)。
 工作方法与协作角色正交，不新增 Task 子类型；非编码或研究工作不加载编码流程。
 
 | 角色 | 常驻指令 | 注入的 Task 工具 |
 | --- | --- | --- |
-| Owner | [task-owner.md](../roles/task-owner.md) | `task_read`、`task_create`、`task_session_create`、`task_session_prepare`、`task_assign`、`task_edit`、`task_cancel`、`task_subscribe`、`task_unsubscribe`、`task_script_read`、`task_script_register`、`task_automation_start`、`task_automation_reconcile` |
-| Executor | [task-executor.md](../roles/task-executor.md) | `task_read`、`task_edit`、`task_ack`、`task_report`、`task_reopen`、`task_cancel` |
+| Task node | [task-node.md](../roles/task-node.md) | 全部十六个：`task_read`、`task_create`、`task_session_create`、`task_session_prepare`、`task_assign`、`task_edit`、`task_cancel`、`task_subscribe`、`task_unsubscribe`、`task_script_read`、`task_script_register`、`task_automation_start`、`task_automation_reconcile`、`task_ack`、`task_report`、`task_reopen` |
 
-共十六个工具。宿主可组合两种角色，工具取并集、相同资源去重；角色管理由宿主负责。
-Task 不提供给已有 session 追加角色的工具，指派也不补能力。角色是协作能力，
-不是项目身份、实际承接或逐 Task ACL；自报 actor 只是归因。
+每个 session 都是 Task 树中的节点：有被指派的 Task 就负责完成它（亲自做或编排子 Task），
+没有就作为根节点委派交付。Owner/Executor 是针对某个 Task 的事实（`owner`/`executor`
+字段与读取返回的 `actor_role`），不是 session 的角色；旧的 `owner`/`executor` 角色已删除，
+无别名，旧 session 需由根节点改为 `node`。Task 不提供给已有 session 追加角色的工具，
+指派也不补能力。自报 actor 只是归因；服务拒绝自我指派（`SELF_ASSIGNMENT`）、
+沿祖先链的回环指派（`DELEGATION_CYCLE`）及执行中节点替他人建 Task 或他人替其建
+（`DELEGATION_OWNER_MISMATCH`）。
+
+Skill 按类别组织：[executing](../skills/cockpit-task-tree/cockpit-task-tree/references/executing.md) 指导作为 Executor 的完成责任，
+[delegating](../skills/cockpit-task-tree/cockpit-task-tree/references/delegating.md) 指导作为 Owner 的委派，
+其余参考为读取、写入与恢复、链接、重要更新和自动化。
 
 常驻 prompt 固定责任及加载入口；Skill 正文指导判断，随包 references 解释
 具体问题。外层目录是原生发现根目录，内层技能自包含，不依赖仓库 docs。
-两角色的 `skillDirectories` 都包含同一个 `skills/github-coding` 根；
-双角色由宿主按同源资源去重。Task 正文按名字指向这个可发现工作 Skill，
-不假定 Executor 继承 Owner 已读的上下文，也不在 role prompt 注入整套方法。
+`node` 的 `skillDirectories` 包含 `skills/cockpit-task-tree` 与 `skills/github-coding` 根。
+Task 正文按名字指向这个可发现工作 Skill，不假定子 Task 的 Executor 继承 Owner 已读的上下文，也不在 role prompt 注入整套方法。
 
 首次需要时加载 Skill，指令仍在上下文时复用。压缩/恢复后缺失、内容改变或
 具体规则不清楚时再读，不因每条消息或检查点重复加载。稳定指导可以复用，
@@ -75,7 +81,7 @@ Task done 是约定结果，不等于 session 空闲。
 Owner 可只读了解情况、回答问题和澄清目标。实施及改变外部状态的交付默认通过
 Task 交给独立 Executor，不亲自实施或用自身 subagent 绕过委派。
 要求达成结果不等于要求本人执行；明确的本人执行要求或实际 Executor 指派才是例外。
-双角色选择本身不是承接，无法委派应说明阻塞。
+仅持有 node 角色本身不是承接，无法委派应说明阻塞。
 
 将一个完整成果放在一个 Task，独立成果才分别登记。创建或修订 description 时，
 完整保留本项工作的目标、范围、关键决定、授权边界、特殊约束和完成条件；
@@ -92,7 +98,7 @@ Task 是共同工作记录，不是原始证据仓库：详细证据用可访问
    不从 Task 正文猜资源，backlog 登记不派单。
 2. 用 `task_session_create` 显式选择资源，或以 `task_session_prepare` 准备符合条件的
    既有 Executor。排除任何绑定未结束 Task 的 session，即使 native idle；
-   目标须已加载空闲、Executor 角色已应用且无待重载角色。检查 operation 回执，
+   目标须已加载空闲、`node` 角色已应用且无待重载角色。检查 operation 回执，
    不强制优先新建/复用，未知效果不盲重试或替换。
 3. 用 `task_assign` 进行能力/原生状态检查、绑定和一次 assigned 派单。
    不另发首条消息，不把角色标签当成就绪证明。
@@ -120,7 +126,7 @@ Task/session、不重新派单或代 Executor 重开。保留原责任和环境�
 
 Agent 仍是默认；Owner 仅为可信、可重复的已知脚本选择服务执行，不把任意工作
 脚本化，也不亲自实施来绕过委派。按需读
-[Owner 脚本参考](../skills/cockpit-task-owner/cockpit-task-owner/references/automation.md)：
+[Owner 脚本参考](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md)：
 发现/不可变登记 → task_create 保存配置与类型化输入快照 → 可选必要订阅 → 显式 start。
 无 Executor、ACK、session 占用、自动订阅或子任务；服务单队列，不是工作流引擎。
 成功 done+outcome，失败/中断 blocked+outcome；取消不回滚，reconcile 仅证明终止后
@@ -180,18 +186,21 @@ activity 不自动改状态，outcome 不自动 done。完成最新已确认约�
 | 引用 | 使用规则 |
 | --- | --- |
 | `[Task](task:<uuid>)` | 普通引用 |
-| `[Task assigned to you](task:<uuid>?event=assigned)` | `task_assign` 的完整首次派单；Owner 不重复发送 |
-| `[Task updated](task:<uuid>?event=updated)` | Owner 明确的重要要求更新，附读取/ACK 最新版要求 |
-| `[Task status updated](task:<uuid>?event=status_changed)` | 系统按显式一次性订阅通知 Task.owner，不是 Executor 的 ACK 通知 |
-| `[Task ready](task:<uuid>?event=ready)` | `blocked_by` 全部 done 后系统通知依赖方 Owner；不代表已指派或启动 |
-| `[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)` | 待派发依赖方的 blocker 取消后系统通知 Owner 重新评估 |
+| `[As Executor: Task assigned to you](task:<uuid>?event=assigned)` | `task_assign` 的完整首次派单；Owner 不重复发送 |
+| `[As Executor: Task updated](task:<uuid>?event=updated)` | Owner 明确的重要要求更新，附读取/ACK 最新版要求 |
+| `[As Owner: Task status updated](task:<uuid>?event=status_changed)` | 系统按显式一次性订阅通知 Task.owner，不是 Executor 的 ACK 通知 |
+| `[As Owner: Task ready](task:<uuid>?event=ready)` | `blocked_by` 全部 done 后系统通知依赖方 Owner；不代表已指派或启动 |
+| `[As Owner: Task blocker cancelled](task:<uuid>?event=blocker_cancelled)` | 待派发依赖方的 blocker 取消后系统通知 Owner 重新评估 |
+| `[As Owner: child Task done](task:<uuid>?event=child_done)` | 子 Task 每次真实进入 done 时系统通知其 Owner，无需订阅；同一转换已触发订阅或父 Task 已结束时不发 |
+| `[As Owner: child Task blocked](task:<uuid>?event=child_blocked)` | 子 Task 每次真实进入 blocked 时系统通知其 Owner，无需订阅；同一转换已触发订阅或父 Task 已结束时不发 |
+| `[As Owner: child Task cancelled](task:<uuid>?event=child_cancelled)` | 子 Task 每次真实进入 cancelled 时系统通知其 Owner，无需订阅；同一转换已触发订阅或父 Task 已结束时不发 |
 
 使用真实 UUID。event 由 URL 明确给出，只有上表小写值有效；不是 Task 类型、
 状态、命令或事件总线。卡片读取当前数据，消息原因保持不变。
 完整语法见[引用契约](task-implementation.md#read-boundaries-and-reference)。
 
 普通要求更新只改 Task，不排队发送 cue。Owner 仅在重要变更不能等待正常检查点时，
-按[重要更新参考](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md)
+按[重要更新参考](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md)
 先保存完整要求并核对同一未结束指派及未 ACK 的最新 revision，再通过已有
 `cockpit_send_prompt` 的 `mode:"immediate"` 单次发送 updated 引用和读取/ACK 要求。
 不复制 description、不整理或重放队列、不为通知中断工作；未知效果只作有界核对，
@@ -247,12 +256,15 @@ definition_check 检查本次定向 Task 及 actor 承接的未结束 Task，不
 
 ## 6. 按问题加载参考
 
-| 问题 | Owner | Executor |
-| --- | --- | --- |
-| 视图、字段、截断和分页 | [Task 读取](../skills/cockpit-task-owner/cockpit-task-owner/references/reading-tasks.md) | [Task 读取](../skills/cockpit-task-executor/cockpit-task-executor/references/reading-tasks.md) |
-| 写入、冲突、部分结果与恢复 | [写入与恢复](../skills/cockpit-task-owner/cockpit-task-owner/references/task-writes-and-recovery.md) | [写入与恢复](../skills/cockpit-task-executor/cockpit-task-executor/references/task-writes-and-recovery.md) |
-| Task 引用和通知原因 | [Task 链接](../skills/cockpit-task-owner/cockpit-task-owner/references/task-links.md) | [Task 链接](../skills/cockpit-task-executor/cockpit-task-executor/references/task-links.md) |
-| 重要变更不能等正常检查点 | [重要更新](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md) | 读取完整 execution 并 ACK 最新 revision |
+| 问题 | 参考 |
+| --- | --- |
+| 作为 Executor 完成 Task | [执行](../skills/cockpit-task-tree/cockpit-task-tree/references/executing.md) |
+| 作为 Owner 委派子 Task | [委派](../skills/cockpit-task-tree/cockpit-task-tree/references/delegating.md) |
+| 视图、字段、截断和分页 | [Task 读取](../skills/cockpit-task-tree/cockpit-task-tree/references/reading-tasks.md) |
+| 写入、冲突、部分结果与恢复 | [写入与恢复](../skills/cockpit-task-tree/cockpit-task-tree/references/task-writes-and-recovery.md) |
+| Task 引用和通知原因 | [Task 链接](../skills/cockpit-task-tree/cockpit-task-tree/references/task-links.md) |
+| 重要变更不能等正常检查点 | Owner：[重要更新](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md)；Executor：读取完整 execution 并 ACK 最新 revision |
+| 可信脚本与自动化 | [自动化](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md) |
 
 只读当前需要的参考，不每轮加载全套。Skill 指导真实行为，工具保护数据一致性；
 两者都不保证自然语言遵从性、验证用户授权或扩大任务范围。

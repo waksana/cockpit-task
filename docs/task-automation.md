@@ -33,7 +33,7 @@ ordinary Agent Tasks are unaffected.
    service's persistent single queue, not in an Agent session.
 
 All required arguments and real JSON examples are in the independently packaged
-[Owner reference](../skills/cockpit-task-owner/cockpit-task-owner/references/automation.md).
+[Owner reference](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md).
 Exact schemas and bounds are in the [MCP contract](task-mcp-contract.md).
 
 Execution uses `executable [...argv, script_path, ...typedStrings]` with no shell.

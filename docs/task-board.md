@@ -12,8 +12,10 @@ v6 data, and switching back to an older package is not a database rollback.
 Validate migration on an isolated consistent copy before authorized deployment;
 never overwrite live data with a historical backup.
 The long-lived `experiment/hierarchical-delegation` branch (#66) adds per-Task
-hierarchical delegation and schema v7 (nullable `tasks.parent_task_id`, `tasks.depth`)
-through a column-only forward migration; existing Tasks stay top-level. Schema v7 is
+hierarchical delegation and schema v7 (nullable `tasks.parent_task_id`, `tasks.depth`
+and a new `child_notices` table) through a forward migration that only adds columns
+and a table; existing Tasks stay top-level. It replaces the Owner/Executor roles with
+one `node` role and one merged `cockpit-task-tree` Skill. Schema v7 is
 roll-forward only: installed 0.1.12 cannot open v7 data. The branch has no version
 bump or deployment and must stay cleanly mergeable into main.
 
@@ -45,16 +47,25 @@ Source support is not a release or deployment claim.
 
 ## Roles and records
 
-Choose Owner, Executor or both through the host's role management. The host
-assembles role System Prompts, Skills and HTTP MCP subsets, persists the selection
-and reassembles it on cold resume. Host role changes for existing sessions are
+Every session is a Task tree node and receives the single `node` role (Task node)
+through the host's role management. The host assembles its System Prompt, Skills and
+all sixteen HTTP MCP tools, persists the selection and reassembles it on cold resume.
+The former `owner` and `executor` roles are removed without aliases; the root node
+gives older sessions `node`. Host role changes for existing sessions are
 separate from Task operations: Task does not expose that mutation or automatically
 add capabilities during assignment.
 
-| Role | Responsibility |
+Owner and Executor are per-Task facts, not session roles:
+
+| Relation to a Task | Responsibility |
 | --- | --- |
-| Owner | Clarify, register, explicitly assign and follow independent Tasks |
-| Executor | Deliver one entire assigned outcome, organizing internal steps/subagents |
+| Owner (`owner` field) | Clarify, register, explicitly assign and follow independent Tasks |
+| Executor (`executor` field) | Deliver one entire assigned outcome, organizing internal steps, subagents or child Tasks |
+
+Reads given `actor_session_id` return `actor_role` (`executor`, `owner`,
+`owner_and_executor` or `none`), and card labels are prefixed "As Executor:" or
+"As Owner:" so a node knows which relation a message concerns. A node with an
+assignment owns completing it; a node without one delegates delivery as root.
 
 Agent Tasks remain the default. Owner may explicitly choose a trusted repeatable
 known script instead, using a service-managed automation Task—not arbitrary work,
@@ -64,7 +75,7 @@ a fake Executor or a child-Task workflow. See
 Owner may investigate read-only and answer questions, but delegates implementation
 and state-changing delivery by default. An outcome request is not a request for
 personal execution. Explicit personal-execution instruction or a real assignment
-as a capable Executor is an exception; dual-role selection alone is not.
+as a capable Executor is an exception; holding the node role alone is not.
 Unavailable delegation is a blocker, not permission to take over.
 For coding, Owner states requirements and references any existing Issue; it does
 not prepare or clean up branches/worktrees and does not implement code.
@@ -76,7 +87,16 @@ is executing an unfinished Agent Task records `parent_task_id` and `depth`
 (top-level = 1, capped at 3; deeper creation fails with `DELEGATION_DEPTH_EXCEEDED`).
 A child must be more specific than its parent, never passed down unchanged and within
 the parent's authorized scope; the parent integrates child results before done.
-`task_session_create` gives new sessions both roles. The board shows the delegation
+The service rejects self-assignment (`SELF_ASSIGNMENT`), assigning an ancestor's Owner
+or Executor (`DELEGATION_CYCLE`), and creation where the actor executing an
+unfinished Agent Task differs from `owner`, or `owner` is executing and the actor
+differs (`DELEGATION_OWNER_MISMATCH`). When a child reaches done, blocked or
+cancelled, the service sends its Owner (the parent's Executor) one
+`[As Owner: child Task done](task:<uuid>?event=child_done)` card per transition
+(`child_blocked`/`child_cancelled` likewise) without a subscription, skipping it when a
+subscription already fired for that transition or the parent is finished; the
+`child_notices` read view pages delivery facts.
+`task_session_create` gives new sessions the `node` role. The board shows the delegation
 level, a lazy parent link and a lazy child list. There is no workflow engine or
 reassignment; `blocked_by` is only a readiness gate and lineage does not gate readiness. Only the original Executor may self-reopen an eligible
 done Agent Task for explicitly user-authorized rework; cancelled and automation
@@ -95,15 +115,17 @@ retro. Busy original-session execution is allowed; current capability readiness
 is still checked. No dispatch/self-prompt, subscription renewal, duplicate notice,
 mandatory activity log, round state machine or UI reopen button is added.
 
-The active Skills are [cockpit-task-owner](../skills/cockpit-task-owner/cockpit-task-owner/SKILL.md)
-and [cockpit-task-executor](../skills/cockpit-task-executor/cockpit-task-executor/SKILL.md).
+The active Skill is [cockpit-task-tree](../skills/cockpit-task-tree/cockpit-task-tree/SKILL.md), organized by category:
+[executing](../skills/cockpit-task-tree/cockpit-task-tree/references/executing.md) as Executor,
+[delegating](../skills/cockpit-task-tree/cockpit-task-tree/references/delegating.md) as Owner, plus reading, writes and recovery,
+links, important updates and automation references.
 Load when first needed, reuse guidance in context, and reload only when missing,
-changed or unclear. Each bundles its own on-demand references; stable Skill reuse
+changed or unclear. Load only the reference a question needs; stable Skill reuse
 does not replace fresh Task reads.
 
-Both roles also discover the same self-contained
+The node role also discovers the self-contained
 [github-coding](../skills/github-coding/github-coding/SKILL.md) work Skill through
-their declared discovery roots; selecting both deduplicates that resource.
+its declared discovery roots.
 Applicability depends on changes intended for commit to version-controlled repository
 files, not GitHub mentions. Deployment of existing verified artifacts and runtime
 configuration use Task without this Skill requiring Issue/PR/branch/worktree;
@@ -269,11 +291,14 @@ are allowed. Ordinary edits/reports stay silent without an explicit subscription
 | Purpose | Reference |
 | --- | --- |
 | Ordinary reference | `[Task](task:<uuid>)` |
-| Entire automatic first dispatch | `[Task assigned to you](task:<uuid>?event=assigned)` |
-| Explicit important-update notice | `[Task updated](task:<uuid>?event=updated)` |
-| System notice from a status subscription | `[Task status updated](task:<uuid>?event=status_changed)` |
-| Dependent's blockers are all done | `[Task ready](task:<uuid>?event=ready)` |
-| A blocker of a waiting dependent was cancelled | `[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)` |
+| Entire automatic first dispatch | `[As Executor: Task assigned to you](task:<uuid>?event=assigned)` |
+| Explicit important-update notice | `[As Executor: Task updated](task:<uuid>?event=updated)` |
+| System notice from a status subscription | `[As Owner: Task status updated](task:<uuid>?event=status_changed)` |
+| Dependent's blockers are all done | `[As Owner: Task ready](task:<uuid>?event=ready)` |
+| A blocker of a waiting dependent was cancelled | `[As Owner: Task blocker cancelled](task:<uuid>?event=blocker_cancelled)` |
+| A child Task became done, sent to its Owner | `[As Owner: child Task done](task:<uuid>?event=child_done)` |
+| A child Task became blocked, sent to its Owner | `[As Owner: child Task blocked](task:<uuid>?event=child_blocked)` |
+| A child Task became cancelled, sent to its Owner | `[As Owner: child Task cancelled](task:<uuid>?event=child_cancelled)` |
 
 Pass only the UUID to tools. Event values are exact lowercase URL metadata, not
 Task fields, commands or inferred states. Generic references have no event title;
@@ -286,7 +311,7 @@ history are fetched from Task. Native session observations are labelled separate
 read on demand and never imply business progress or capability readiness.
 
 For an exceptionally important change that cannot wait for checkpoints, Owner
-follows the [important-update handoff](../skills/cockpit-task-owner/cockpit-task-owner/references/important-updates.md):
+follows the [important-update handoff](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md):
 save the updated Task, confirm the same unfinished assignment and unacknowledged
 latest revision, then send one `cockpit_send_prompt` notice with `mode:"immediate"`.
 It interjects into a running turn without queue handling or interruption, carrying
@@ -372,7 +397,7 @@ npm run package:module
 ```
 
 `dist/cockpit-task-0.1.12.tgz` contains runtime dependencies, backend/frontend assets,
-role prompts, two role Skills and the shared coding Skill. Its `.sha256` sidecar identifies the
+the node role prompt, the tree Skill and the shared coding Skill. Its `.sha256` sidecar identifies the
 archive. [Task CI](https://github.com/waksana/cockpit-task/blob/main/.github/workflows/task-board-ci.yml) retains these as the
 `cockpit-task-module` artifact; an artifact is not an installation or deployment.
 

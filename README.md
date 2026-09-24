@@ -1,33 +1,41 @@
 # Task
 
-Task 是 Cockpit 模块：用共同的持久化 Task 记录协作，通过 Owner / Executor
+Task 是 Cockpit 模块：用共同的持久化 Task 记录协作，通过唯一的 `node`
 角色组合 System Prompt、Skill 和 HTTP MCP。Task 引用直接在聊天中显示卡片，详情按需读取；
 不保存聊天、不自动监工或做依赖调度。默认不发送进度或完成通知；
 默认不登记订阅；仅当未来状态会使 Owner 需要作决定、安排后续独立工作等必要行动时，
 由 Owner 自行判断并显式登记一次性订阅，不为追踪进度或确认完成而订阅。
 
-Owner / Executor 是 Task 提供的协作能力，不是 session 的业务身份。例如 Cockpit Owner
-仍负责 Cockpit 本体，选择 Owner 只增加任务协调能力，不表示负责开发 Task 模块或绑定某条 Task。
+每个 session 都是 Task 树的节点：有被指派的 Task 就负责完成它，可亲自完成或在授权范围内
+编排子 Task；没有 Task 的根节点委派交付。Owner / Executor 由每条 Task 的事实决定，读取结果以
+`actor_role` 标明，卡片以 “As Executor:” / “As Owner:” 前缀说明身份；它们不是 session
+的业务身份，也不是可选角色。旧 `owner` / `executor` 角色已删除且无别名。
+服务拒绝自我指派、沿祖先链的回环指派，以及执行中节点与他人互相代建 Task。
+
+子 Task 进入 done、blocked 或 cancelled 时，服务自动向其 Owner（父 Task 的 Executor）
+每次转换发送一张 `[As Owner: child Task done](task:<uuid>?event=child_done)`（或
+`child_blocked` / `child_cancelled`）卡片，无需订阅；同一次转换若已触发订阅则不重复，
+父 Task 已结束时不发送。旧的无前缀卡片标签仍可识别。
 
 通用引用为 `[Task](task:<uuid>)`；首次指派由 `task_assign` 仅发送一次
-`[Task assigned to you](task:<uuid>?event=assigned)`。Owner 明确决定的重要更新
-使用 `[Task updated](task:<uuid>?event=updated)`，并要求读取、ACK 最新版本。
+`[As Executor: Task assigned to you](task:<uuid>?event=assigned)`。Owner 明确决定的重要更新
+使用 `[As Executor: Task updated](task:<uuid>?event=updated)`，并要求读取、ACK 最新版本。
 event 只说明这条消息的原因，不是 Task 状态；卡片仍读取当前数据，普通编辑不发通知。
 
-状态订阅使用独立的 `[Task status updated](task:<uuid>?event=status_changed)`，
+状态订阅使用独立的 `[As Owner: Task status updated](task:<uuid>?event=status_changed)`，
 发送给 Task 的 Owner，不是要求 Executor 读取并 ACK 的更新指令。
 登记时若已处于目标状态则明确失败，不创建订阅或补发消息；只有登记后第一次
 进入目标状态才触发，不重复订阅、不轮询、不打断 Owner 当前工作。
 
 “A 完成后做 B”时，Owner 立即以 `blocked_by` 创建未指派的 B 并写完整要求，
 不必为每个前置 Task 订阅。所有 blocker done 前 `task_assign` / `task_automation_start`
-返回 `TASK_NOT_READY`；就绪只发送 `[Task ready](task:<uuid>?event=ready)` 给 B 的 Owner，
-blocker 取消则发送 `[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)`，
+返回 `TASK_NOT_READY`；就绪只发送 `[As Owner: Task ready](task:<uuid>?event=ready)` 给 B 的 Owner，
+blocker 取消则发送 `[As Owner: Task blocker cancelled](task:<uuid>?event=blocker_cancelled)`，
 不自动改状态、指派或启动。blocker 须同一 Owner、无环、最多 20 个。
 
 默认 Agent Task 由一个 Executor 完整负责，可在内部使用 subagents。要求直接修改 Task，
-Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的版本。没有子任务树、
-改派或任意终态回退。用户明确授权返工时，符合条件的原 Executor 可自行
+Executor 在同步点读取并 ACK；执行动态和结果带有实际确认的版本。可在授权范围内
+编排子 Task（受深度上限限制），没有改派或任意终态回退。用户明确授权返工时，符合条件的原 Executor 可自行
 `task_reopen` 同一 done Agent Task；不重新派单、不自发消息、不更换责任人。
 必须为 schema v5 升级后有持久序号的指派，且自该次指派后未承接其他 Task
 （后来已完成/取消也不例外）、没有其他未结束 Task。升级前已指派的全部不符合条件，
@@ -54,7 +62,7 @@ Owner 也可为已授权、可信、可重复的已知脚本选择轻量 automat
 Linux 进程组终止屏障只由 `task_automation_reconcile` 在内核确认组已不存在后解除；
 未回收 zombie 也会保持屏障，须由宿主回收，不手改数据库绕过。
 取消不回滚副作用。详见[轻量自动化](docs/task-automation.md)及
-[Owner 脚本参考](skills/cockpit-task-owner/cockpit-task-owner/references/automation.md)。
+[Owner 脚本参考](skills/cockpit-task-tree/cockpit-task-tree/references/automation.md)。
 
 编码流程按是否需要修改并提交仓库文件判断，不按 GitHub 或部署等关键词触发。
 纯部署使用现有已验证产物时用 Task，不由本 Skill 强制 Issue/PR/branch/worktree；
@@ -111,10 +119,10 @@ npm run package:module
 `cockpit.module.json` 是模块入口。归档输出到 `dist/cockpit-task-<version>.tgz`，
 供支持所需接口的 Cockpit 装载；Task 不提供独立服务启动命令。
 
-模块 ID、MCP key 和包名均为 `cockpit-task`；正式角色 Skill 为
-[Owner](skills/cockpit-task-owner/cockpit-task-owner/SKILL.md) 和
-[Executor](skills/cockpit-task-executor/cockpit-task-executor/SKILL.md)。
-两角色都通过现有装载机制发现同一份 `github-coding` 工作 Skill，双角色不会重复装配，
+模块 ID、MCP key 和包名均为 `cockpit-task`；唯一角色为 `node`（Task node），合并 Skill 为
+[cockpit-task-tree](skills/cockpit-task-tree/cockpit-task-tree/SKILL.md)，
+按执行、委派、读取、写入、链接、重要更新和自动化分类组织参考。
+节点同时通过现有装载机制发现 `github-coding` 工作 Skill，
 选择角色不等于每次都加载正文。准备包版本为 `0.1.12`；不同内容使用新版本，
 不覆盖同版本的既有安装。源码合并、CI 归档均不会自动升级线上。
 持久化仅使用宿主提供的模块目录，不自动导入其他数据库或修改既有安装。
@@ -122,6 +130,6 @@ npm run package:module
 Task 依赖新增 schema v6（`task_dependencies`、`dependency_notices`），v5→v6
 迁移只新建表。schema v6 只能向前滚动：已安装的 `0.1.11` 不能打开 v6；
 切回旧包不等于数据库回退，不得用历史备份覆盖实时数据。部署前应在隔离的一致副本上验证迁移。
-长期分支 `experiment/hierarchical-delegation`（#66）引入按 Task 区分的层级委派：session 对自己被指派的 Task 是 Executor，对其创建的子 Task 是 Owner；新增 schema v7（`tasks.parent_task_id`、`tasks.depth`，最多 3 层，超出返回 `DELEGATION_DEPTH_EXCEEDED`），只能向前滚动，已安装的 `0.1.12` 不能打开 v7。该分支不升级版本、不部署。
+长期分支 `experiment/hierarchical-delegation`（#66）引入按 Task 区分的层级委派：session 对自己被指派的 Task 是 Executor，对其创建的子 Task 是 Owner；新增 schema v7（`tasks.parent_task_id`、`tasks.depth`，最多 3 层，超出返回 `DELEGATION_DEPTH_EXCEEDED`；新表 `child_notices`），以唯一 `node` 角色和合并 Skill `cockpit-task-tree` 取代 Owner/Executor 角色，只能向前滚动，已安装的 `0.1.12` 不能打开 v7。该分支不升级版本、不部署。
 `0.1.11` 在 `0.1.10` 基础上包含 Owner 顺序订阅跟进（#53）和 Executor 会话标题（#55），
 不新增 schema 迁移。升级为 schema v5 时不回填历史指派；升级前已派单 Task 保持可读但均不可重开。

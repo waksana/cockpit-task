@@ -60,7 +60,7 @@ test('official MCP tools/list publishes all Task read selectors and a required v
     'request_id', 'revision', 'status', 'task_id', 'view',
   ].sort());
   assert.deepEqual(schema.properties.view.enum, [
-    'list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'subscriptions', 'dependency_notices', 'automation_log', 'operation',
+    'list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'subscriptions', 'dependency_notices', 'child_notices', 'automation_log', 'operation',
   ]);
   assert.equal(schema.properties.task_id.type, 'string');
   assert.equal(schema.properties.task_id.format, 'uuid');

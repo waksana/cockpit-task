@@ -28,14 +28,25 @@ per pair, no self-edge, indexed by blocker, and `dependency_notices` with
 `blocker_cancelled`, plus the same pending/unknown/accepted delivery columns as
 subscriptions. The v5→v6 migration only creates these tables; installed 0.1.12
 opens schema v6, but installed 0.1.11 cannot. Schema v6 is roll-forward only.
-On `experiment/hierarchical-delegation` (#66), schema v7 adds nullable
+On `experiment/hierarchical-delegation` (#66), schema v7 adds `child_notices`
+(`UNIQUE(task_id, status, child_lifecycle)`, status done/blocked/cancelled, the same
+delivery columns) plus nullable
 `tasks.parent_task_id REFERENCES tasks(id)` and `tasks.depth INTEGER NOT NULL DEFAULT 1`
-(`CHECK(depth>=1)`, indexed by parent). The v6→v7 migration only adds absent columns,
-so existing Tasks become top-level; installed 0.1.12 cannot open v7. `task_create`
+(`CHECK(depth>=1)`, indexed by parent). The v6→v7 migration only adds absent columns
+and the table, so existing Tasks become top-level; installed 0.1.12 cannot open v7. `task_create`
 looks up the Owner's unfinished Agent Task where it is Executor in the same write
 transaction; that Task becomes the parent and `depth` is its depth plus one, rejected
 with `DELEGATION_DEPTH_EXCEEDED` beyond 3 levels before any row is saved. Lineage is
-immutable and changes no readiness, notice, assignment or authority rule.
+immutable and changes no readiness or authority rule. Creation also rejects
+`DELEGATION_OWNER_MISMATCH` when the actor executes an unfinished Agent Task and
+`owner` differs, or `owner` executes one and the actor differs. `bindAssignment`
+rejects `SELF_ASSIGNMENT` (executor = owner) and `DELEGATION_CYCLE` (executor owns or
+executes any ancestor) before readiness. A child's real transition into
+done/blocked/cancelled, in the same write transaction (including automation
+`finish`), inserts one `child_notices` row for its Owner when the parent is unfinished,
+the parent's Executor is that Owner and no subscription fired for the transition;
+delivery and startup recovery share the subscription path. Reads with
+`actor_session_id` derive `actor_role` from `owner`/`executor`; nothing is stored.
 Blocker sets are validated in the write transaction: at most
 20 unique ids, existing same-Owner Tasks, no self or newly added cancelled blocker,
 and no cycle (recursive CTE). Edits are allowed only while the dependent awaits
@@ -91,11 +102,11 @@ another Executor has read a definition. The backend does not verify reading,
 understanding or user authorization through actor IDs or chat inspection.
 
 The host controls role management, including changes to existing sessions.
-Task itself exposes no such mutation: session creation selects Executor for
-the new session, while assignment checks existing capabilities without adding
+Task itself exposes no such mutation: session creation selects the single `node`
+role for the new session, while assignment checks existing capabilities without adding
 roles, enabling resources or repairing the target.
 Explicit preparation is separate: only loaded idle sessions with an applied
-Executor role, no pending role reload and no unfinished Task are eligible.
+`node` role, no pending role reload and no unfinished Task are eligible.
 There is no bound-Task repair mode or automatic resource selection from Task text.
 
 ## Concurrency and replay
@@ -280,7 +291,7 @@ Assignment proceeds as follows:
 2. Bind the unassigned todo transactionally, enforcing single unfinished work.
 3. Recheck capability/native state and the Task's version, lifecycle and binding.
 4. Persist message uncertainty before calling host `prompt` once with the entire
-   message `[Task assigned to you](task:<uuid>?event=assigned)` and `mode:"enqueue"`.
+   message `[As Executor: Task assigned to you](task:<uuid>?event=assigned)` and `mode:"enqueue"`.
 
 The idle checks and send are not atomic. Enqueue avoids proactively interrupting
 a turn that starts in the race; an actual `queued:true` result is retained as
@@ -323,7 +334,7 @@ The delivery record is a bounded durable outbox, not a second native queue or
 scheduler. A passive `session/get` lookup first checks the original Owner exists.
 Missing/unavailable Owners produce `not_sent` evidence; no replacement is created.
 A compare-and-set claim persists `unknown` before the non-idempotent host send.
-The only message is `[Task status updated](task:<uuid>?event=status_changed)`
+The only message is `[As Owner: Task status updated](task:<uuid>?event=status_changed)`
 (or, for a dependency notice, the dependent's `event=ready` / `event=blocker_cancelled` card).
 Accepted/queued responses update evidence; ambiguous or interrupted sends remain
 unknown and are never automatically retried. Busy Owner enqueue is normal and
@@ -409,11 +420,17 @@ checked against retained fields too, not merely the supplied patch.
 | Purpose | Exact reference form |
 | --- | --- |
 | Ordinary reference | `[Task](task:<uuid>)` |
-| Entire first assignment message | `[Task assigned to you](task:<uuid>?event=assigned)` |
-| Explicit important-update notice to Executor | `[Task updated](task:<uuid>?event=updated)` |
-| Explicit subscription's system notice to Owner | `[Task status updated](task:<uuid>?event=status_changed)` |
-| Dependent ready notice to Owner | `[Task ready](task:<uuid>?event=ready)` |
-| Dependent blocker-cancelled notice to Owner | `[Task blocker cancelled](task:<uuid>?event=blocker_cancelled)` |
+| Entire first assignment message | `[As Executor: Task assigned to you](task:<uuid>?event=assigned)` |
+| Explicit important-update notice to Executor | `[As Executor: Task updated](task:<uuid>?event=updated)` |
+| Explicit subscription's system notice to Owner | `[As Owner: Task status updated](task:<uuid>?event=status_changed)` |
+| Dependent ready notice to Owner | `[As Owner: Task ready](task:<uuid>?event=ready)` |
+| Dependent blocker-cancelled notice to Owner | `[As Owner: Task blocker cancelled](task:<uuid>?event=blocker_cancelled)` |
+| Child done notice to its Owner (the parent's Executor) | `[As Owner: child Task done](task:<uuid>?event=child_done)` |
+| Child blocked notice to its Owner (the parent's Executor) | `[As Owner: child Task blocked](task:<uuid>?event=child_blocked)` |
+| Child cancelled notice to its Owner (the parent's Executor) | `[As Owner: child Task cancelled](task:<uuid>?event=child_cancelled)` |
+
+Labels name the recipient's role for the linked Task; older unprefixed labels such as
+`[Task assigned to you](task:<uuid>?event=assigned)` remain recognized because the renderer reads only the event.
 
 IDs passed to tools are bare UUIDs. The parser accepts only the `task:` scheme,
 a UUID, and either no query or exactly one supported lowercase event form above.
@@ -443,9 +460,9 @@ storage. Expired transport sessions require explicit reconnection, not business
 write retries. Connection capacity, disposal and host calls are defined in the
 [host contract](task-host-contract.md).
 
-Task ships backend/frontend assets, role prompts, two self-contained role Skills,
-one shared `github-coding` work Skill and runtime dependencies. Both roles declare
-the same work-Skill discovery root; no new loading API or Task schema is involved.
+Task ships backend/frontend assets, the `node` role prompt, the self-contained
+`cockpit-task-tree` Skill, one shared `github-coding` work Skill and runtime
+dependencies. The role declares both discovery roots; no new loading API or Task schema is involved.
 Installation does not resolve dependencies at runtime.
 Modern build/install instructions are in [Task](task-board.md#module-api-and-packaging).
 Packaging, testing and repository cleanup perform no production installation,

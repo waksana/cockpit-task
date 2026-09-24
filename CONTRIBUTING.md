@@ -27,8 +27,10 @@ cannot open v6 data, and switching its package back is not a database rollback.
 Never overwrite live data with a historical backup. Validate migration on an
 isolated consistent copy before separately authorized deployment.
 The long-lived `experiment/hierarchical-delegation` branch (#66; PRs target it and do not close #66) adds per-Task
-hierarchical delegation and schema v7 (nullable `tasks.parent_task_id`, `tasks.depth`)
-through a column-only forward migration; existing Tasks stay top-level. Schema v7 is
+hierarchical delegation and schema v7 (nullable `tasks.parent_task_id`, `tasks.depth`
+and a new `child_notices` table) through a forward migration that only adds columns
+and a table; existing Tasks stay top-level. It replaces the Owner/Executor roles with
+one `node` role and one merged `cockpit-task-tree` Skill. Schema v7 is
 roll-forward only: installed 0.1.12 cannot open v7 data. The branch has no version
 bump or deployment and must stay cleanly mergeable into main.
 
