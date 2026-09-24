@@ -26,7 +26,7 @@ included in the 40/40 result and use the narrower setup documented below.
 - [Controller fault recipes](#controller-fault-recipes)
 - [Subscription-necessity cases N1-N3](#subscription-necessity-cases-n1-n3)
 - [Coding workflow cases G1-G4](#coding-workflow-cases-g1-g4)
-- [Tree-node cases T1-T17](#tree-node-cases-t1-t17)
+- [Tree-node cases T1-T22](#tree-node-cases-t1-t22)
 - [Real isolated host harness](#real-isolated-host-harness)
 - [assignee preparation: rationale and acceptance](#assignee-preparation-rationale-and-acceptance)
 - [Completion retro acceptance](#completion-retro-acceptance)
@@ -117,7 +117,7 @@ no production migration, installation, session mutation or deployment is implied
   assignee self-cleanup and no orchestrator messages remain.
 - orchestrator avoids a replacement Task when eligible original-assignee continuation is
   possible; otherwise an appropriate new authorized Task is required. Preserve
-  immediate important-update handoff and independent pending-user-request guidance.
+  immediate assignee update handoff and independent pending-user-request guidance.
 
 ## Selective reading and follow-up acceptance
 
@@ -413,7 +413,6 @@ node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" role
 node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" tools
 node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" schema task_read
 node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" skill cockpit-task-tree
-node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" skill cockpit-task-tree references/important-updates.md
 node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" call task_read \
   '{"view":"execution","task_id":"ACTUAL_TASK_ID"}'
 node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" messages
@@ -561,13 +560,11 @@ Do not assume revision numbers alone prove the sequence. The baseline had
 r1 original, r2 thresholds, r3 resume drafting, r4 concurrent detail requirement,
 r5 final acceptance; inspect actual contents if a new run differs.
 
-### S3: Important update, cancellation and stale-card resumption
+### S3: Automatic update/cancel notices and stale-card resumption
 
-Current reruns must use the
-[important-update handoff](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md):
-the orchestrator edits the complete Task definition with `task_edit` and
-`notify_assignee:true`. The service, not a handwritten chat message, sends one fixed
-`mode:"immediate"` update notice. Queued messages stay intact and no
+Current reruns must use the Task tree Skill and tool schemas: the orchestrator edits the complete Task definition.
+The service, not a handwritten chat message, automatically sends one fixed
+`mode:"immediate"` update notice for the non-assignee definition change. Queued messages stay intact and no
 notification-driven interruption is performed.
 
 After A finishes, give its existing assignee a new C Task for anomaly notes.
@@ -595,9 +592,9 @@ Preserve the pending context during one handoff. Work is still preparation and
 synchronization only; I will decide later whether to continue.
 ```
 
-Call `task_edit` once with the changed full description and `notify_assignee:true`.
+Call `task_edit` once with the changed full description.
 Expected evidence includes `notice_ids`, the returned `notifications` /
-`notification_error`, an `update_notices` read row, and a host prompt to the assignee
+`notification_error`, an `assignee_notices` read row, and a host prompt to the assignee
 with `mode:"immediate"` and exactly:
 
 ```text
@@ -613,13 +610,13 @@ the real service-sent update notice.
 
 | Assertion | Evidence required |
 | --- | --- |
-| S3.1 | orchestrator loads the important-update reference for this exceptional operation |
+| S3.1 | orchestrator loads current Task tree guidance/tool schema as needed; no deleted update-reference or hand-written notice path is used |
 | S3.2 | Exact pending IDs and complete exposed content are preserved; no removal/replay is used |
 | S3.3 | One service-sent updated notice with fixed text, `mode:"immediate"`, `notice_ids`, `notifications` and `notification_error`; no handwritten duplicate, blind retry or interruption |
 | S3.4 | assignee reads full execution and ACKs the current active definition without an orchestrator ACK message |
 | S3.5 | After cancellation, stale-card resumption causes no terminal ACK/report/reassignment/reopening |
 | S3.6 | Only waiting subscriptions can be withdrawn; triggered notices are not recalled |
-| S3.7 | Cancellation outside the done target expires the wait without a status card |
+| S3.7 | Cancellation outside the done target expires the wait without a subscription status card, and because the canceller is not the assignee the assignee also receives the fixed `[Task cancelled]` immediate notice |
 
 Preserve original context only in places the receiving actor is allowed to read,
 normally the Task definition plus the untouched queue. Do not point to private
@@ -970,7 +967,7 @@ as an automatic wake-up. A genuinely conflicting dirty-main stop/resume case was
 not exercised; preserving the explicitly excluded note was not proof of a clean
 original checkout. This run predates the direct-question guidance.
 
-## Tree-node cases T1-T17
+## Tree-node cases T1-T22
 
 These cases exercise the tree-node model: every Agent session carries the single
 `node` role, a session holds at most one unfinished Agent Task as assignee, an
@@ -998,7 +995,19 @@ from that file; one prompt deliberately references a missing `incidents.csv`.
 | T8 Idle root | All of the above | Root holds no Task, creates no subscription, never polls, and only reacts to user prompts and its own orchestrator cards (ready, subscribed transitions). |
 | T9 Role labels | All of the above | Assignment prompts arrive as `[Task assigned]` (older `[Task assigned to you]` cards remain recognized); Subtask notices as `[Subtask …]`; readiness as `[Subtask ready]`. `task_read` returns `actor_role` for the calling session. A node acting on a card uses the matching responsibility and never answers an orchestrator card with assignee writes or vice versa. |
 | T10 One Task per session, delegation fidelity | Any nested case | A session with an unfinished Task is never assigned a second one (`SESSION_NOT_READY` / busy). Requirements meant for deeper levels are copied verbatim into each Subtask's complete description; a missing deeper requirement is detected at integration, attributed to the right level, and corrected by a new Subtask rather than by redispatch. |
-| T17 Service-sent update notice | *Coached*: root changes an assigned unfinished Agent Task description with `notify_assignee:true`, then attempts unassigned/done/unchanged/metadata-only/assignee-self variants and a restart with a pending notice | Allowed edit records `update_notices`, returns `notice_ids`, `notifications` / `notification_error`, and sends exactly the fixed `[Task updated]` text with host `mode:"immediate"` to the assignee. Assignee reads full execution and ACKs the latest revision. Rejected variants return `UPDATE_NOTICE_NOT_APPLICABLE` with nothing saved or sent. Missing/unavailable assignee records `ASSIGNEE_NOT_FOUND` / `ASSIGNEE_UNAVAILABLE`; restart expires pending update notices with `UPDATE_NOTICE_EXPIRED`, not late delivery. |
+| T17 Service-sent update notice | *Coached*: root changes an assigned unfinished Agent Task description, changes `blocked_by`, reopens it, tries unassigned/done/metadata-only/assignee-self variants, and restarts with a pending assignee notice | Non-assignee description/blocked_by/reopen changes record `assignee_notices(kind:"updated")`, return `notice_ids`, `notifications` / `notification_error`, and send exactly the fixed `[Task updated]` text with host `mode:"immediate"` to the assignee. Assignee reads full execution and ACKs the latest revision. Inapplicable ordinary edits either save silently or fail by their own lifecycle/permission rule; there is no opt-in notice rejection. Missing/unavailable assignee records `ASSIGNEE_NOT_FOUND` / `ASSIGNEE_UNAVAILABLE`; restart expires pending assignee notices with `ASSIGNEE_NOTICE_EXPIRED`, not late delivery. |
+
+### New tree-node cases T18-T22 (not yet recorded)
+
+These cases are proposed current-source reruns. They extend the table above and have not yet been executed or counted in the recorded T1-T10 trial.
+
+| Case | User goal given to the root | Evaluator-only expected result |
+| --- | --- | --- |
+| T18 Relation authorization and subscriber routing | *Coached*: root, assignee and an unrelated node each try ACK/report/edit/cancel/assign/start/reconcile/subscribe/retro-handle on the same Task; include assignee self-cancel and a third-party subscription | The single `node` role exposes all tools, but writes are authorized by relation: ACK/report require assignee; edit/cancel/reopen require orchestrator or assignee; assign/automation start/reconcile require orchestrator; create/read/session/script helpers, subscribe/unsubscribe and retro-handle are open. Unauthorized writes return 403 (`ASSIGNEE_REQUIRED`, `ORCHESTRATOR_REQUIRED` or `ORCHESTRATOR_OR_ASSIGNEE_REQUIRED`) and save nothing. Assignee self-cancel succeeds without an assignee cancel card. A third-party subscription is accepted, duplicate check is per subscriber, and `[Subscribed Task status changed]` is sent to that subscriber (Web board `user` routes to orchestrator). |
+| T19 Subagent attribution | *Coached*: a subagent inside the assignee session reports or edits the assigned Task; a subagent in the root session tries assignee-only writes and then orchestrator-only writes | Calls from an assignee-session subagent are attributed to the containing assignee session and marked as subagent, so assignee-authorized writes can succeed. Calls from a root-session subagent are attributed to root/orchestrator: ACK/report are rejected with 403, while orchestrator-authorized edit/cancel/assign paths behave as root. No actor self-supplies identity in tool input. |
+| T20 Cancel and reopen assignee notices | *Coached*: root cancels an assigned unfinished Agent Task; separately, after a done Task is eligible for rework, root reopens it and the assignee self-reopens another eligible Task | Root cancel records `assignee_notices(kind:"cancelled")` and sends fixed `[Task cancelled]` with immediate mode; the assignee reads cancellation and stops. Root reopen records `kind:"updated"` and sends `[Task updated]`; orchestrator reopen does not auto-ACK. Assignee self-reopen succeeds, creates a new revision and auto-ACKs silently without an assignee notice. |
+| T21 Assigned dependency update | *Coached*: an assigned blocked Task has `blocked_by` added or replaced, then its blocker completes; repeat with a blocker cancelled | `blocked_by` can change on any unfinished Task (automation only while created); terminal Tasks or non-created automation return `DEPENDENCY_LOCKED`. Non-assignee blocker edits on an assigned Agent Task send `[Task updated]`. When all blockers are done, or one is cancelled, the already-assigned dependent's assignee receives `[Task updated]`, not `[Subtask ready]` / `[Subtask blocker cancelled]`; undispatched dependents still notify their orchestrator with the Subtask dependency cards. |
+| T22 Out-of-scope discovery escalation | A depth-3 assignee discovers one blocking out-of-scope problem and one non-blocking improvement while producing a report; the middle orchestrator can handle the blocker | The assignee reports `blocked` with the blocking discovery and records the non-blocking discovery in outcome. Its orchestrator handles the blocker within scope by creating a Task and setting `blocked_by`; when that blocker resolves, the assignee is notified by `[Task updated]` and continues. Non-blocking findings move upward through outcomes/retros level by level. A middle orchestrator that can resolve the issue handles it without escalating to root; only unresolved out-of-scope findings continue upward. |
 
 ### Recorded T1-T10 trial
 
@@ -1125,7 +1134,7 @@ these cases; that preparation used 0.1.6. Version 0.1.7 added completion retro.
 Version 0.1.8 added selective Task reads and updated Skill guidance.
 Version 0.1.9 added the coding/deployment Skill boundary clarification.
 Version 0.1.10 added orchestrator request follow-through (#45),
-immediate important-update notices (#47) and Agent reopen (#49). Version 0.1.11
+immediate assignee update notices (#47) and Agent reopen (#49). Version 0.1.11
 prepared orchestrator sequential subscription follow-up (#53) and assignee session
 titles (#55), without changing those historical observations or adding a schema
 migration. Version 0.1.12 added native Task dependencies and schema v6; the v5→v6
@@ -1144,16 +1153,16 @@ open schema v5; package rollback is not database rollback.
 | --- | --- |
 | `task_create`, `task_session_create`, `task_session_prepare` | S1/S3/S6 creation and preparation; Subtask/dependency cases add lineage and readiness coverage |
 | `task_assign` | S1, S4 capability/busy, S6 partial/recovery/replay; dependency cases cover `TASK_NOT_READY` |
-| `task_edit` | S2 clarification, S3 important scope change with `notify_assignee:true`, S6 materials-only edit; dependencies cover `blocked_by` replacement; T17 covers service-sent update notices and rejection cases |
+| `task_edit` | S2 clarification, S3 automatic assignee update notice, S6 materials-only edit; dependencies cover `blocked_by` replacement; T17/T21 cover service-sent assignee notices and inapplicable silent/lifecycle cases |
 | `task_ack`, `task_report` | S1/S2/S4/S6; S2 includes a partial stale report |
 | `task_cancel`, `task_reopen` | S3 cancellation; rework acceptance covers guarded original-assignee reopen |
 | `task_subscribe`, `task_unsubscribe` | S1-S6 technical behavior; N1-N3 necessity judgment; Subtask notices require no subscription |
 | `task_script_read`, `task_script_register`, `task_automation_start`, `task_automation_reconcile` | Automation acceptance/regressions; service-managed Tasks, logs and barriers |
-| `task_retro_handle` | orchestrator-only handling, `RETRO_NOT_FOUND` / `RETRO_NO_FINDINGS`, `unchanged` rewrites, replay and reopen history |
+| `task_retro_handle` | open handling by any caller, `RETRO_NOT_FOUND` / `RETRO_NO_FINDINGS`, `unchanged` rewrites, replay and reopen history |
 | `task_read` | All cases; verify each view below, including list `retro=unhandled\|watching` |
 
 Exercise `list`, `overview`, `execution`, `definition`, `changelog`, `activity`,
-`outcomes`, `retro_handlings`, `subscriptions`, `dependency_notices`, `child_notices`, `update_notices`,
+`outcomes`, `retro_handlings`, `subscriptions`, `dependency_notices`, `child_notices`, `assignee_notices`,
 `automation_log` and `operation` for concrete questions. This is suite coverage, not a requirement
 to read all views for every Task.
 

@@ -116,7 +116,7 @@ Do not put secrets in Task inputs or retained output.
 
 Current source/package version is **0.1.13**, retaining completion retro for Agent Tasks,
 selective Task reads, the coding/deployment Skill boundary clarification,
-orchestrator request follow-through (#45), immediate important-update notices (#47),
+orchestrator request follow-through (#45), immediate assignee update notices (#47),
 Agent reopen (#49), orchestrator sequential subscription follow-up (#53), assignee
 session titles (#55), native Task dependencies and github-coding Skill updates,
 and adding per-Task hierarchical delegation and the tree-node model from #71/#72/#74

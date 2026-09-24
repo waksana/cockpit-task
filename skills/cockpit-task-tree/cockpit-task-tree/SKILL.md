@@ -1,85 +1,143 @@
 ---
 name: cockpit-task-tree
-description: "Guide every Task tree node: with a Task, own completing it by doing the work or orchestrating Subtasks; without one, stay available and delegate delivery through Tasks. Derive your relation to each Task from its facts. Load when first needed; reuse guidance still in context rather than loading again at each message or checkpoint."
+description: "Operating manual for every Task tree node: Task is the only channel between nodes. With a Task, complete it yourself or through Subtasks you orchestrate; without one, stay available and delegate through Tasks. The service sends every notice. Load when first needed; reuse guidance still in context."
 ---
 
 # Task tree
 
-Use the `cockpit-task` MCP for the shared Task record. Project instructions and work
-skills define execution methods; Task mechanics live here, not in `github-coding`.
+Use the `cockpit-task` MCP. Tool descriptions, schemas, results and error messages carry the
+arguments, fields, views, limits, error codes and recovery steps; this Skill says how to act.
 
-## 1. Principle: every session is a node
+## Core idea
 
-Every session is one node in a tree. The only judgment a node makes is whether to do
-the work itself or split it into Subtasks. A node has at most one Task of its own and
-owns completing it; every Task it creates is its Subtask, which it orchestrates.
+Task is the only channel between nodes. Every session is a node: with a Task, it owns
+completing it; when the work is too big, it splits it into Subtasks and orchestrates them.
+Nodes only read and write Tasks, and the service sends every notice. Decisions come from
+the user, asked directly.
 
-**If you have a Task, you own completing it.** Do the work yourself, or split it into
-Subtasks that you orchestrate. Subtasks are part of your Task: follow them until their
-results are integrated, and only then complete your own Task. Keep working until done.
-That is not being always busy or non-interactive: when a real decision, missing
-information or a scope question arises, ask the user directly (via ask_user where
-available), wait, revise your own Task if the agreement changes, and continue.
+## Relations
 
-**Without a Task** (in practice the root session the user prompts directly) you have
-nothing to complete; see [section 4](#4-root-node-no-task-of-your-own).
+For any Task, `assignee` is you: it is your Task, and you hold at most one unfinished Task.
+`orchestrator` is you: you created it, so it is your Subtask (a top-level Task when you had
+no Task). Reads return `actor_role`; when unsure, read the Task. The host supplies your
+identity, a subagent acts for its session, and the service authorizes each write by relation:
 
-## Your relation comes from Task facts, not memory
-
-For a given Task, `assignee` is you: it is your Task. `orchestrator` is you: it is your
-Subtask. The service sets `orchestrator` to the calling session at creation and takes your
-identity from the host, never from a parameter. Reads return `actor_role`
-(`assignee`, `orchestrator` or `none`); notice cards say `Task …` about your Task and
-`Subtask …` about Tasks you orchestrate. When unsure, read the Task. These relations are
-collaboration responsibilities, not business identities or extra authority. The service
-rejects self-assignment and assignment back up the lineage
-([Subtasks of your Task](references/task-writes-and-recovery.md#subtasks-of-your-task)).
-
-## 2. Doing your own Task
-
-Confirm the agreement, ask the user directly, revise your Task when it changes, deliver
-truthfully and submit a retro with done: [Doing your own Task](references/own-task.md).
-
-## 3. Orchestrating Subtasks
-
-You orchestrate every Subtask you create and keep their topology correct: split into more
-specific parts, order them with `blocked_by` after a conflict check against all unfinished
-Tasks, re-plan when changes make a Subtask obsolete, then follow, integrate and handle their
-retros before your own done: [Orchestrating Subtasks](references/subtasks.md).
-
-## 4. Root node: no Task of your own
-
-Stay available for the user and delegate delivery through top-level Tasks rather than doing
-long work yourself (brief read-only answers are fine). You are still their orchestrator: check
-conflicts and order before dispatching, exactly as in section 3, but do not follow their
-progress beyond a concrete necessary follow-up. This is a consequence of the principle, not
-a separate role.
-
-## 5. Mechanics references
-
-| When | Read |
+| Caller | Tools |
 | --- | --- |
-| A known trusted script should run as an automation Task | [Automation](references/automation.md) |
-| An important definition change cannot wait for the assignee's next checkpoint | [Important updates](references/important-updates.md) |
-| Views, fields, truncation and pagination | [Task views and fields](references/reading-tasks.md) |
-| Write rules, conflicts, partial or uncertain effects, subscriptions, dependencies, Subtasks, reopen, retro handling | [Task writes and recovery](references/task-writes-and-recovery.md) |
-| `task:` link syntax or an unfamiliar notice card | [Task links](references/task-links.md) |
+| Only the assignee | `task_ack`, `task_report` |
+| Orchestrator or assignee | `task_edit`, `task_cancel`, `task_reopen` |
+| Only the orchestrator | `task_assign`, `task_automation_start`, `task_automation_reconcile` |
+| Anyone | every other tool |
 
-A node doing its Task and orchestrating Subtasks reads both section 2 and section 3
-guidance, each for its own Tasks. Load only the reference needed, not the whole set.
+## Rules
 
-## Shared rules
+**R1 Communicate only through Task.**
+- Never send anything to another agent, not even a Task link.
+- Put what others need in the Task. The description is the complete current agreement: goal,
+  scope, key decisions, authorization boundaries and completion conditions. References,
+  metadata and Issues only supplement it. Progress goes in activity, results in the outcome.
+- The node facing a decision asks the user directly (ask_user where available). Do not ask
+  a question someone is already asking, or ask for facts you can check yourself.
+- Keep secrets out of Tasks.
 
-Ask real decisions of the user in your own session; never message another Task's
-orchestrator or assignee, directly or through other agents; an
-[important update](references/important-updates.md) goes through `task_edit`
-`notify_assignee`, never a handwritten note. Task is the shared
-agreement and record. Use actual Task/session IDs, stable mutation request IDs and fresh
-returned `write_context`; inspect errors and `definition_check` as well as results.
-The host supplies your identity
-([identity](references/task-writes-and-recovery.md#identity-and-concurrency)).
-Use tool schemas for arguments.
+**R2 Do your Task by the current agreement.**
+- Before starting, resuming, taking a consequential action and delivering, read the full
+  current Task (`execution`) and ACK its exact revision. A card is only a pointer; the Task
+  decides.
+- Follow project instructions and relevant work Skills for methods; use `github-coding`
+  when changing repository files. Methods never widen authorization or change communication.
+- When the agreement changes, for example the user changes their mind or you agree a new
+  scope with them, revise your own Task.
+- Record only meaningful facts in activity, report status truthfully, and never present
+  partial work as complete.
+- Mark done with a new outcome (result, evidence, limits) and a retro (evidence-based
+  findings, or `null` when there are none).
 
-Reuse this Skill while it remains in context; reload for missing/changed guidance or an
-unclear rule, not each new message or checkpoint. This never replaces fresh Task reads,
-state or precise ACK.
+**R3 Do it yourself, or split it.**
+- Do what you can complete yourself. Split work that is too big or parallel into more
+  specific Subtasks by independently deliverable result, not by stage or trade, and assign
+  each to a new node. Each Subtask description carries every requirement of your Task that
+  applies to it or to deeper levels. Do not do a delegated Subtask yourself; its assignee
+  decides how.
+- Before dispatching, check all unfinished Tasks for conflicting work on the same thing and
+  order them with `blocked_by`.
+- When things change, revise, reorder or cancel obsolete Subtasks.
+- Verify each result against your Task's requirements. Errors and empty results are not
+  results; revise or add a Subtask for gaps. Integrate, fold your Subtasks' retros into your
+  own retro, and only then complete your Task.
+- Without a Task (the root), you dispatch this way but do not follow progress.
+
+**R4 Report work outside your Task upward.**
+- If it blocks you, report `blocked` and state what must happen first, including any user
+  decision you are waiting for.
+- If it does not block you, put it in your outcome.
+- An orchestrator reading this handles it within its own scope (create a Task, set
+  `blocked_by`, revise a definition) or reports it upward the same way.
+
+**R5 Authorization comes from the user.**
+- Discussion, research and records do not authorize changes, dispatch or implementation;
+  asking for a result does not authorize doing it yourself.
+- Scope changes, trade-offs, cancellation and reopening need the user's explicit consent.
+
+**R6 Act on Task facts; when unsure, read first.**
+- On an unknown result, failure or conflict, read the Task or operation before deciding.
+  Where a tool result names a safe recovery, follow it; otherwise never blindly retry,
+  redispatch or replace.
+- Read only what the current decision needs. Chat history, an idle session or a delivered
+  notice is not evidence of delivery.
+- Never poll, chase or wait for a notice to be read. Subscribe only when a future status
+  unlocks a necessary follow-up of yours.
+
+## Notices
+
+| Card | Received by | Act |
+| --- | --- | --- |
+| `[Task assigned]` | assignee | F2 |
+| `[Task updated]` | assignee: someone else changed the description or `blocked_by`, reopened the Task, or its blockers finished or were cancelled | F3 |
+| `[Task cancelled]` | assignee: someone else cancelled the Task | F4 |
+| `[Subtask done]`, `[Subtask blocked]`, `[Subtask cancelled]` | the Subtask's orchestrator | F5 |
+| `[Subtask ready]`, `[Subtask blocker cancelled]` | orchestrator of an undispatched dependent | F5 |
+| `[Subscribed Task status changed]` | the subscriber | the follow-up you subscribed for |
+
+Cards are `task:` links with fixed text and never carry free-form notes. Older labels, such
+as `[Task assigned to you]` or an `As Owner:` prefix, mean the same card. A top-level
+Task's transitions reach the root only through its own subscription.
+
+## Basic situations
+
+- **F1 The root receives a request.** Discussion stays discussion. When the user wants a
+  result: create a Task with complete requirements, check conflicts and order (R3), create a
+  node (preparing explicitly needed existing Skills or MCP servers; readiness is not
+  authorization), assign, then stop and stay available.
+- **F2 `[Task assigned]`.** Read the full Task and ACK. Do it or split it (R3). Ask the user
+  real decisions and revise your Task (R1, R2). Report status; finish with outcome and retro.
+- **F3 `[Task updated]`.** Read the full Task, ACK the latest revision, continue by the
+  current agreement.
+- **F4 `[Task cancelled]`.** Read the cancellation, stop affected work, report nothing more.
+- **F5 Subtask cards.** `done`: read the outcome, verify and integrate; handle anything
+  reported upward (R4). `blocked`: read the reason; do not repeat a user question it is
+  already waiting on, otherwise handle it (R4). `cancelled` or `blocker cancelled`:
+  re-plan. `ready`: assign it.
+- **F6 Cancel or reopen.** With the user's consent, cancel with a reason, or reopen a done
+  Task with a complete description and reason; the service notifies the assignee.
+- **F7 Trusted scripts.** Agent work is the default. Only an existing, trusted, repeatable
+  script within the user's authorization runs as automation; never create a script to
+  bypass Agent delivery, and registration does not authorize running it. See
+  [Automation](references/automation.md).
+
+## Service guarantees
+
+You do not check or perform these yourself:
+- **Rejected writes**: the service rejects, saving nothing:
+  - self-assignment, assignment up the lineage, more than 3 levels, a second unfinished Task
+    for a node, and dispatch before blockers are done;
+  - `blocked_by` on an ancestor or in a cycle;
+  - reports without an ACK of that revision, and stale status, outcome or retro;
+  - done without an outcome and an explicit retro.
+- **Idempotent writes**: writes replay by `request_id` and reject stale `write_context`.
+- **Notices**: every notice above is sent by the service. Delivery results are recorded and
+  never retried. Notices never clear or rewrite queued session messages.
+- **Pending changes**: every response carries `definition_check` for your own Task.
+
+Reuse this Skill while it remains in context; reload it only when guidance is missing,
+changed or unclear. That never replaces fresh Task reads or an exact ACK.

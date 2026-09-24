@@ -1,7 +1,7 @@
 # Task 产品设计
 
 Task 是 Cockpit 内的独立任务协作模块。模块 ID 与 MCP key 为 `cockpit-task`，
-展示名称为 Task；orchestrator / assignee 是协作职责，不是项目身份或权限等级。
+展示名称为 Task；orchestrator / assignee 是每条 Task 的协作关系，不是项目身份或可选 session 角色；服务按关系授权写入。
 
 使用与打包见 [Task](task-board.md)，记录语义见 [Schema](task-schema.md)，
 调用接口见 [MCP 契约](task-mcp-contract.md)，行为指导见
@@ -128,9 +128,10 @@ assignee 在开工、恢复、重要阶段之间、重要外部操作前和交�
 | 用途 | 消息 |
 | --- | --- |
 | 普通引用 | `[Task](task:<uuid>)` |
-| 首次派单，由 `task_assign` 发送一次 | `[Task assigned to you](task:<uuid>?event=assigned)` |
-| orchestrator 明确的重要要求更新，由 `task_edit notify_assignee:true` 发送给 assignee | `[Task updated](task:<uuid>?event=updated)`，附读取/ACK 最新版要求 |
-| 显式一次性状态订阅，由系统通知 orchestrator | `[Task status updated](task:<uuid>?event=status_changed)` |
+| 首次派单，由 `task_assign` 发送一次 | `[Task assigned](task:<uuid>?event=assigned)` |
+| assignee 之外的调用者修改已指派未结束 Agent Task 的 description / `blocked_by`、重开或依赖变化 | `[Task updated](task:<uuid>?event=updated)`，附读取/ACK 最新版要求 |
+| assignee 之外的调用者取消已指派未结束 Agent Task | `[Task cancelled](task:<uuid>?event=cancelled)`，附读取取消理由并停止受影响工作要求 |
+| 显式一次性状态订阅，由系统通知 subscriber | `[Subscribed Task status changed](task:<uuid>?event=status_changed)` |
 | 依赖方的全部 blocker 已 done，由系统通知 orchestrator | `[Subtask ready](task:<uuid>?event=ready)` |
 | 待派发依赖方的 blocker 被取消，由系统通知 orchestrator | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` |
 | Subtask 进入 done，由系统通知其 orchestrator（父 Task 的 assignee） | `[Subtask done](task:<uuid>?event=child_done)` |
@@ -138,11 +139,8 @@ assignee 在开工、恢复、重要阶段之间、重要外部操作前和交�
 | Subtask 进入 cancelled，由系统通知其 orchestrator（父 Task 的 assignee） | `[Subtask cancelled](task:<uuid>?event=child_cancelled)` |
 
 首次派单不复制 description，orchestrator 不重复发单。普通编辑与报告静默。
-只有 orchestrator 判断重要更新不能等待正常同步点时，才按
-[重要更新参考](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md)
-把所有说明写入完整 Task 定义，并在改变 description 的同一次 `task_edit` 中设置
-`notify_assignee:true`。服务核对同一未结束指派、调用者不是 assignee 后，用
-`mode:"immediate"` 发送固定 updated 引用和读取/ACK 要求。
+assignee 之外的调用者对已指派未结束 Agent Task 改 description / `blocked_by`、重开、取消或依赖变化时，服务自动用
+`mode:"immediate"` 发送固定 updated/cancelled 引用和读取/ACK 或停止工作要求。
 不整理或重放队列、不为通知中断工作；受理不等于消费或 ACK，未知效果不盲重试或手写补发。
 
 状态订阅默认不使用。只有未来状态使 orchestrator 必须采取具体、必要的后续行动时

@@ -8,7 +8,7 @@ Task 是 Cockpit 模块：用共同的持久化 Task 记录协作，通过唯一
 
 每个 session 都是 Task 树的节点：有被指派的 Task 就负责完成它，可亲自完成或在授权范围内
 编排Subtask；没有 Task 的根节点委派交付。`orchestrator` / `assignee` 由每条 Task 的事实决定，读取结果以
-`actor_role` 标明，卡片不再带 “As Owner:” / “As Executor:” 前缀；它们不是 session
+`actor_role` 标明，卡片使用当前标签；历史 “As Owner:” / “As Executor:” 前缀仅作兼容识别。它们不是 session
 的业务身份，也不是可选角色。旧 `owner` / `executor` 角色已删除且无别名。
 服务拒绝自我指派、沿祖先链的回环指派，以及执行中节点与他人互相代建 Task。
 
@@ -18,21 +18,20 @@ Subtask 进入 done、blocked 或 cancelled 时，服务自动向其 orchestrato
 父 Task 已结束时不发送。旧的无前缀卡片标签仍可识别。
 
 通用引用为 `[Task](task:<uuid>)`；首次指派由 `task_assign` 仅发送一次
-`[Task assigned to you](task:<uuid>?event=assigned)`。orchestrator 明确决定的重要更新
-通过改变完整 description 的 `task_edit notify_assignee:true` 由服务发送
-`[Task updated](task:<uuid>?event=updated)`，并要求读取、ACK 最新版本。
-event 只说明这条消息的原因，不是 Task 状态；卡片仍读取当前数据，普通编辑不发通知。
+`[Task assigned](task:<uuid>?event=assigned)`。当 assignee 之外的调用者改变已指派未结束 Agent Task 的完整 description、`blocked_by`、重开或取消时，服务自动用 `mode:"immediate"` 向 assignee 发送固定
+`[Task updated](task:<uuid>?event=updated)` 或 `[Task cancelled](task:<uuid>?event=cancelled)`，并要求读取 Task、ACK 最新版本或停止受影响工作。
+event 只说明这条消息的原因，不是 Task 状态；卡片仍读取当前数据。assignee 只接收 assigned / updated / cancelled 三类 Task 卡。
 
-状态订阅使用独立的 `[Task status updated](task:<uuid>?event=status_changed)`，
-发送给 Task 的编排者，不是要求 assignee 读取并 ACK 的更新指令。
+状态订阅使用独立的 `[Subscribed Task status changed](task:<uuid>?event=status_changed)`，
+发送给实际 subscriber（Web board 用户的卡片路由到 orchestrator），不是要求 assignee 读取并 ACK 的更新指令。
 登记时若已处于目标状态则明确失败，不创建订阅或补发消息；只有登记后第一次
 进入目标状态才触发，不重复订阅、不轮询、不打断编排者当前工作。
 
 “A 完成后做 B”时，编排者 立即以 `blocked_by` 创建未指派的 B 并写完整要求，
 不必为每个前置 Task 订阅。所有 blocker done 前 `task_assign` / `task_automation_start`
-返回 `TASK_NOT_READY`；就绪只发送 `[Subtask ready](task:<uuid>?event=ready)` 给 B 的编排者，
-blocker 取消则发送 `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)`，
-不自动改状态、指派或启动。blocker 可由任意编排者创建；仍拒绝自身、成环、祖先 blocker（`BLOCKER_ANCESTOR`）和已取消 blocker，最多 20 个。
+返回 `TASK_NOT_READY`；未指派依赖方就绪时发送 `[Subtask ready](task:<uuid>?event=ready)` 给其编排者，
+blocker 取消则发送 `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)`；已指派依赖方改由 assignee 收到 `[Task updated]`。
+这些通知不自动改状态、指派或启动。blocker 可由任意编排者创建；仍拒绝自身、成环、祖先 blocker（`BLOCKER_ANCESTOR`）和已取消 blocker，最多 20 个。
 
 默认 Agent Task 由一个 assignee 完整负责，可在内部使用 subagents。要求直接修改 Task，
 执行者在同步点读取并 ACK；执行动态和结果带有实际确认的版本。可在授权范围内

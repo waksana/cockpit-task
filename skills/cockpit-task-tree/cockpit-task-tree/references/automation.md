@@ -1,206 +1,31 @@
 # Trusted script Tasks
 
-Read this only when considering or handling an automation Task. Agent remains the
-default for investigation, implementation and work needing judgment. An orchestrator may choose
-automation for an already known, trusted, repeatable script within the user's authorized
-scope. Registration does not authorize execution. Do not manufacture an arbitrary
-script, command template or Subtask workflow to bypass independent Agent delivery.
+Read this only when considering or handling an automation Task. Agent work stays the
+default for anything needing judgment. Use automation only for an existing, reviewed,
+trusted and repeatable script within the user's authorization; registration never
+authorizes running it, and never create a script, command template or workflow to bypass
+Agent delivery. Automation needs a Linux (or WSL2) host; elsewhere use an Agent Task.
 
-## Discover and register an immutable script
+1. **Select or register.** Inspect an existing registration with `task_script_read`, or
+   register an existing script with `task_script_register` (it does not run it). A
+   registration is immutable: changed code or configuration needs a new `script_id`. The
+   tool descriptions define the exact argument vector; there is no shell.
+2. **Create.** `task_create` with `automation` saves the complete agreement plus an
+   immutable script and typed-input snapshot. Creation runs nothing. An automation Task has
+   no assignee: never assign, ACK or report it.
+3. **Subscribe only if needed, then start.** If a necessary follow-up of yours depends on
+   the result, subscribe before `task_automation_start` so fast completion cannot race it.
+   Start enqueues the run once; replaying the same request never reruns it.
+4. **Read the result.** The service marks success `done` and failure or interruption
+   `blocked`, each with an outcome. Read the outcome, and run facts or logs only for a
+   concrete question; a truncated log is not complete evidence. Do not poll.
+5. **Cancel or recover.** Cancelling before launch prevents the run; during it, cancellation
+   requests termination but proves neither exit nor rollback. Recovery never reruns started
+   work: an interrupted run blocks the queue behind a barrier. Review its possible effects
+   before `task_automation_reconcile`, which clears the barrier only when the service proves
+   the process group is gone. Any repeat needs fresh authorization and a new Task.
 
-Orchestration guidance covers `task_script_read`, `task_script_register`, `task_automation_start` and
-`task_automation_reconcile`; doing your own Task does not grant them.
-The host supplies your identity; the created Task's `orchestrator` is your session. Use actual IDs, unique stable mutation request IDs and returned Task IDs/context;
-the examples below are JSON argument objects, not commands to run unchanged.
-The sample script must already exist and have been reviewed on the service filesystem.
-No installation, deployment or production testing is implied.
-
-`task_script_read` lists the catalog (default 20, maximum 50) with `next_cursor`:
-
-```json
-{"limit":20}
-```
-
-Select a known registration with `{"script_id":"inventory-v1"}`;
-do not combine `script_id` with pagination. Inspect its full description, paths,
-fixed arguments, ordered input definitions and SHA256 before selecting it.
-Script automation requires a Linux (or WSL2) host; elsewhere registration, automation
-creation and start return `AUTOMATION_PLATFORM` and store nothing, so use an Agent Task.
-If no suitable registration exists, `task_script_register` registers an existing
-trusted local script without running it:
-
-```json
-{
-  "request_id":"register-inventory-v1",
-  "script_id":"inventory-v1",
-  "title":"Read inventory",
-  "description":"Read an authorized inventory directory and print a bounded inventory summary; no writes or detached children.",
-  "executable":"/usr/bin/python3",
-  "script_path":"/srv/task-scripts/inventory.py",
-  "argv":["-I"],
-  "parameters":[
-    {"name":"source","type":"string","description":"Authorized inventory directory to read."},
-    {"name":"sample_limit","type":"integer","description":"Maximum records to inspect."},
-    {"name":"include_archived","type":"boolean","description":"Whether to include archived records."}
-  ]
-}
-```
-
-`script_id` is immutable: new script code/configuration requires a new ID. Both
-`executable` and `script_path` are absolute local file paths, resolved at registration;
-the executable must be executable, and the script a regular file up to 8 MiB.
-`argv` is the fixed prefix, not a caller-supplied shell command. The ordered
-`parameters` list declares unique names, `type` (`string|integer|boolean`) and
-`description`; all inputs are required, with no extra names or implicit coercion.
-Integers must be safe integers. Up to 32 parameters and 32 fixed arguments are allowed.
-
-Execution is exactly `executable [...argv, script_path, ...typedStrings]`, with no shell.
-Values map by the registration's parameter order, not JSON key order. For the example
-inputs below the actual argument vector is
-`["-I","/srv/task-scripts/inventory.py","/srv/inventory","25","false"]`.
-Booleans are the literal strings `true` / `false`, never flags or `1` / `0`.
-Strings pass literally: quoting, pipes, substitutions and wildcards have no shell expansion.
-The script must validate its own domain constraints and safely interpret positional values.
-
-## Snapshot, optionally subscribe, then explicitly start
-
-`task_create` preserves the complete agreement plus an immutable script/configuration
-and typed-input snapshot:
-
-```json
-{
-  "request_id":"create-inventory-review",
-  "title":"Read the authorized inventory",
-  "description":"Run inventory-v1 once against /srv/inventory, inspect at most 25 records, exclude archives. Read-only scope; no installation or production changes. The orchestrator will use the result for the already requested inventory decision.",
-  "automation":{
-    "script_id":"inventory-v1",
-    "parameters":{"source":"/srv/inventory","sample_limit":25,"include_archived":false}
-  }
-}
-```
-
-Omit `automation` for an ordinary Agent Task. Creation never executes anything.
-Automation has `kind=automation`, no assignee or fake ACK, and consumes no session
-assignment slot. Do not use `task_assign`, `task_ack` or `task_report` on it.
-The script selection and inputs can never be edited; title/description/materials
-are also frozen while queued, starting or running. Record scope changes before
-start where permitted; changed inputs require a newly authorized Task.
-
-Default to no subscription, just as for Agent work. If the next necessary authorized
-orchestrator action needs the result, subscribe **before start** so fast completion cannot
-race registration. Completion confirmation or repeated reporting is not such an action.
-Choose only statuses that unlock that action. In this example the already-requested
-inventory decision needs success evidence or the failure reason, so it uses
-`done` and `blocked`; `cancelled` is not needed:
-
-```json
-{
-  "request_id":"subscribe-inventory-decision",
-  "task_id":"11111111-1111-4111-8111-111111111111",
-  "write_context":"<returned-write-context>",
-  "statuses":["done","blocked"]
-}
-```
-
-Replace the sample UUID/context with the actual creation/read result. Read the
-latest definition and use its actual revision/context for `task_automation_start`:
-
-```json
-{
-  "request_id":"start-inventory-review",
-  "task_id":"11111111-1111-4111-8111-111111111111",
-  "revision":1,
-  "write_context":"<returned-write-context>"
-}
-```
-
-Start explicitly enqueues once in the service's persistent single queue. It does
-not subscribe automatically. Exact request replay does not rerun; if a response
-is uncertain, read `task_read(view=operation)` and current Task facts, never change
-request IDs to retry external effects.
-
-## Read results, not a monitoring loop
-
-Success becomes `done` with a service-generated outcome; failure or interruption
-becomes `blocked` with an outcome. These are service facts, not assignee reports.
-Automatic subscription transitions have `event.source='automation'`, `event.run_id`
-and `actor:null`. Outcomes have `assignee:null`, `source:'automation'`
-and `author:'automation:<run_id>'`; the author is a service label, not a native session.
-On a one-shot status notice, select only needed latest content in one bounded
-overview call where possible, then do only the still-necessary authorized follow-up.
-For the inventory decision, `include=["outcome"]` supplies the latest full result
-and current context; add `automation` only if run facts or the immutable snapshot
-are necessary:
-
-```json
-{"view":"overview","task_id":"11111111-1111-4111-8111-111111111111","include":["outcome"]}
-```
-
-No automatic resubscription, acceptance, polling,
-scheduled monitor or turn held open waiting for completion.
-
-`task_read` without `include` preserves existing views. Select `automation` on
-overview for the full stored script/parameter snapshot and run facts, without logs;
-`definition` / `execution` also retain the snapshot. See
-[selective reads](reading-tasks.md#select-the-latest-content-for-the-decision).
-Inspect run state, exit code,
-signal, error, cancellation and barrier separately from Task status.
-Read retained combined stdout/stderr only for a concrete question:
-
-```json
-{
-  "view":"automation_log",
-  "task_id":"11111111-1111-4111-8111-111111111111",
-  "offset":0,
-  "limit":4096
-}
-```
-
-Offset is a character offset, not a history cursor. Limit defaults to 4096, maximum
-8192; JSON escaping can shorten a page. Follow `next_offset` only as needed.
-Output is capped at 65536 retained characters; `retained_characters` and
-`omitted_characters` explicitly disclose truncation. `complete` means log capture
-has ended, not successful delivery; a null next offset alone is not completion.
-Do not present truncated logs as complete evidence or place secrets in parameters/output.
-
-## Cancellation and recovery
-
-`task_cancel` before launch prevents execution. During execution it requests process-group
-termination; cancelled is not proof of exit and never rolls back external effects.
-Read the outcome and barrier before assuming the queue is safe.
-Recovery never reruns started work: starting/running work becomes interrupted/blocked
-(an already cancelled Task stays cancelled), with an outcome and persistent queue barrier.
-Prelaunch queued work may resume, but no queued run advances through an unresolved barrier.
-
-Inspect effects before requesting `task_automation_reconcile`:
-
-```json
-{
-  "request_id":"reconcile-inventory-interruption",
-  "task_id":"11111111-1111-4111-8111-111111111111",
-  "write_context":"<latest-returned-write-context>",
-  "reason":"Reviewed the interrupted run and its possible effects; request service verification of process-group termination before releasing the queue."
-}
-```
-
-When a durable process group was recorded, reconcile clears an interrupted/finished
-run's barrier only when the Linux kernel
-process-group probe `kill(-pgid,0)` returns `ESRCH`, proving the group no longer exists.
-If both durable PID and process group are absent, explicit reconciliation needs no
-probe: the service could not have sent the launch handshake, so the script never
-started. This still does not replay that Task.
-Any existing group (including unreaped zombies), `EPERM` or observation uncertainty
-keeps the barrier. Unreaped zombie groups can block until the host reaps them;
-never manually edit the database or bypass the barrier. Shutdown cannot always
-prove exit; blocked plus a barrier is the correct conservative result.
-Reconciliation does not kill recovered
-processes, rerun the script, turn blocked into done or claim rollback/success.
-Any repeat requires fresh authorization and a new Task, never a new start on the old one.
-
-This is a same-user trusted execution boundary, not a sandbox or authentication
-system. Scripts must NOT daemonize, detach or escape their process group. Review
-the executable, fixed prefix, script and descendants as trusted code; a Linux
-group proof cannot account for escaped processes. Immutable registration and
-script SHA256 detect script-byte changes but do not freeze the interpreter,
-runtime, imports, dependencies or external state. If these constraints do not fit,
-use an Agent Task or stop for a real authorization decision, not a workflow engine.
+This is a same-user trust boundary, not a sandbox. Scripts must not daemonize, detach or
+escape their process group, and the fingerprint covers only the script bytes, not the
+interpreter, dependencies or external state. When these constraints do not fit, use an
+Agent Task or ask the user.

@@ -190,14 +190,9 @@ Task adapter 不单独调用 [Cockpit #97](https://github.com/waksana/cockpit/pu
 及无其他未结束 Task。能力、业务资格与用户授权分别判断；调用 session 等于原 assignee 不是用户授权认证，
 不读取聊天验证用户决定。首次 assign/prepare 的原生空闲门槛保持不变。
 
-### 重要更新由模块发送固定 immediate 通知
+### Assignee notices are service-sent immediate prompts
 
-orchestrator 的例外更新流程由
-[随包参考](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md)
-指导，不是自动循环。调用方把所有说明写入完整 Task 定义，并在改变 description 的
-同一次 `task_edit` 设置 `notify_assignee:true`；模块核对仍为已指派、未结束 Agent Task
-且调用者不是 assignee 后，通过宿主 `prompt` 的 `mode:"immediate"` 发送一次固定 updated
-引用及读取/ACK 要求。调用方不再用 `cockpit_send_prompt` 手写这张卡。
+Agents never send Task notices to other agents. When someone other than the assignee changes an assigned unfinished Agent Task description or `blocked_by`, reopens it, cancels it, or a blocker of an assigned dependent resolves/cancels, the module writes an `assignee_notices` row and uses host `prompt` with `mode:"immediate"` to send fixed updated/cancelled text to the assignee. Callers do not use `cockpit_send_prompt` or free text for these cards.
 运行中的 immediate 是向当前轮次插入消息，不是新开一轮；不整理、删除或重放队列，
 也不为通知中断主轮次或后台工作。它不能回答待决 ask/plan/elicitation，受理不等于已读或 ACK，
 失败或未知效果只作有界核对，不盲重试或自动升级为中断。

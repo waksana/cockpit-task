@@ -54,14 +54,13 @@ start reject `TASK_NOT_READY`; readiness never changes status or dispatches.
 `report`/`cancel`/automation finish return these as `notice_ids`, delivered and
 recovered through the same outbox path as `subscription_ids`.
 
-Schema version 9 renames vocabulary in place: tasks.owner→orchestrator, tasks.executor→assignee; activities/outcomes/task_assignments.executor→assignee; subscriptions/dependency_notices/child_notices.owner→orchestrator; subscriptions.actor_session_id→author. It drops legacy occupancy/waiting indexes and creates `assignee_occupancy`, `task_assignments_assignee` and `subscriptions_waiting_orchestrator`; it adds `operations.invocation` and creates `update_notices` with `update_notices_task` / `update_notices_pending`. Notification event JSON is migrated from `actor_session_id` to `actor`, and saved `task_assign` operation input/result JSON moves `executor` to `assignee`. The migration is roll-forward only; older installed modules reject user_version 9 with `SCHEMA_TOO_NEW`.
+Schema version 9 renames vocabulary in place: tasks.owner→orchestrator, tasks.executor→assignee; activities/outcomes/task_assignments.executor→assignee; subscriptions.owner→subscriber; dependency_notices/child_notices.owner→orchestrator; subscriptions.actor_session_id→author. It drops legacy occupancy/waiting indexes and creates `assignee_occupancy`, `task_assignments_assignee` and `subscriptions_waiting_subscriber`; it adds `operations.invocation` and creates `assignee_notices(kind)` with `assignee_notices_task` / `assignee_notices_pending`. Notification event JSON is migrated from `actor_session_id` to `actor`, and saved `task_assign` operation input/result JSON moves `executor` to `assignee`. The migration is roll-forward only; older installed modules reject user_version 9 with `SCHEMA_TOO_NEW`.
 
 Schema version 8 (source only, not yet packaged) adds append-only
 `retro_handlings(id, task_id, outcome_id REFERENCES outcomes(id), status, note, refs, author, at)`
 with status fixed/followup/watching/dismissed, indexed by outcome and Task. The v7→v8
 migration only creates the table; existing retros read as unhandled and nothing is
-backfilled. `task_retro_handle` runs in the local mutation transaction: actor must equal
-`orchestrator` (`ORCHESTRATOR_REQUIRED`), `outcome_id` must be a `retro_recorded=1` outcome of that Task
+backfilled. `task_retro_handle` runs in the local mutation transaction: `outcome_id` must be a `retro_recorded=1` outcome of that Task
 (`RETRO_NOT_FOUND`) with non-null text (`RETRO_NO_FINDINGS`); an identical latest entry
 returns `unchanged`. It never touches the Task row, lifecycle, write context or outbox.
 The list `retro` filter uses correlated subqueries on the latest recorded retro and its
@@ -303,7 +302,7 @@ Assignment proceeds as follows:
 2. Bind the unassigned todo transactionally, enforcing single unfinished work.
 3. Recheck capability/native state and the Task's version, lifecycle and binding.
 4. Persist message uncertainty before calling host `prompt` once with the entire
-   message `[Task assigned to you](task:<uuid>?event=assigned)` and `mode:"enqueue"`.
+   message `[Task assigned](task:<uuid>?event=assigned)` and `mode:"enqueue"`.
 
 The idle checks and send are not atomic. Enqueue avoids proactively interrupting
 a turn that starts in the race; an actual `queued:true` result is retained as
@@ -325,8 +324,8 @@ No recovery path reassigns, reopens a terminal Task or silently rolls back bindi
 
 ## One-shot status notifications
 
-Subscription is optional and normally unused. orchestrator registers only for a concrete,
-necessary future orchestrator action, not progress/completion watching; this is Skill
+Subscription is optional and normally unused. Any caller registers only for a concrete,
+necessary future action of that subscriber, not progress/completion watching; this is Skill
 guidance rather than a server-side policy expression. Choose minimal targets,
 withdraw unnecessary waits and never automatically re-subscribe. assignee work
 does not depend on an orchestrator wait or notice being read.
@@ -334,27 +333,24 @@ does not depend on an orchestrator wait or notice being read.
 Registration atomically checks lifecycle, current status and waiting uniqueness.
 Already matching fails without registration or immediate notification.
 A terminal Task cannot register for future transitions. The recipient is always
-the saved Task orchestrator, not a caller-supplied destination.
+the subscriber derived from the caller (Web board `user` routes to the Task orchestrator), not a caller-supplied destination.
 
 A real matching status transition commits Task effects, receipt, subscription
 consumption, immutable transition event and `pending` delivery together.
 Same-status reports and failed transitions do not trigger; an unmatched terminal
 transition expires the wait. Waiting cancellation races through the same
 transaction boundary and cannot revoke an already triggered event.
-An important description update requested with `task_edit notify_assignee:true`
-commits the new definition and one `update_notices` row in the same local write
-after validating an assigned unfinished Agent Task, changed description and non-assignee
-caller; failed applicability rejects the whole edit.
+An assignee notice commits with the local write that caused it. A non-assignee description or `blocked_by` change, reopen, cancel, or dependency resolution/cancellation on an assigned unfinished Agent Task writes one `assignee_notices` row; failed authorization or lifecycle checks reject the original write.
 
 The delivery record is a bounded durable outbox, not a second native queue or
 scheduler. A passive `session/get` lookup first checks the original orchestrator exists.
 For update notices the recipient column is the assignee instead. Missing/unavailable
 recipients produce `not_sent` evidence; no replacement is created.
 A compare-and-set claim persists `unknown` before the non-idempotent host send.
-The only message is `[Task status updated](task:<uuid>?event=status_changed)`
-(or, for a dependency notice, the dependent's `event=ready` / `event=blocker_cancelled` card;
-for an update notice, the fixed `[Task updated]` card and read/ACK instruction).
-Update notices call host `prompt` with `mode:"immediate"`; the other notices use the
+The subscription message is `[Subscribed Task status changed](task:<uuid>?event=status_changed)`
+(or, for an undispatched dependency notice, the dependent's `event=ready` / `event=blocker_cancelled` card;
+for an assignee notice, the fixed `[Task updated]` or `[Task cancelled]` card and instruction).
+Assignee notices call host `prompt` with `mode:"immediate"`; the other notices use the
 default queued prompt. Accepted/queued responses update evidence; ambiguous or interrupted sends remain
 unknown and are never automatically retried. Busy orchestrator enqueue is normal and
 does not interrupt, clear messages or prove reading.
@@ -370,8 +366,8 @@ runtime is started and HTTP is listening so resumed sessions can connect MCP.
 Activation, pre-listen agent events and inbound reads do not trigger it.
 Recovery uses bounded batches through a fixed high-water mark without waiting
 for new Task traffic. Waiting subscriptions survive restart; only known-unattempted
-pending subscription/dependency/child notices recover. Pending `update_notices`
-expire on restart as `UPDATE_NOTICE_EXPIRED` and are not delivered late. Unknown,
+pending subscription/dependency/child notices recover. Pending `assignee_notices`
+expire on restart as `ASSIGNEE_NOTICE_EXPIRED` and are not delivered late. Unknown,
 accepted, queued and known failed attempts do not replay. Shutdown prevents new
 claims and keeps storage open until in-flight work records its outcome. There is
 no exactly-once guarantee for host prompt.
@@ -380,7 +376,7 @@ no exactly-once guarantee for host prompt.
 
 Read views are fixed, not arbitrary projections:
 `list`, `overview`, `execution`, `definition`, `changelog`, `activity`, `outcomes`,
-`subscriptions`, `dependency_notices`, `child_notices`, `update_notices`,
+`subscriptions`, `dependency_notices`, `child_notices`, `assignee_notices`,
 `automation_log`, `operation`. orchestrator discovers through an explicit
 orchestrator-filtered list and selects single-Task content by purpose; assignee reads full
 execution requirements at start/resumption and synchronization checkpoints.
@@ -442,16 +438,17 @@ checked against retained fields too, not merely the supplied patch.
 | Purpose | Exact reference form |
 | --- | --- |
 | Ordinary reference | `[Task](task:<uuid>)` |
-| Entire first assignment message | `[Task assigned to you](task:<uuid>?event=assigned)` |
-| Service-sent important-update notice to assignee (`task_edit notify_assignee:true`) | `[Task updated](task:<uuid>?event=updated)` |
-| Explicit subscription's system notice to orchestrator | `[Task status updated](task:<uuid>?event=status_changed)` |
+| Entire first assignment message | `[Task assigned](task:<uuid>?event=assigned)` |
+| Automatic assignee update notice | `[Task updated](task:<uuid>?event=updated)` |
+| Automatic assignee cancellation notice | `[Task cancelled](task:<uuid>?event=cancelled)` |
+| Explicit subscription's system notice to subscriber | `[Subscribed Task status changed](task:<uuid>?event=status_changed)` |
 | Dependent ready notice to orchestrator | `[Subtask ready](task:<uuid>?event=ready)` |
 | Dependent blocker-cancelled notice to orchestrator | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` |
 | Subtask done notice to its orchestrator (the parent's assignee) | `[Subtask done](task:<uuid>?event=child_done)` |
 | Subtask blocked notice to its orchestrator (the parent's assignee) | `[Subtask blocked](task:<uuid>?event=child_blocked)` |
 | Subtask cancelled notice to its orchestrator (the parent's assignee) | `[Subtask cancelled](task:<uuid>?event=child_cancelled)` |
 
-Labels name the recipient's role for the linked Task; older unprefixed labels such as
+Labels name the recipient's role for the linked Task; older assignment labels such as
 `[Task assigned to you](task:<uuid>?event=assigned)` remain recognized because the renderer reads only the event.
 
 IDs passed to tools are bare UUIDs. The parser accepts only the `task:` scheme,

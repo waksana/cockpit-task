@@ -27,9 +27,7 @@ session 修改宿主角色的工具，指派也不补能力。调用者身份来
 和沿祖先链的回环指派（`DELEGATION_CYCLE`）。`DELEGATION_OWNER_MISMATCH` 已删除，
 因为 `orchestrator` 不再是输入字段。
 
-Skill 按类别组织：[Doing your own Task](../skills/cockpit-task-tree/cockpit-task-tree/references/own-task.md) 指导作为 assignee 的完成责任，
-[Orchestrating Subtasks](../skills/cockpit-task-tree/cockpit-task-tree/references/subtasks.md) 指导作为 orchestrator 的委派，
-其余参考为读取、写入与恢复、链接、重要更新和自动化。
+Skill 结构为一个 [SKILL.md](../skills/cockpit-task-tree/cockpit-task-tree/SKILL.md) 操作手册，覆盖作为节点完成自己的 Task、编排 Subtask、读取当前事实、写入安全、通知与恢复；仅保留 [automation reference](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md) 说明可信脚本 Task。工具字段、错误码、视图和分页以 MCP 工具描述为准。
 
 常驻 prompt 固定责任及加载入口；Skill 正文指导判断，随包 references 解释
 具体问题。外层目录是原生发现根目录，内层技能自包含，不依赖仓库 docs。
@@ -181,7 +179,7 @@ activity 不自动改状态，outcome 不自动 done。完成最新已确认约�
 或 Skill/MCP 发现、契约、能力验证缺口。区分观察、假设及外部等待，不编造耗时；
 无有用发现传 null，不要求多段模板或凑字数。复盘最多 2,000 字符，不代替成果和阻塞，
 不授权改进或扩大范围；服务不新增通知、派单或完成门槛；
-orchestrator 按 subtasks.md 用 `task_retro_handle` 处理有发现的 retro（有Subtask 的 assignee 在 done 前，根节点仅在用户问起时）。
+orchestrator 按 Task tree Skill 用 `task_retro_handle` 处理有发现的 retro（有Subtask 的 assignee 在 done 前，根节点仅在用户问起时）。
 服务保证提交和持久化，不保证思考或质量；automation 无 Agent 复盘。
 仅工作本身需要时使用 in_review，不等待默认 orchestrator 审批。
 
@@ -190,9 +188,10 @@ orchestrator 按 subtasks.md 用 `task_retro_handle` 处理有发现的 retro（
 | 引用 | 使用规则 |
 | --- | --- |
 | `[Task](task:<uuid>)` | 普通引用 |
-| `[Task assigned to you](task:<uuid>?event=assigned)` | `task_assign` 的完整首次派单；orchestrator 不重复发送 |
-| `[Task updated](task:<uuid>?event=updated)` | 服务按 `task_edit notify_assignee:true` 发送给 assignee 的重要要求更新，附读取/ACK 最新版要求 |
-| `[Task status updated](task:<uuid>?event=status_changed)` | 系统按显式一次性订阅通知 Task.orchestrator，不是 assignee 的 ACK 通知 |
+| `[Task assigned](task:<uuid>?event=assigned)` | `task_assign` 的完整首次派单；orchestrator 不重复发送；旧 assigned-to-you 标签仅兼容识别 |
+| `[Task updated](task:<uuid>?event=updated)` | 服务自动发送给 assignee 的要求/依赖/重开更新，附读取/ACK 最新版要求 |
+| `[Task cancelled](task:<uuid>?event=cancelled)` | 服务自动发送给 assignee 的取消通知，附读取取消理由并停止受影响工作要求 |
+| `[Subscribed Task status changed](task:<uuid>?event=status_changed)` | 系统按显式一次性订阅通知 subscriber，不是 assignee 的 ACK 通知 |
 | `[Subtask ready](task:<uuid>?event=ready)` | `blocked_by` 全部 done 后系统通知依赖方 orchestrator；不代表已指派或启动 |
 | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` | 待派发依赖方的 blocker 取消后系统通知 orchestrator 重新评估 |
 | `[Subtask done](task:<uuid>?event=child_done)` | Subtask 每次真实进入 done 时系统通知其 orchestrator，无需订阅；同一转换已触发订阅或父 Task 已结束时不发 |
@@ -203,12 +202,7 @@ orchestrator 按 subtasks.md 用 `task_retro_handle` 处理有发现的 retro（
 状态、命令或事件总线。卡片读取当前数据，消息原因保持不变。
 完整语法见[引用契约](task-implementation.md#read-boundaries-and-reference)。
 
-普通要求更新只改 Task，不排队发送 cue。orchestrator 仅在重要变更不能等待正常检查点时，
-按[重要更新参考](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md)
-把所有说明写进完整要求，并在改变 description 的同一次 `task_edit` 设置
-`notify_assignee:true`。服务用 `mode:"immediate"` 单次发送固定 updated 引用和读取/ACK 要求。
-不复制 description、不整理或重放队列、不为通知中断工作；未知效果只作有界核对，
-不手写补发。接受不等于消费或当前 revision 的 ACK。
+普通要求更新只改 Task；agent 不给其他 agent 发消息或补发卡片。assignee 之外的调用者改变已指派未结束 Agent Task 的 description / `blocked_by`、重开或依赖变化时，服务用 `mode:"immediate"` 单次发送固定 updated 引用和读取/ACK 要求；取消时发送 fixed cancelled 引用和停止工作要求。不复制 description、不整理或重放队列、不为通知中断工作；未知效果只作有界核对，不手写补发。接受不等于消费或当前 revision 的 ACK。
 
 **默认不订阅。** orchestrator 只有在未来状态会使自己采取具体、必要的后续行动时，
 才用 task_subscribe；无需等用户明确要求订阅，但不能为此虚构工作、拆分成果或
@@ -216,8 +210,8 @@ orchestrator 按 subtasks.md 用 `task_retro_handle` 处理有发现的 retro（
 blocked 不让 orchestrator 再转述。选择最少必要目标，行动不再需要时
 task_unsubscribe 取消仍在等待的订阅。
 
-登记时已匹配则失败，不即时通知。首次实际匹配后由系统 enqueue 给 Task.orchestrator，
-不打断或清队列、不保持原模型轮次等待。orchestrator 收到后按实际目的一次读取所需最新内容，重新判断
+登记时已匹配则失败，不即时通知。首次实际匹配后由系统 enqueue 给 subscriber，
+不打断或清队列、不保持原模型轮次等待。subscriber 收到后按实际目的一次读取所需最新内容，重新判断
 后续行动是否仍必要且已授权，不自动续订或轮询。assignee 不等待订阅或通知被读，
 也不发送、重复或 ACK 这条消息。失败投递不抹去已保存成果，不手工补发未知通知。
 
@@ -230,7 +224,7 @@ task_unsubscribe 取消仍在等待的订阅。
 | `result` | 读取数据或原操作的明确效果，可能包含已应用部分 |
 | `error` | 原操作未完成部分的错误；无错误为 `null` |
 | `definition_check` | 响应检查点的定义同步情况，独立于操作成功与否 |
-| `notifications` / `notification_error` | 触发订阅时的投递证据与独立错误，不回滚 Task 效果 |
+| `notifications` / `notification_error` | 触发订阅、依赖、Subtask 或 assignee notice 时的投递证据与独立错误，不回滚 Task 效果 |
 
 definition_check 检查本次定向 Task 及 actor 承接的未结束 Task，不扫描聊天或全部任务。
 `checked` 的条目含 task_id、revision、acknowledged_revision、needs_ack，
@@ -262,12 +256,10 @@ definition_check 检查本次定向 Task 及 actor 承接的未结束 Task，不
 
 | 问题 | 参考 |
 | --- | --- |
-| 作为 assignee 完成 Task | [执行](../skills/cockpit-task-tree/cockpit-task-tree/references/own-task.md) |
-| 作为 orchestrator 委派Subtask | [委派](../skills/cockpit-task-tree/cockpit-task-tree/references/subtasks.md) |
-| 视图、字段、截断和分页 | [Task 读取](../skills/cockpit-task-tree/cockpit-task-tree/references/reading-tasks.md) |
-| 写入、冲突、部分结果与恢复 | [写入与恢复](../skills/cockpit-task-tree/cockpit-task-tree/references/task-writes-and-recovery.md) |
-| Task 引用和通知原因 | [Task 链接](../skills/cockpit-task-tree/cockpit-task-tree/references/task-links.md) |
-| 重要变更不能等正常检查点 | orchestrator：[重要更新](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md) 并用 `task_edit notify_assignee:true`；assignee：读取完整 execution 并 ACK 最新 revision |
+| 完成自己的 Task、编排 Subtask、处理通知与恢复 | [Task tree Skill](../skills/cockpit-task-tree/cockpit-task-tree/SKILL.md) |
+| 可信脚本 automation Task | [Automation reference](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md) |
+| 视图、字段、截断、分页、错误码和工具输入 | [MCP 契约](task-mcp-contract.md) |
+| Task 引用和通知原因 | [实现边界](task-implementation.md#read-boundaries-and-reference) |
 | 可信脚本与自动化 | [自动化](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md) |
 
 只读当前需要的参考，不每轮加载全套。Skill 指导真实行为，工具保护数据一致性；

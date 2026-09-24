@@ -128,7 +128,10 @@ export const schemas = {
   task_automation_reconcile: z.strictObject({ ...existing, reason: text(2000) }),
   task_session_create: z.strictObject({ ...mutation, cwd: text(4000), ...resources }),
   task_session_prepare: z.strictObject({ ...mutation, session_id: session, ...resources }),
-  task_assign: z.strictObject({ ...existing, revision, assignee: session, resume_request_id: request.optional() }),
+  task_assign: z.strictObject({
+    ...existing, revision, assignee: session,
+    resume_request_id: request.optional().describe('Only to finish a dispatch whose finalized operation shows assignment=applied and message=not_sent: the earlier request_id, same Task and assignee. Pending, queued, accepted or unknown sends cannot resume'),
+  }),
   task_edit: z.strictObject({
     ...existing, revision, reason: text(2000), title: text(240).optional(),
     description: text(LIMITS.description).optional(), references: references.optional(), metadata: metadata.optional(),
