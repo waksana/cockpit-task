@@ -36,33 +36,33 @@ function nativeHost(t, { name = null, userSet = false, provenance = true, rename
   const service = new TaskService(store, createHostAdapter(host), { report: error => assert.fail(error.stack) });
   t.after(() => { service.close(); rmSync(directory, { recursive: true, force: true }); });
   let sequence = 0;
-  const write = (name, input, actor = 'owner') => service.execute(name, {
-    request_id: `title-${++sequence}`, actor_session_id: actor, ...input,
+  const write = (name, input, actor = 'orchestrator') => service.execute(name, {
+    request_id: `title-${++sequence}`, actor: actor, ...input,
   });
   const create = async title => {
-    const created = await write('task_create', { owner: 'owner', title, description: 'Synthetic work' });
+    const created = await write('task_create', { title, description: 'Synthetic work' });
     assert.equal(created.error, null);
     return store.task(created.result.task_id);
   };
   const assign = (task, extra = {}) => service.execute('task_assign', {
-    request_id: `assign-${task.id}`, actor_session_id: 'owner', task_id: task.id, executor: 'executor',
+    request_id: `assign-${task.id}`, actor: 'orchestrator', task_id: task.id, assignee: 'assignee',
     revision: task.revision, write_context: task.write_context, ...extra,
   });
   const finish = async task => {
     const bound = store.task(task.id);
-    await write('task_ack', { task_id: task.id, revision: bound.revision, write_context: bound.write_context }, 'executor');
+    await write('task_ack', { task_id: task.id, revision: bound.revision, write_context: bound.write_context }, 'assignee');
     const acked = store.task(task.id);
     const done = await write('task_report', {
       task_id: task.id, revision: acked.revision, write_context: acked.write_context,
       status: 'done', outcome: { summary: 'Done' }, retro: null,
-    }, 'executor');
+    }, 'assignee');
     assert.equal(done.error, null);
   };
   const renames = () => calls.filter(call => call.intent === 'session/rename');
   return { native, calls, store, service, create, assign, finish, renames };
 }
 
-test('assignment renames an auto-titled Executor to the Task title before dispatch', async t => {
+test('assignment renames an auto-titled Assignee to the Task title before dispatch', async t => {
   const f = nativeHost(t);
   const task = await f.create('  Synthetic title  ');
   const assigned = await f.assign(task);
@@ -70,7 +70,7 @@ test('assignment renames an auto-titled Executor to the Task title before dispat
   assert.equal(assigned.result.operation.status, 'applied');
   assert.equal(assigned.result.operation.message, 'accepted');
   assert.deepEqual(assigned.result.operation.session_title, { status: 'renamed', title: 'Synthetic title' });
-  assert.deepEqual(f.renames().map(call => call.body), [{ sessionId: 'executor', name: task.title }]);
+  assert.deepEqual(f.renames().map(call => call.body), [{ sessionId: 'assignee', name: task.title }]);
   const order = f.calls.map(call => call.intent);
   assert.ok(order.indexOf('session/rename') < order.indexOf('prompt'));
 
@@ -126,7 +126,7 @@ test('rename failure or an unconfirmed result is reported without affecting the 
     assert.equal(assigned.result.operation.message, 'accepted');
     assert.equal(assigned.result.operation.session_title.status, 'unconfirmed');
     assert.equal(assigned.result.operation.session_title.error.code, 'TITLE_UNCONFIRMED');
-    assert.equal(f.store.task(task.id).executor, 'executor');
+    assert.equal(f.store.task(task.id).assignee, 'assignee');
     assert.equal(f.renames().length, 1, 'no retry');
   }
 });

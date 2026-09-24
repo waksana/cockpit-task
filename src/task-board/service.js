@@ -1,5 +1,5 @@
 import { TaskError, parseInput } from './contracts.js';
-import { assignExecutor, createExecutor, prepareExecutor } from './operations.js';
+import { assignTask, createNodeSession, prepareNodeSession } from './operations.js';
 import { deliverNotification } from './notifications.js';
 import { AutomationRunner } from './automation-runner.js';
 
@@ -14,35 +14,64 @@ export class TaskService {
     this.closed = false;
     this.sessionOperations = new Set();
     this.automation = new AutomationRunner(this);
+    this.expireEarlierAssigneeNotices();
   }
 
-  async execute(name, rawInput, { signal } = {}) {
+  // Immediate assignee notices are only meaningful during their own request. Ones left pending by an
+  // earlier process expire before this service accepts any request, so a replay can never send them late.
+  expireEarlierAssigneeNotices() {
+    for (let seq = 0, through = this.store.pendingNotificationBoundary('assignee_notices'); through;) {
+      const batch = this.store.pendingNotifications(seq, through, 20, 'assignee_notices');
+      if (!batch.length) break;
+      for (const entry of batch) {
+        this.store.finishNotification(entry.id, 'pending', 'not_sent', {
+          code: 'ASSIGNEE_NOTICE_EXPIRED', message: 'The module restarted before this assignee notice was sent; it was not sent. The assignee still meets the change through definition_check or the Task status at its next read',
+        });
+        seq = entry.seq;
+      }
+    }
+  }
+
+  // actor is the calling session: the host-injected MCP invocation, or 'user' for the module HTTP API.
+  // external marks untrusted MCP/HTTP input: identity then comes only from these options.
+  async execute(name, rawInput, { signal, actor, invocation, external = false } = {}) {
     if (this.closing) return {
       result: null, error: { code: 'MODULE_CLOSING', message: 'Task is closing', status: 503 },
       definition_check: { status: 'unavailable', error: { code: 'MODULE_CLOSING', message: 'Task storage is closing' } },
     };
     this.active++;
     try {
-      return await this.run(name, rawInput, signal);
+      return await this.run(name, rawInput, signal, invocation?.sessionId ?? actor, invocation, external);
     } finally {
       this.active--;
       this.finishClose();
     }
   }
 
-  async run(name, rawInput, signal) {
+  async run(name, rawInput, signal, actor, invocation, external) {
     let input;
     let outcome;
     try {
-      input = parseInput(name, rawInput);
+      const { actor: inputActor, invocation: inputInvocation, ...publicInput } =
+        rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput) ? rawInput : {};
+      if (external && (inputActor !== undefined || inputInvocation !== undefined)) {
+        throw new TaskError('INVALID_INPUT', 'Caller identity comes only from host invocation metadata; actor and invocation are not tool arguments and nothing was done', 400);
+      }
+      const effectiveInvocation = external ? invocation : invocation ?? inputInvocation;
+      const effectiveActor = external ? effectiveInvocation?.sessionId ?? actor : effectiveInvocation?.sessionId ?? actor ?? inputActor;
+      if (typeof effectiveActor !== 'string' || !effectiveActor) {
+        throw new TaskError('INVOCATION_REQUIRED', 'Task tools need the calling session from host MCP invocation metadata (_meta["cockpit/invocation"]); this host did not provide it and nothing was done', 400);
+      }
+      input = { ...parseInput(name, publicInput), actor: effectiveActor, ...(effectiveInvocation ? { invocation: effectiveInvocation } : {}) };
       if (signal?.aborted) throw new TaskError('REQUEST_CANCELLED', 'Task request was cancelled before execution', 409);
       if (name === 'task_assign') {
         const row = this.store.row(input.task_id);
         if (row.kind === 'automation') throw new TaskError('AUTOMATION_MANAGED', 'Automation Tasks cannot be assigned to an Agent');
-        // Reject before reserving or inspecting the Executor, so a busy target cannot mask role
+        // Reject before reserving or inspecting the assignee, so a busy target cannot mask role
         // confusion as unavailability; binding rechecks inside its transaction.
+        if (!this.store.receipt(name, input)) this.store.authorize(row, input.actor, ['orchestrator']);
         if (!input.resume_request_id && !this.store.receipt(name, input)) {
-          this.store.assertAssignable(row, input.executor);
+          this.store.assertAssignable(row, input.assignee);
           this.store.assertReady(row);
         }
       }
@@ -60,12 +89,12 @@ export class TaskService {
             guard: (id, work) => this.withSessionOperation(id, work),
           };
           if (name === 'task_session_create') {
-            outcome = await createExecutor({ ...options, create: cwd => this.host.create(cwd) });
+            outcome = await createNodeSession({ ...options, create: cwd => this.host.create(cwd) });
           } else if (name === 'task_session_prepare') {
-            outcome = await prepareExecutor(options);
+            outcome = await prepareNodeSession(options);
           } else {
             try {
-              outcome = await this.withSessionOperation(input.executor, () => assignExecutor({
+              outcome = await this.withSessionOperation(input.assignee, () => assignTask({
                 ...options,
                 bind: () => this.store.bindAssignment(input),
                 recheck: () => this.store.dispatchPreflight(input),
@@ -73,14 +102,14 @@ export class TaskService {
                 ...(typeof this.host.nameState === 'function' && typeof this.host.rename === 'function' ? { retitle: {
                   nameState: id => this.host.nameState(id),
                   rename: (id, name) => this.host.rename(id, name),
-                  previous: () => this.store.moduleSessionTitle(input.executor, input.request_id),
+                  previous: () => this.store.moduleSessionTitle(input.assignee, input.request_id),
                 } } : {}),
               }));
             } catch (error) {
-              if (!(error instanceof TaskError) || error.code !== 'EXECUTOR_OPERATION_IN_PROGRESS') throw error;
+              if (!(error instanceof TaskError) || error.code !== 'SESSION_OPERATION_IN_PROGRESS') throw error;
               outcome = {
                 result: { operation: {
-                  request_id: input.request_id, task_id: input.task_id, executor: input.executor,
+                  request_id: input.request_id, task_id: input.task_id, assignee: input.assignee,
                   status: 'rejected', capability: 'unchecked', assignment: 'not_applied', message: 'not_sent',
                 } },
                 error: { code: error.code, message: error.message },
@@ -93,11 +122,11 @@ export class TaskService {
         let validationError;
         if (name === 'task_reopen' && !this.store.receipt(name, input)) {
           try {
-            this.store.reopenCandidate(input);
-            const capability = await this.host.inspect(input.actor_session_id);
-            // Self-continuation is performed by a running Executor, not an idle dispatch target.
-            if (!capability.ready || !capability.executor) {
-              throw new TaskError('CAPABILITY_UNAVAILABLE', 'The original Executor must have loaded, ready Executor capability');
+            const candidate = this.store.reopenCandidate(input);
+            // Whoever reopens, the original assignee continues the work and needs Node capability.
+            const capability = await this.host.inspect(candidate.assignee);
+            if (!capability.ready || !capability.node) {
+              throw new TaskError('CAPABILITY_UNAVAILABLE', 'The original assignee must have loaded, ready Node capability');
             }
             if (signal?.aborted) throw new TaskError('REQUEST_CANCELLED', 'Task request was cancelled before reopening');
           } catch (error) {
@@ -155,8 +184,7 @@ export class TaskService {
       ?? outcome.result?.result?.operation?.task_id;
     const context = {
       task_id: target ?? (typeof rawInput?.task_id === 'string' ? rawInput.task_id : undefined),
-      actor_session_id: input?.actor_session_id
-        ?? (typeof rawInput?.actor_session_id === 'string' ? rawInput.actor_session_id : undefined),
+      actor: typeof input?.actor === 'string' ? input.actor : typeof actor === 'string' ? actor : undefined,
     };
     const definition_check = this.store.definitionCheck(context);
     if (!['task_read', 'task_script_read'].includes(name) && outcome.result !== null) this.invalidate();
@@ -168,7 +196,7 @@ export class TaskService {
 
   async withSessionOperation(sessionId, work) {
     if (this.sessionOperations.has(sessionId)) {
-      throw new TaskError('EXECUTOR_OPERATION_IN_PROGRESS', 'Another preparation or assignment is using this Executor; nothing attempted');
+      throw new TaskError('SESSION_OPERATION_IN_PROGRESS', 'Another preparation or assignment is using this session; nothing attempted');
     }
     this.sessionOperations.add(sessionId);
     try { return await work(); }

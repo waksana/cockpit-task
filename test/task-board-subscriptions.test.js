@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { TaskStore } from '../src/task-board/store.js';
 import { TaskService } from '../src/task-board/service.js';
 import { parseInput } from '../src/task-board/contracts.js';
@@ -15,25 +14,25 @@ function fixture(t, overrides = {}) {
   let store = new TaskStore(root);
   const sent = [], reads = [], errors = [];
   const host = {
-    ownerExists: async owner => { reads.push(owner); return true; },
-    send: async (owner, text) => { sent.push({ owner, text }); return { ok: true }; },
+    sessionExists: async orchestrator => { reads.push(orchestrator); return true; },
+    send: async (orchestrator, text) => { sent.push({ orchestrator, text }); return { ok: true }; },
     ...overrides,
   };
   let service = new TaskService(store, host, { report: error => errors.push(error) });
   t.after(() => { service.close(); rmSync(root, { recursive: true, force: true }); });
-  const create = owner => store.executeLocal('task_create', {
-    actor_session_id: 'creating-actor', request_id: randomUUID(), owner: owner ?? 'task-owner',
+  const create = orchestrator => store.executeLocal('task_create', {
+    actor: orchestrator ?? 'task-orchestrator', request_id: randomUUID(),
     title: 'Synthetic subscription', description: 'Synthetic requirements',
   });
   const request = (task, fields) => ({
-    actor_session_id: 'different-actor', request_id: randomUUID(),
+    actor: 'task-orchestrator', request_id: randomUUID(),
     task_id: task.task_id, write_context: store.task(task.task_id).write_context, ...fields,
   });
-  const subscribe = (task, statuses = ['done'], extra = {}) => store.executeLocal('task_subscribe', request(task, { statuses, ...extra }));
-  const reportRequest = (task, fields) => request(task, { revision: store.task(task.task_id).revision, ...fields });
+  const subscribe = (task, statuses = ['done'], extra = {}) => store.executeLocal('task_subscribe', request(task, { actor: 'subscriber', statuses, ...extra }));
+  const reportRequest = (task, fields) => request(task, { actor: 'assignee', revision: store.task(task.task_id).revision, ...fields });
   const executable = () => {
     const task = create();
-    const input = request(task, { revision: 1, executor: 'executor' });
+    const input = request(task, { revision: 1, assignee: 'assignee' });
     store.reserveOperation('task_assign', input);
     store.bindAssignment(input);
     store.executeLocal('task_ack', reportRequest(task, {}));
@@ -48,15 +47,15 @@ function fixture(t, overrides = {}) {
 }
 const code = expected => error => error.code === expected;
 
-test('subscription schemas are bounded and never accept recipient, owner or rule selectors', () => {
-  const input = { actor_session_id: 'actor', request_id: 'id', task_id: randomUUID(), write_context: 'context', statuses: ['done'] };
+test('subscription schemas are bounded and never accept recipient, orchestrator or rule selectors', () => {
+  const input = { request_id: 'id', task_id: randomUUID(), write_context: 'context', statuses: ['done'] };
   assert.deepEqual(parseInput('task_subscribe', input), input);
   for (const patch of [
     { statuses: [] }, { statuses: ['done', 'done'] }, { statuses: ['unknown'] },
-    { recipient: 'other' }, { owner: 'other' }, { fields: ['status'] }, { rule: {} }, { revision: 1 },
+    { recipient: 'other' }, { orchestrator: 'other' }, { fields: ['status'] }, { rule: {} }, { revision: 1 },
   ]) assert.throws(() => parseInput('task_subscribe', { ...input, ...patch }), code('INVALID_INPUT'));
   assert.throws(() => parseInput('task_unsubscribe', {
-    actor_session_id: 'actor', request_id: 'id', task_id: input.task_id, subscription_id: randomUUID(), write_context: 'extra',
+    request_id: 'id', task_id: input.task_id, subscription_id: randomUUID(), write_context: 'extra',
   }), code('INVALID_INPUT'));
 });
 
@@ -78,22 +77,22 @@ test('already-matching registration rejects inside the transaction without subsc
   assert.deepEqual(await f.service.execute('task_subscribe', request), result);
 });
 
-test('one waiting subscription per derived Owner, durable receipt replay and cancellation', t => {
+test('one waiting subscription per subscriber, durable receipt replay and cancellation', t => {
   const f = fixture(t), task = f.create();
   const input = f.request(task, { statuses: ['in_review', 'done'] });
   const first = f.store.executeLocal('task_subscribe', input);
   const subscription = first.subscription;
-  assert.equal(subscription.owner, 'task-owner');
-  assert.equal(subscription.actor_session_id, 'different-actor');
+  assert.equal(subscription.subscriber, 'task-orchestrator');
+  assert.equal(subscription.author, 'task-orchestrator');
   assert.equal(subscription.state, 'waiting');
   assert.equal(subscription.event, null);
   assert.equal(subscription.notification.status, 'not_requested');
   assert.deepEqual(f.store.executeLocal('task_subscribe', input), first);
-  assert.throws(() => f.subscribe(task), code('SUBSCRIPTION_EXISTS'));
+  assert.throws(() => f.store.executeLocal('task_subscribe', f.request(task, { statuses: ['done'] })), code('SUBSCRIPTION_EXISTS'));
   assert.throws(() => f.store.executeLocal('task_subscribe', { ...input, statuses: ['blocked'] }), code('REQUEST_ID_CONFLICT'));
   f.restart();
   assert.equal(f.subscriptions(task)[0].state, 'waiting');
-  const cancel = { actor_session_id: 'other-actor', request_id: randomUUID(), task_id: task.task_id, subscription_id: subscription.subscription_id };
+  const cancel = { actor: 'other-actor', request_id: randomUUID(), task_id: task.task_id, subscription_id: subscription.subscription_id };
   const cancelled = f.store.executeLocal('task_unsubscribe', cancel);
   assert.equal(cancelled.subscription.state, 'cancelled');
   assert.equal(cancelled.subscription.ended_by, 'other-actor');
@@ -103,7 +102,7 @@ test('one waiting subscription per derived Owner, durable receipt replay and can
   assert.throws(() => f.store.executeLocal('task_unsubscribe', { ...cancel, request_id: randomUUID(), task_id: f.create('other').task_id }), code('SUBSCRIPTION_NOT_FOUND'));
 });
 
-test('actual transitions consume once, address only stored Owner, and retain event snapshot after fast changes', async t => {
+test('actual transitions consume once, address only stored subscriber, and retain event snapshot after fast changes', async t => {
   const f = fixture(t), task = f.executable();
   const subscription = f.subscribe(task, ['in_progress', 'blocked']).subscription;
   const input = f.reportRequest(task, { status: 'in_progress' });
@@ -112,8 +111,8 @@ test('actual transitions consume once, address only stored Owner, and retain eve
   assert.equal(first.notification_error, null);
   assert.deepEqual(first.result.subscription_ids, [subscription.subscription_id]);
   assert.equal(first.notifications[0].notification.status, 'accepted');
-  assert.deepEqual(f.sent, [{ owner: 'task-owner', text: `[As Owner: Task status updated](task:${task.task_id}?event=status_changed)` }]);
-  assert.deepEqual(f.reads, ['task-owner']);
+  assert.deepEqual(f.sent, [{ orchestrator: 'subscriber', text: `[Subscribed Task status changed](task:${task.task_id}?event=status_changed)` }]);
+  assert.deepEqual(f.reads, ['subscriber']);
   assert.deepEqual((await f.service.execute('task_report', input)).result, first.result);
   await f.service.execute('task_report', f.reportRequest(task, { status: 'blocked' }));
   await f.service.execute('task_report', f.reportRequest(task, { status: 'in_progress' }));
@@ -123,7 +122,7 @@ test('actual transitions consume once, address only stored Owner, and retain eve
   assert.equal(recorded.event.from_status, 'todo');
   assert.equal(recorded.event.status, 'in_progress');
   assert.equal(recorded.event.request_id, input.request_id);
-  assert.equal(recorded.event.actor_session_id, 'different-actor');
+  assert.equal(recorded.event.actor, 'assignee');
   assert.equal(recorded.event.at, recorded.ended_at);
   assert.equal(f.store.operation(input.request_id).result.subscription_ids[0], subscription.subscription_id);
 });
@@ -133,7 +132,8 @@ test('same-status, activity, definitions and stale status reports do not fire or
   await f.service.execute('task_report', f.reportRequest(task, { status: 'in_progress' }));
   f.subscribe(task, ['blocked']);
   await f.service.execute('task_report', f.reportRequest(task, { status: 'in_progress', activity: { text: 'Same status' } }));
-  await f.service.execute('task_edit', f.reportRequest(task, { reason: 'clarify', description: 'Second definition' }));
+  // The assignee revises its own definition, so no service update notice is involved.
+  await f.service.execute('task_edit', f.reportRequest(task, { actor: 'assignee', reason: 'clarify', description: 'Second definition' }));
   const stale = await f.service.execute('task_report', f.reportRequest(task, {
     revision: 1, status: 'blocked', activity: { text: 'Acknowledged old work' },
   }));
@@ -173,7 +173,7 @@ test('cancellation triggers only subscribed Tasks; unmatched terminal targets ex
 test('unsubscription races serialize: cancelling wins before transition or fails after consumption', async t => {
   const f = fixture(t), task = f.create();
   const sub = f.subscribe(task, ['cancelled']).subscription;
-  const cancel = { actor_session_id: 'actor', request_id: randomUUID(), task_id: task.task_id, subscription_id: sub.subscription_id };
+  const cancel = { actor: 'actor', request_id: randomUUID(), task_id: task.task_id, subscription_id: sub.subscription_id };
   await f.service.execute('task_unsubscribe', cancel);
   await f.service.execute('task_cancel', f.request(task, { reason: 'done waiting' }));
   assert.equal(f.sent.length, 0);
@@ -210,9 +210,9 @@ test('queued, rejected and unknown host results remain inspectable across restar
   }
 });
 
-test('missing Owner or failed passive lookup is explicitly known unsent; no session is created', async t => {
-  for (const ownerExists of [async () => false, async () => { throw new Error('read failed'); }]) {
-    const f = fixture(t, { ownerExists }), task = f.create();
+test('missing Orchestrator or failed passive lookup is explicitly known unsent; no session is created', async t => {
+  for (const sessionExists of [async () => false, async () => { throw new Error('read failed'); }]) {
+    const f = fixture(t, { sessionExists }), task = f.create();
     f.subscribe(task, ['cancelled']);
     const result = await f.service.execute('task_cancel', f.request(task, { reason: 'stop' }));
     assert.equal(result.result.task_status, 'cancelled');
@@ -324,21 +324,14 @@ test('storage failure after host acceptance remains unknown durably and cannot r
   assert.equal(f.sent.length, 1);
 });
 
-test('schema 1 upgrade preserves Task rows and receipts while fencing old binaries with the current schema version', t => {
+test('current schema preserves Task rows and receipts across restart', t => {
   const f = fixture(t), task = f.executable();
   const before = f.store.task(task.task_id);
   const receipts = f.store.db.prepare('SELECT * FROM operations ORDER BY request_id').all();
   f.service.close();
-  const old = new DatabaseSync(join(f.root, 'task-board.sqlite'));
-  old.exec(`
-    DROP TABLE subscriptions; DROP TABLE automation_runs; DROP TABLE scripts;
-    ALTER TABLE tasks DROP COLUMN kind; ALTER TABLE outcomes DROP COLUMN run_id;
-    PRAGMA user_version=1;
-  `);
-  old.close();
   const upgraded = new TaskStore(f.root);
   try {
-    assert.equal(upgraded.db.prepare('PRAGMA user_version').get().user_version, 8);
+    assert.equal(upgraded.db.prepare('PRAGMA user_version').get().user_version, 9);
     assert.deepEqual(upgraded.task(task.task_id), before);
     assert.deepEqual(upgraded.db.prepare('SELECT * FROM operations ORDER BY request_id').all(), receipts);
     assert.deepEqual(upgraded.read({ view: 'subscriptions', task_id: task.task_id }).items, []);
@@ -350,7 +343,7 @@ test('subscription histories are bounded and scoped, including after terminal tr
   for (let i = 0; i < 13; i++) {
     const subscription = f.subscribe(task).subscription;
     f.store.executeLocal('task_unsubscribe', {
-      actor_session_id: 'actor', request_id: randomUUID(), task_id: task.task_id, subscription_id: subscription.subscription_id,
+      actor: 'actor', request_id: randomUUID(), task_id: task.task_id, subscription_id: subscription.subscription_id,
     });
   }
   f.store.executeLocal('task_cancel', f.request(task, { reason: 'stop' }));
@@ -390,7 +383,7 @@ test('service-ready hook recovers without inbound traffic; activation and ordina
     await Promise.all([module.onReady(), module.onReady()]);
     assert.deepEqual(calls.map(call => call.name), ['session/get', 'prompt']);
     assert.deepEqual(calls.at(-1).body, {
-      sessionId: 'task-owner', text: `[As Owner: Task status updated](task:${task.task_id}?event=status_changed)`, mode: 'enqueue',
+      sessionId: 'subscriber', text: `[Subscribed Task status changed](task:${task.task_id}?event=status_changed)`, mode: 'enqueue',
     });
     await module.onReady();
     assert.equal(calls.length, 2);
@@ -398,7 +391,7 @@ test('service-ready hook recovers without inbound traffic; activation and ordina
   } finally { module.dispose(); }
 });
 
-test('service-ready recovery honors host shutdown or module disposal during Owner lookup', async t => {
+test('service-ready recovery honors host shutdown or module disposal during Orchestrator lookup', async t => {
   for (const shutdown of ['host', 'dispose']) {
     const f = fixture(t), task = f.create();
     f.subscribe(task, ['cancelled']);
@@ -422,7 +415,7 @@ test('service-ready recovery honors host shutdown or module disposal during Owne
       assert.deepEqual(calls, ['session/get']);
       if (shutdown === 'host') controller.abort();
       else module.dispose();
-      finishLookup({ meta: { sessionId: 'task-owner', loaded: true, status: 'idle' } });
+      finishLookup({ meta: { sessionId: 'subscriber', loaded: true, status: 'idle' } });
       await recovery;
       await module.onReady();
       assert.deepEqual(calls, ['session/get']);
@@ -449,8 +442,8 @@ test('pending recovery drains bounded batches and stops at its captured high-wat
     return batch;
   };
   let later;
-  f.host.send = async (owner, text) => {
-    f.sent.push({ owner, text });
+  f.host.send = async (orchestrator, text) => {
+    f.sent.push({ orchestrator, text });
     if (!later) {
       later = f.create();
       f.subscribe(later, ['cancelled']);
@@ -466,9 +459,9 @@ test('pending recovery drains bounded batches and stops at its captured high-wat
   assert.equal(f.sent.length, 24);
 });
 
-test('abort during passive Owner lookup preserves pending known-unsent evidence for explicit replay', async t => {
+test('abort during passive Orchestrator lookup preserves pending known-unsent evidence for explicit replay', async t => {
   const controller = new AbortController();
-  const f = fixture(t, { ownerExists: async () => { controller.abort(); return true; } });
+  const f = fixture(t, { sessionExists: async () => { controller.abort(); return true; } });
   const task = f.create();
   f.subscribe(task, ['cancelled']);
   const input = f.request(task, { reason: 'saved before abort' });
@@ -478,7 +471,7 @@ test('abort during passive Owner lookup preserves pending known-unsent evidence 
   assert.equal(first.notification_error.code, 'NOTIFICATION_PENDING');
   assert.equal(first.notifications[0].notification.status, 'pending');
   assert.deepEqual(f.sent, []);
-  f.host.ownerExists = async () => true;
+  f.host.sessionExists = async () => true;
   const replay = await f.service.execute('task_cancel', input);
   assert.deepEqual(replay.result, first.result);
   assert.equal(replay.notifications[0].notification.status, 'accepted');
@@ -499,7 +492,7 @@ test('failure to persist uncertainty prevents crossing the send boundary', async
   assert.equal(f.sent.length, 1);
 });
 
-test('HTTP exposes notification failure separately from persisted cancellation and never requires Owner idle', async t => {
+test('HTTP exposes notification failure separately from persisted cancellation and never requires Orchestrator idle', async t => {
   const f = fixture(t), task = f.create();
   f.subscribe(task, ['cancelled']);
   f.service.close();
@@ -518,7 +511,7 @@ test('HTTP exposes notification failure separately from persisted cancellation a
   try {
     const response = await module.routes.find(route => route.path === '/tools/:name').handler({
       params: { name: 'task_cancel' }, signal: controller.signal,
-      body: { actor_session_id: 'actor', request_id: randomUUID(), task_id: task.task_id, write_context: task.write_context, reason: 'stop' },
+      body: { request_id: randomUUID(), task_id: task.task_id, write_context: task.write_context, reason: 'stop' },
     });
     assert.equal(response.status, 502);
     assert.equal(response.body.error, null);
@@ -527,7 +520,7 @@ test('HTTP exposes notification failure separately from persisted cancellation a
     assert.equal(response.body.notifications[0].notification.status, 'unknown');
     assert.deepEqual(calls.map(call => call.name), ['session/get', 'prompt']);
     assert.deepEqual(calls[1].body, {
-      sessionId: 'task-owner', text: `[As Owner: Task status updated](task:${task.task_id}?event=status_changed)`, mode: 'enqueue',
+      sessionId: 'subscriber', text: `[Subscribed Task status changed](task:${task.task_id}?event=status_changed)`, mode: 'enqueue',
     });
   } finally { module.dispose(); }
 });

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assignExecutor, createExecutor } from '../src/task-board/operations.js';
+import { assignTask, createNodeSession } from '../src/task-board/operations.js';
 
 const input = {
   request_id: 'dispatch-1', task_id: 'd10c0c92-3580-4cdd-85bf-d7fcf22ab3ff',
-  executor: 'executor', cwd: '/synthetic',
+  assignee: 'assignee', cwd: '/synthetic',
 };
 
 function assignment(overrides = {}) {
@@ -13,7 +13,7 @@ function assignment(overrides = {}) {
   let bindings = 0;
   return {
     saved, sent, get bindings() { return bindings; },
-    run: () => assignExecutor({
+    run: () => assignTask({
       input,
       inspect: async () => ({ ready: true, idle: true }),
       bind: () => { bindings++; return { write_context: 'bound-context' }; },
@@ -31,7 +31,7 @@ test('assignment records uncertainty before sending exactly one assigned event r
   assert.equal(outcome.error, null);
   assert.equal(outcome.result.operation.message, 'accepted');
   assert.equal(f.bindings, 1);
-  assert.deepEqual(f.sent, [{ id: 'executor', text: `[As Executor: Task assigned to you](task:${input.task_id}?event=assigned)` }]);
+  assert.deepEqual(f.sent, [{ id: 'assignee', text: `[Task assigned](task:${input.task_id}?event=assigned)` }]);
   assert.equal(f.saved.at(-2).result.operation.message, 'unknown');
 });
 
@@ -43,7 +43,7 @@ test('missing capability and busy sessions are rejected before binding', async (
     };
     const f = assignment({ inspect: async () => ({ ...current, details }) });
     const outcome = await f.run();
-    assert.equal(outcome.error.code, current.ready ? 'EXECUTOR_NOT_READY' : 'CAPABILITY_UNAVAILABLE');
+    assert.equal(outcome.error.code, current.ready ? 'SESSION_NOT_READY' : 'CAPABILITY_UNAVAILABLE');
     assert.deepEqual(outcome.result.operation.details, details);
     assert.deepEqual(f.saved.at(-1), outcome);
     assert.equal(outcome.result.operation.assignment, 'not_applied');
@@ -66,7 +66,7 @@ test('readiness lost after binding retains the second observation and never send
         : { ready, idle: !ready, details },
     });
     const outcome = await f.run();
-    assert.equal(outcome.error.code, ready ? 'EXECUTOR_NOT_READY' : 'CAPABILITY_UNAVAILABLE');
+    assert.equal(outcome.error.code, ready ? 'SESSION_NOT_READY' : 'CAPABILITY_UNAVAILABLE');
     assert.equal(outcome.result.operation.assignment, 'applied');
     assert.equal(outcome.result.operation.message, 'not_sent');
     assert.equal(outcome.result.operation.status, 'partially_applied');
@@ -115,7 +115,7 @@ test('cancellation after binding does not send or pretend the binding disappeare
 test('session creation retains a known ID when capability preparation failed', async () => {
   const saved = [];
   let inspected = false;
-  const outcome = await createExecutor({
+  const outcome = await createNodeSession({
     input,
     create: async () => { throw Object.assign(new Error('MCP unavailable'), { sessionId: 'created-id' }); },
     inspect: async () => { inspected = true; return { ready: true }; },
@@ -130,7 +130,7 @@ test('session creation retains a known ID when capability preparation failed', a
 
 test('creation with an unknown result does not attempt readiness or another creation', async () => {
   let creates = 0;
-  const outcome = await createExecutor({
+  const outcome = await createNodeSession({
     input,
     create: async () => { creates++; throw new Error('Transport interrupted'); },
     inspect: async () => assert.fail('No ID exists to inspect'),
@@ -142,10 +142,10 @@ test('creation with an unknown result does not attempt readiness or another crea
 });
 
 test('successful creation checks readiness separately without sending', async () => {
-  const outcome = await createExecutor({
+  const outcome = await createNodeSession({
     input,
-    create: async cwd => { assert.equal(cwd, '/synthetic'); return { sessionId: 'new-executor' }; },
-    inspect: async id => { assert.equal(id, 'new-executor'); return { ready: true, idle: true }; },
+    create: async cwd => { assert.equal(cwd, '/synthetic'); return { sessionId: 'new-assignee' }; },
+    inspect: async id => { assert.equal(id, 'new-assignee'); return { ready: true, idle: true }; },
     save: () => {},
   });
   assert.equal(outcome.error, null);

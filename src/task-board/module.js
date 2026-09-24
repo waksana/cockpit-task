@@ -21,8 +21,9 @@ export function activate(context) {
   const execute = (name, input, options) => service.execute(name, input, options);
   const mcp = createMcpRoutes({ execute, schemas: toolSchemas, signal, report: context.report });
   const json = async (name, request) => {
+    // Module HTTP callers are the signed-in user (Web board, operators), never a native session.
     const body = await execute(name, request.body, {
-      signal: AbortSignal.any([request.signal, signal]),
+      signal: AbortSignal.any([request.signal, signal]), actor: 'user', external: true,
     });
     return { status: body.error?.status ?? (body.error ? 409 : body.notification_error ? 502 : 200), body };
   };
@@ -38,7 +39,7 @@ export function activate(context) {
         method: 'GET', path: '/tasks/:id/native',
         async handler(request) {
           const task = await execute('task_read', { view: 'overview', task_id: request.params.id }, {
-            signal: AbortSignal.any([request.signal, signal]),
+            signal: AbortSignal.any([request.signal, signal]), actor: 'user', external: true,
           });
           const unavailable = (sessionId, error) => ({
             source: 'native', session_id: sessionId, loaded: null, available: false,
@@ -46,17 +47,17 @@ export function activate(context) {
           });
           if (task.error) return { status: task.error.status ?? 400, body: unavailable(null, task.error) };
           if (task.result.kind === 'automation') return {
-            body: unavailable(null, { code: 'NO_NATIVE_EXECUTOR', message: 'Automation is service-managed and has no native Executor session' }),
+            body: unavailable(null, { code: 'NO_NATIVE_ASSIGNEE', message: 'Automation is service-managed and has no native assignee session' }),
           };
-          const executor = task.result.executor;
-          if (!executor) return {
-            body: unavailable(null, { code: 'NO_EXECUTOR', message: 'This Task has no assigned Executor' }),
+          const assignee = task.result.assignee;
+          if (!assignee) return {
+            body: unavailable(null, { code: 'NO_ASSIGNEE', message: 'This Task has no assignee' }),
           };
-          try { return { body: await host.observe(executor) }; }
+          try { return { body: await host.observe(assignee) }; }
           catch (error) {
             context.report(error);
             return {
-              body: unavailable(executor, { code: 'NATIVE_UNAVAILABLE', message: 'The host could not confirm the current session state' }),
+              body: unavailable(assignee, { code: 'NATIVE_UNAVAILABLE', message: 'The host could not confirm the current session state' }),
             };
           }
         },

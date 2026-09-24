@@ -8,9 +8,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const hostWorktree = process.env.TASK_BOARD_HOST_WORKTREE;
-const ownerTools = ['task_read', 'task_create', 'task_script_register', 'task_script_read', 'task_automation_start', 'task_automation_reconcile', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe', 'task_retro_handle'];
-const executorTools = ['task_read', 'task_edit', 'task_ack', 'task_reopen', 'task_report', 'task_cancel'];
-const allTools = [...new Set([...ownerTools, ...executorTools])].sort();
+const orchestratorTools = ['task_read', 'task_create', 'task_script_register', 'task_script_read', 'task_automation_start', 'task_automation_reconcile', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe', 'task_retro_handle'];
+const assigneeTools = ['task_read', 'task_edit', 'task_ack', 'task_reopen', 'task_report', 'task_cancel'];
+const allTools = [...new Set([...orchestratorTools, ...assigneeTools])].sort();
 
 async function removeIsolatedTree(root) {
   async function writable(path) {
@@ -54,8 +54,8 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
   const nativeTaskReads = new Map();
   const nativeTaskAcks = new Map();
   const nativeTaskReports = new Map();
-  const nativeOwnerWorkflows = new Map();
-  const nativeOwnerCalls = [];
+  const nativeOrchestratorWorkflows = new Map();
+  const nativeOrchestratorCalls = [];
   const nativePreparations = new Map();
   const expectedDefinitions = new Map();
   const isolatedSessionIds = new Set();
@@ -132,26 +132,26 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
           }).join('\n');
         };
         const latestUser = message.messages.findLast(item => item.role === 'user');
-        const taskReference = latestUser && /\[(As Executor: Task assigned to you|As Executor: Task updated)\]\(task:([0-9a-f-]{36})\?event=(assigned|updated)\)/u.exec(contentText(latestUser.content));
-        const ownerSubscription = latestUser && /Synthetic Owner subscription for task:([0-9a-f-]{36})\./u.exec(contentText(latestUser.content));
-        const ownerNotice = latestUser && /\[As Owner: Task status updated\]\(task:([0-9a-f-]{36})\?event=status_changed\)/u.exec(contentText(latestUser.content));
-        const ownerPreparation = latestUser && /Synthetic Owner preparation for executor:([0-9a-f-]{36})\./u.exec(contentText(latestUser.content));
+        const taskReference = latestUser && /\[(As Assignee: Task assigned to you|As Assignee: Task updated)\]\(task:([0-9a-f-]{36})\?event=(assigned|updated)\)/u.exec(contentText(latestUser.content));
+        const orchestratorSubscription = latestUser && /Synthetic Orchestrator subscription for task:([0-9a-f-]{36})\./u.exec(contentText(latestUser.content));
+        const orchestratorNotice = latestUser && /\[As Orchestrator: Task status updated\]\(task:([0-9a-f-]{36})\?event=status_changed\)/u.exec(contentText(latestUser.content));
+        const orchestratorPreparation = latestUser && /Synthetic Orchestrator preparation for assignee:([0-9a-f-]{36})\./u.exec(contentText(latestUser.content));
         let toolCall;
         if (taskReference) {
           const taskId = taskReference[2];
           const event = taskReference[3];
-          assert.equal(taskReference[1], event === 'assigned' ? 'As Executor: Task assigned to you' : 'As Executor: Task updated');
+          assert.equal(taskReference[1], event === 'assigned' ? 'As Assignee: Task assigned to you' : 'As Assignee: Task updated');
           const eventKey = `${event}:${taskId}`;
           const actor = /Native session ID: ([0-9a-f-]{36})/u.exec(JSON.stringify(message.messages));
           assert.ok(actor, 'Role System Prompt must supply the actual actor session ID');
           const call = (name, action, input) => {
             const tools = message.tools.filter(tool => tool.type === 'function' && tool.function.name.endsWith(name));
-            assert.equal(tools.length, 1, `Executor must have exactly one native ${name} tool`);
+            assert.equal(tools.length, 1, `Assignee must have exactly one native ${name} tool`);
             return {
               id: `synthetic-${event}-${action}-${taskId}`, type: 'function',
               function: {
                 name: tools[0].function.name,
-                arguments: JSON.stringify({ task_id: taskId, actor_session_id: actor[1], ...input }),
+                arguments: JSON.stringify({ task_id: taskId, ...input }),
               },
             };
           };
@@ -182,7 +182,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
               if (event === 'assigned' && !reportReply) {
                 toolCall = call('task_report', 'report', {
                   ...input, request_id: `native-report-${taskId}`, status: 'in_progress',
-                  activity: { text: 'Native Executor began the assigned Task.' },
+                  activity: { text: 'Native Assignee began the assigned Task.' },
                 });
               } else if (reportReply) {
                 nativeTaskReports.set(taskId, envelopeFor(reportReply));
@@ -190,27 +190,27 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
             }
           }
         }
-        if (ownerSubscription || ownerNotice) {
-          const taskId = (ownerSubscription ?? ownerNotice)[1];
-          const phase = ownerSubscription ? 'subscribe' : 'status_changed';
+        if (orchestratorSubscription || orchestratorNotice) {
+          const taskId = (orchestratorSubscription ?? orchestratorNotice)[1];
+          const phase = orchestratorSubscription ? 'subscribe' : 'status_changed';
           const key = `${phase}:${taskId}`;
           const actor = /Native session ID: ([0-9a-f-]{36})/u.exec(JSON.stringify(message.messages));
-          assert.ok(actor, 'Owner uses its injected native session ID, not a guessed recipient');
+          assert.ok(actor, 'Orchestrator uses its injected native session ID, not a guessed recipient');
           const evidence = {};
           const step = (name, action, input) => {
-            const id = `synthetic-owner-${phase}-${action}-${taskId}`;
+            const id = `synthetic-orchestrator-${phase}-${action}-${taskId}`;
             const reply = message.messages.findLast(item => item.role === 'tool' && item.tool_call_id === id);
             if (reply) {
               const envelope = JSON.parse(contentText(reply.content));
-              assert.equal(envelope.error, null, 'Owner must be able to execute the Skill-described MCP workflow');
+              assert.equal(envelope.error, null, 'Orchestrator must be able to execute the Skill-described MCP workflow');
               assert.ok(envelope.definition_check);
               evidence[action] = envelope.result;
               return envelope.result;
             }
             const tools = message.tools.filter(tool => tool.type === 'function' && tool.function.name.endsWith(name));
-            assert.equal(tools.length, 1, `Owner must have exactly one native ${name} tool`);
-            const args = { task_id: taskId, actor_session_id: actor[1], ...input };
-            nativeOwnerCalls.push({ key, name, input: args });
+            assert.equal(tools.length, 1, `Orchestrator must have exactly one native ${name} tool`);
+            const args = { task_id: taskId, ...input };
+            nativeOrchestratorCalls.push({ key, name, input: args });
             toolCall = { id, type: 'function', function: { name: tools[0].function.name, arguments: JSON.stringify(args) } };
             return null;
           };
@@ -218,8 +218,8 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
           const overview = step('task_read', 'overview', { view: 'overview' });
           if (overview) {
             assert.equal(overview.id, taskId);
-            assert.equal(overview.owner, actor[1]);
-            if (ownerSubscription) {
+            assert.equal(overview.orchestrator, actor[1]);
+            if (orchestratorSubscription) {
               step('task_subscribe', 'subscription', {
                 write_context: overview.write_context, request_id: `native-subscribe-${taskId}`, statuses: ['done'],
               });
@@ -227,11 +227,11 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
               step('task_read', 'subscriptions', { view: 'subscriptions' });
             }
           }
-          if (!toolCall) nativeOwnerWorkflows.set(key, evidence);
+          if (!toolCall) nativeOrchestratorWorkflows.set(key, evidence);
         }
-        if (ownerPreparation) {
-          const sessionId = ownerPreparation[1];
-          const callId = `synthetic-owner-prepare-${sessionId}`;
+        if (orchestratorPreparation) {
+          const sessionId = orchestratorPreparation[1];
+          const callId = `synthetic-orchestrator-prepare-${sessionId}`;
           const reply = message.messages.findLast(item => item.role === 'tool' && item.tool_call_id === callId);
           if (reply) {
             const envelope = JSON.parse(contentText(reply.content));
@@ -245,7 +245,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
             toolCall = { id: callId, type: 'function', function: {
               name: tools[0].function.name,
               arguments: JSON.stringify({
-                actor_session_id: actor[1], request_id: callId, session_id: sessionId,
+                request_id: callId, session_id: sessionId,
                 skills: ['github-coding'], mcp_servers: [{ name: 'cockpit-task', tools: ['task_read', 'task_report'] }],
               }),
             } };
@@ -385,7 +385,11 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(typeof transport.sessionId, 'string');
     assert.deepEqual((await mcp.listTools()).tools.map(tool => tool.name).sort(), allTools);
     const tool = async (name, input) => {
-      const response = await mcp.callTool({ name, arguments: input });
+      const { actor, ...arguments_ } = input;
+      const response = await mcp.callTool({
+        name, arguments: arguments_,
+        _meta: { 'cockpit/invocation': { sessionId: actor ?? orchestratorId, runtimeSessionId: actor ?? orchestratorId, subagent: false } },
+      });
       const envelope = response.structuredContent;
       assert.ok(envelope, JSON.stringify(response));
       assert.deepEqual(JSON.parse(response.content[0].text), envelope);
@@ -407,16 +411,16 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     await engine.start();
     runtimeReady = true;
     moduleHost.ready();
-    const ownerId = await engine.newSession(dirs.work, [node]);
-    isolatedSessionIds.add(ownerId);
+    const orchestratorId = await engine.newSession(dirs.work, [node]);
+    isolatedSessionIds.add(orchestratorId);
     const unionId = await engine.newSession(dirs.work, [node]);
     isolatedSessionIds.add(unionId);
-    assert.equal((await engine.roleReadiness(ownerId, [node])).ready, true);
+    assert.equal((await engine.roleReadiness(orchestratorId, [node])).ready, true);
     assert.equal((await engine.roleReadiness(unionId, [node])).ready, true);
-    const ownerMeta = await engine.getMeta(ownerId);
-    assert.ok(ownerMeta);
-    assert.deepEqual(ownerMeta.roles.map(role => role.roleId), ['node']);
-    assert.equal(Object.hasOwn(ownerMeta, 'roleReadiness'), false,
+    const orchestratorMeta = await engine.getMeta(orchestratorId);
+    assert.ok(orchestratorMeta);
+    assert.deepEqual(orchestratorMeta.roles.map(role => role.roleId), ['node']);
+    assert.equal(Object.hasOwn(orchestratorMeta, 'roleReadiness'), false,
       'Ordinary session metadata must not project capability readiness');
     assert.equal(requests.length, 0, 'Role creation must not send a startup prompt');
 
@@ -441,7 +445,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
         'The node role discovers the tree Skill and exactly one shared work Skill');
       for (const skill of taskSkills) assert.equal(skill.enabled, true);
       assert.ok(assembly.config.skillDirectories.includes(join(installed.root, 'skills/github-coding')));
-      assert.equal(nativeSkills.some(skill => ['task-owner', 'task-executor', 'cockpit-task-owner', 'cockpit-task-executor', 'work-commander', 'work-commander-owner', 'cockpit-task-commander'].includes(skill.label)), false);
+      assert.equal(nativeSkills.some(skill => ['task-orchestrator', 'task-assignee', 'cockpit-task-orchestrator', 'cockpit-task-assignee', 'work-commander', 'work-commander-orchestrator', 'cockpit-task-commander'].includes(skill.label)), false);
       const nativeMcp = await engine.getPanel(sessionId, 'mcpServers');
       assert.equal(nativeMcp.filter(server => server.label === 'cockpit-task').length, 1,
         'Exactly one declared Task MCP server must be present, including after cold resume');
@@ -449,7 +453,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
         'No generated or legacy Task MCP server may accompany the declared server');
       return assembly;
     };
-    await verifyAssembly(ownerId, [node], allTools, ['cockpit-task-tree']);
+    await verifyAssembly(orchestratorId, [node], allTools, ['cockpit-task-tree']);
     await verifyAssembly(unionId, [node], allTools, ['cockpit-task-tree']);
     const verifyNativePrompts = async (sessionId, captured) => {
       const capturedJson = JSON.stringify(captured);
@@ -480,15 +484,15 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
         for (const name of unexpectedTools) assert.ok(!offered.includes(name), `Unexpected native tool ${name}`);
       }
     };
-    await promptAndInspect(ownerId, 'Synthetic Owner capability check; acknowledge without tools.', allTools, []);
+    await promptAndInspect(orchestratorId, 'Synthetic Orchestrator capability check; acknowledge without tools.', allTools, []);
     await promptAndInspect(unionId, 'Synthetic node capability check; acknowledge without tools.', allTools, []);
 
-    stage = 'preparing a reused idle Executor through an actual native Owner tool call';
+    stage = 'preparing a reused idle Assignee through an actual native Orchestrator tool call';
     await engine.toggleSessionSkill(unionId, 'github-coding', false);
     assert.equal((await engine.roleReadiness(unionId, [node])).ready, false);
     const beforePreparationMessages = nativeMessages.filter(message => message.sessionId === unionId).length;
-    await engine.prompt(ownerId, `Synthetic Owner preparation for executor:${unionId}.`);
-    await waitFor(async () => nativePreparations.has(unionId) && await engine.busyCount() === 0, 'native Owner preparation');
+    await engine.prompt(orchestratorId, `Synthetic Orchestrator preparation for assignee:${unionId}.`);
+    await waitFor(async () => nativePreparations.has(unionId) && await engine.busyCount() === 0, 'native Orchestrator preparation');
     const preparation = nativePreparations.get(unionId).result.operation;
     assert.equal(preparation.status, 'applied');
     assert.equal(preparation.preparation, 'prepared');
@@ -502,19 +506,19 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
 
     stage = 'creating a real node session through packaged task_session_create';
     const createInput = {
-      request_id: 'integration-create-session', actor_session_id: ownerId, cwd: dirs.work,
+      request_id: 'integration-create-session', actor: orchestratorId, cwd: dirs.work,
       skills: ['github-coding'], mcp_servers: [{ name: 'cockpit-task', tools: ['task_read', 'task_report'] }],
     };
     const creation = await tool('task_session_create', createInput);
-    const executorId = creation.result.operation.session_id;
+    const assigneeId = creation.result.operation.session_id;
     assert.equal(creation.result.operation.creation, 'created');
     assert.equal(creation.result.operation.capability, 'ready');
     assert.equal(creation.result.operation.preparation, 'prepared');
     assert.equal(creation.result.operation.resources.skills[0].effect, 'unchanged');
-    assert.equal((await engine.roleReadiness(executorId, [node])).ready, true);
-    assert.deepEqual((await engine.getMeta(executorId)).roles.map(role => role.roleId), ['node'],
+    assert.equal((await engine.roleReadiness(assigneeId, [node])).ready, true);
+    assert.deepEqual((await engine.getMeta(assigneeId)).roles.map(role => role.roleId), ['node'],
       'Created sessions carry the single node role so delegation needs no reload');
-    await verifyAssembly(executorId, [node], allTools, ['cockpit-task-tree']);
+    await verifyAssembly(assigneeId, [node], allTools, ['cockpit-task-tree']);
     assert.deepEqual((await tool('task_session_create', createInput)).result, creation.result);
     assert.equal(bridgeCalls.filter(call => call.name === 'session/new').length, 1, 'Creation replay cannot create a replacement');
 
@@ -524,39 +528,39 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       ['filtered', { mcp_servers: [{ name: 'cockpit-task', tools: ['task_synthetic_unoffered'] }] }],
     ]) {
       const failed = await mcp.callTool({ name: 'task_session_prepare', arguments: {
-        request_id: `integration-prepare-${suffix}`, actor_session_id: ownerId, session_id: executorId, ...selections,
-      } });
+        request_id: `integration-prepare-${suffix}`, session_id: assigneeId, ...selections,
+      }, _meta: { 'cockpit/invocation': { sessionId: orchestratorId, runtimeSessionId: orchestratorId, subagent: false } } });
       assert.equal(failed.isError, true);
       assert.equal(failed.structuredContent.error.code, 'RESOURCE_PREPARATION_FAILED');
-      assert.equal(failed.structuredContent.result.operation.session_id, executorId);
-      assert.equal((await engine.roleReadiness(executorId, [node])).ready, true,
+      assert.equal(failed.structuredContent.result.operation.session_id, assigneeId);
+      assert.equal((await engine.roleReadiness(assigneeId, [node])).ready, true,
         'Rejected preparation cannot alter the existing role subset');
     }
 
     stage = 'refreshing an initialized table after explicit MCP activation';
-    await engine.toggleSessionMcp(executorId, 'cockpit-task', false);
-    await engine.initializeSessionTools(executorId);
+    await engine.toggleSessionMcp(assigneeId, 'cockpit-task', false);
+    await engine.initializeSessionTools(assigneeId);
     const reconnected = await tool('task_session_prepare', {
-      request_id: 'integration-prepare-mcp-activation', actor_session_id: ownerId, session_id: executorId,
+      request_id: 'integration-prepare-mcp-activation', actor: orchestratorId, session_id: assigneeId,
       mcp_servers: [{ name: 'cockpit-task', tools: ['task_read', 'task_report'] }],
     });
     assert.equal(reconnected.result.operation.status, 'applied');
     assert.equal(reconnected.result.operation.resources.mcpServers[0].effect, 'enabled');
     assert.equal(reconnected.result.operation.resources.tools, 'initialized',
       'A confirmed configuration change refreshes even a non-null stale table without manual recovery');
-    assert.equal((await engine.roleReadiness(executorId, [node])).ready, true);
+    assert.equal((await engine.roleReadiness(assigneeId, [node])).ready, true);
 
     stage = 'assigning exactly one native Task reference';
     const created = await tool('task_create', {
-      request_id: 'integration-task-create', actor_session_id: ownerId, owner: ownerId,
+      request_id: 'integration-task-create', actor: orchestratorId,
       title: 'Synthetic packaged integration', description: 'Synthetic complete requirements. No external work.',
     });
     const taskId = created.result.task_id;
     expectedDefinitions.set(taskId, 'Synthetic complete requirements. No external work.');
     const initial = (await tool('task_read', { view: 'execution', task_id: taskId })).result;
     const assignInput = {
-      request_id: 'integration-task-assign', actor_session_id: ownerId, task_id: taskId,
-      executor: executorId, revision: initial.revision, write_context: initial.write_context,
+      request_id: 'integration-task-assign', actor: orchestratorId, task_id: taskId,
+      assignee: assigneeId, revision: initial.revision, write_context: initial.write_context,
     };
     const beforeDispatch = requests.length;
     const assigned = await tool('task_assign', assignInput);
@@ -565,17 +569,17 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     await waitFor(async () => requests.length > beforeDispatch && await engine.busyCount() === 0, 'Task dispatch native completion');
     assert.deepEqual(providerErrors, []);
     const dispatched = requests.slice(beforeDispatch);
-    await verifyNativePrompts(executorId, dispatched);
+    await verifyNativePrompts(assigneeId, dispatched);
     for (const request of dispatched) {
       const offered = JSON.stringify(request.tools);
       for (const name of allTools) assert.ok(offered.includes(name), `Missing node tool ${name}`);
     }
-    const reference = `[As Executor: Task assigned to you](task:${taskId}?event=assigned)`;
-    assert.deepEqual(nativeMessages.filter(message => message.sessionId === executorId), [{ sessionId: executorId, content: reference }]);
-    assert.equal(nativeTaskReads.size, 1, 'The native Executor must execute the advertised Task MCP tool');
+    const reference = `[As Assignee: Task assigned to you](task:${taskId}?event=assigned)`;
+    assert.deepEqual(nativeMessages.filter(message => message.sessionId === assigneeId), [{ sessionId: assigneeId, content: reference }]);
+    assert.equal(nativeTaskReads.size, 1, 'The native Assignee must execute the advertised Task MCP tool');
     assert.ok(nativeTaskReads.has(`assigned:${taskId}`));
     assert.ok(nativeTaskAcks.has(`assigned:${taskId}`));
-    assert.equal(nativeTaskReports.size, 1, 'The native Executor must ACK and report through its actual MCP tools');
+    assert.equal(nativeTaskReports.size, 1, 'The native Assignee must ACK and report through its actual MCP tools');
     assert.ok(nativeTaskReports.has(taskId));
     const nativeStarted = (await tool('task_read', { view: 'execution', task_id: taskId })).result;
     assert.equal(nativeStarted.acknowledged_revision, 1);
@@ -588,13 +592,13 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       assert.deepEqual(renames, []);
     } else {
       assert.deepEqual(assigned.result.operation.session_title, { status: 'renamed', title: nativeStarted.title });
-      assert.deepEqual(renames, [{ name: 'session/rename', body: { sessionId: executorId, name: nativeStarted.title } }]);
-      const renamed = await engine.getMeta(executorId);
+      assert.deepEqual(renames, [{ name: 'session/rename', body: { sessionId: assigneeId, name: nativeStarted.title } }]);
+      const renamed = await engine.getMeta(assigneeId);
       assert.equal(renamed.title, nativeStarted.title);
       assert.equal(renamed.nativeNameUserSet, true);
     }
     assert.deepEqual(bridgeCalls.filter(call => call.name === 'prompt'), [
-      { name: 'prompt', body: { sessionId: executorId, text: reference, mode: 'enqueue' } },
+      { name: 'prompt', body: { sessionId: assigneeId, text: reference, mode: 'enqueue' } },
     ]);
 
     stage = 'editing, acknowledging, reporting and observing without chat messages';
@@ -603,29 +607,30 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const current = (await tool('task_read', { view: 'execution', task_id: taskId })).result;
     const description = 'Updated complete synthetic requirements.\nNo deployment, credentials, or external work.';
     await tool('task_edit', {
-      request_id: 'integration-task-edit', actor_session_id: ownerId, task_id: taskId,
+      request_id: 'integration-task-edit', actor: orchestratorId, task_id: taskId,
       revision: current.revision, write_context: current.write_context, description, reason: 'Synthetic integration revision',
     });
     const updated = (await tool('task_read', { view: 'execution', task_id: taskId })).result;
     assert.equal(updated.description, description);
     assert.equal(updated.revision, 2);
-    assert.equal(updated.acknowledged_revision, 1, 'An Owner edit must not ACK the new revision on behalf of the Executor');
+    assert.equal(updated.acknowledged_revision, 1, 'An Orchestrator edit must not ACK the new revision on behalf of the Assignee');
     const invalidReport = await mcp.callTool({
       name: 'task_report',
       arguments: {
-        request_id: 'integration-invalid-report', actor_session_id: executorId, task_id: taskId,
+        request_id: 'integration-invalid-report', task_id: taskId,
         revision: 1, write_context: updated.write_context, status: 'invented-status',
       },
+      _meta: { 'cockpit/invocation': { sessionId: assigneeId, runtimeSessionId: assigneeId, subagent: false } },
     });
     assert.equal(invalidReport.isError, true);
     assert.equal(invalidReport.structuredContent.error.code, 'INVALID_INPUT');
     assert.equal(invalidReport.structuredContent.definition_check.tasks[0].needs_ack, true);
     await tool('task_ack', {
-      request_id: 'integration-task-ack', actor_session_id: executorId, task_id: taskId,
+      request_id: 'integration-task-ack', actor: assigneeId, task_id: taskId,
       revision: updated.revision, write_context: updated.write_context,
     });
     await tool('task_report', {
-      request_id: 'integration-task-report', actor_session_id: executorId, task_id: taskId,
+      request_id: 'integration-task-report', actor: assigneeId, task_id: taskId,
       revision: updated.revision, write_context: updated.write_context,
       activity: { text: 'Synthetic persisted progress, not native activity.' }, status: 'in_progress',
     });
@@ -648,100 +653,102 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const native = await app.inject({ url: `${apiBase}/tasks/${taskId}/native`, headers });
     assert.equal(native.statusCode, 200, native.body);
     assert.equal(native.json().source, 'native');
-    assert.equal(native.json().session_id, executorId);
+    assert.equal(native.json().session_id, assigneeId);
     assert.equal(native.json().status, 'idle');
     assert.equal(native.json().available, true);
     assert.ok(invalidations >= 5);
 
     stage = 'delivering an explicit updated notice without automatically sending on edit';
     expectedDefinitions.set(taskId, description);
-    const notice = `Synthetic preserved pending context.\n\n[As Executor: Task updated](task:${taskId}?event=updated)\nRead the current Task and acknowledge its latest revision before continuing.`;
-    await engine.prompt(executorId, notice, 'enqueue');
+    const notice = `Synthetic preserved pending context.\n\n[As Assignee: Task updated](task:${taskId}?event=updated)\nRead the current Task and acknowledge its latest revision before continuing.`;
+    await engine.prompt(assigneeId, notice, 'enqueue');
     await waitFor(async () => nativeTaskAcks.has(`updated:${taskId}`) && await engine.busyCount() === 0,
       'explicit updated notice and native fresh read/ACK');
     assert.deepEqual(providerErrors, []);
     assert.equal(nativeTaskReads.get(`updated:${taskId}`).revision, 2);
     assert.equal(nativeTaskReads.get(`assigned:${taskId}`).revision, 1,
       'A later definition cannot relabel the earlier assigned event');
-    assert.deepEqual(nativeMessages.filter(message => message.sessionId === executorId), [
-      { sessionId: executorId, content: reference }, { sessionId: executorId, content: notice },
+    assert.deepEqual(nativeMessages.filter(message => message.sessionId === assigneeId), [
+      { sessionId: assigneeId, content: reference }, { sessionId: assigneeId, content: notice },
     ]);
     const afterNoticeModels = requests.length;
 
     stage = 'checking actual role cold resume and unloaded native observation';
-    await engine.unload(executorId);
-    assert.equal((await engine.roleReadiness(executorId, [node])).loaded, false);
+    await engine.unload(assigneeId);
+    assert.equal((await engine.roleReadiness(assigneeId, [node])).loaded, false);
     const unloaded = (await app.inject({ url: `${apiBase}/tasks/${taskId}/native`, headers })).json();
     assert.equal(unloaded.loaded, false);
     assert.equal(unloaded.status, 'unloaded');
-    assert.equal((await engine.roleReadiness(executorId, [node])).loaded, false, 'Observation cannot load the Executor');
-    await engine.load(executorId);
-    assert.equal((await engine.roleReadiness(executorId, [node])).ready, true);
+    assert.equal((await engine.roleReadiness(assigneeId, [node])).loaded, false, 'Observation cannot load the Assignee');
+    await engine.load(assigneeId);
+    assert.equal((await engine.roleReadiness(assigneeId, [node])).ready, true);
     assert.equal(requests.length, afterNoticeModels, 'Cold resume must not send a startup prompt');
-    await verifyAssembly(executorId, [node], allTools, ['cockpit-task-tree']);
-    await promptAndInspect(executorId, 'Synthetic cold-resumed Owner+Executor capability check; acknowledge without tools.',
+    await verifyAssembly(assigneeId, [node], allTools, ['cockpit-task-tree']);
+    await promptAndInspect(assigneeId, 'Synthetic cold-resumed Orchestrator+Assignee capability check; acknowledge without tools.',
       allTools, []);
 
-    stage = 'explicitly subscribing and delivering one status-change card only to the isolated Owner';
+    stage = 'explicitly subscribing and delivering one status-change card only to the isolated Orchestrator';
     const beforeSubscriptionMessages = nativeMessages.length;
     const subscribedTask = (await tool('task_read', { view: 'execution', task_id: taskId })).result;
     const subscriptionInput = {
-      actor_session_id: unionId, task_id: taskId, write_context: subscribedTask.write_context,
+      actor: unionId, task_id: taskId, write_context: subscribedTask.write_context,
     };
     const already = await mcp.callTool({
-      name: 'task_subscribe', arguments: { ...subscriptionInput, request_id: 'already-in-progress', statuses: ['in_progress'] },
+      name: 'task_subscribe',
+      arguments: { task_id: subscriptionInput.task_id, write_context: subscriptionInput.write_context, request_id: 'already-in-progress', statuses: ['in_progress'] },
+      _meta: { 'cockpit/invocation': { sessionId: unionId, runtimeSessionId: unionId, subagent: false } },
     });
     assert.equal(already.isError, true);
     assert.equal(already.structuredContent.error.code, 'ALREADY_IN_TARGET_STATUS');
     assert.deepEqual((await tool('task_read', { view: 'subscriptions', task_id: taskId })).result.items, []);
     const waiting = await tool('task_subscribe', { ...subscriptionInput, request_id: 'subscribe-cancelled', statuses: ['cancelled'] });
-    assert.equal(waiting.result.subscription.owner, ownerId, 'Recipient comes from the Task, not the actor');
+    assert.equal(waiting.result.subscription.orchestrator, orchestratorId, 'Recipient comes from the Task, not the actor');
     const unsubscriptionInput = {
-      actor_session_id: ownerId, request_id: 'unsubscribe-cancelled', task_id: taskId,
+      actor: orchestratorId, request_id: 'unsubscribe-cancelled', task_id: taskId,
       subscription_id: waiting.result.subscription.subscription_id,
     };
     const cancelledSubscription = await tool('task_unsubscribe', unsubscriptionInput);
     assert.equal(cancelledSubscription.result.subscription.state, 'cancelled');
     assert.deepEqual((await tool('task_unsubscribe', unsubscriptionInput)).result, cancelledSubscription.result);
     assert.equal(nativeMessages.length, beforeSubscriptionMessages, 'Registration and cancellation are silent');
-    await promptAndInspect(ownerId, `Synthetic Owner subscription for task:${taskId}.`,
+    await promptAndInspect(orchestratorId, `Synthetic Orchestrator subscription for task:${taskId}.`,
       allTools, []);
-    const ownerRegistration = nativeOwnerWorkflows.get(`subscribe:${taskId}`);
-    assert.ok(ownerRegistration, 'Native Owner must complete its read and subscription tool calls');
-    assert.equal(ownerRegistration.subscription.subscription.state, 'waiting');
-    assert.equal(ownerRegistration.subscription.subscription.owner, ownerId);
-    assert.deepEqual(nativeOwnerCalls.filter(call => call.key === `subscribe:${taskId}`).map(call => call.name),
+    const orchestratorRegistration = nativeOrchestratorWorkflows.get(`subscribe:${taskId}`);
+    assert.ok(orchestratorRegistration, 'Native Orchestrator must complete its read and subscription tool calls');
+    assert.equal(orchestratorRegistration.subscription.subscription.state, 'waiting');
+    assert.equal(orchestratorRegistration.subscription.subscription.orchestrator, orchestratorId);
+    assert.deepEqual(nativeOrchestratorCalls.filter(call => call.key === `subscribe:${taskId}`).map(call => call.name),
       ['task_read', 'task_subscribe']);
     const beforeStatusMessages = nativeMessages.length;
     const completeInput = {
-      actor_session_id: executorId, request_id: 'integration-task-done', task_id: taskId,
+      actor: assigneeId, request_id: 'integration-task-done', task_id: taskId,
       revision: subscribedTask.revision, write_context: subscribedTask.write_context,
       status: 'done', outcome: { summary: 'Synthetic isolated completion' }, retro: null,
     };
     const complete = await tool('task_report', completeInput);
     assert.equal(complete.notification_error, null);
     assert.equal(complete.result.task_status.value, 'done');
-    assert.equal(complete.notifications[0].subscription_id, ownerRegistration.subscription.subscription.subscription_id);
+    assert.equal(complete.notifications[0].subscription_id, orchestratorRegistration.subscription.subscription.subscription_id);
     assert.ok(['accepted', 'queued'].includes(complete.notifications[0].notification.status));
-    const statusCard = `[As Owner: Task status updated](task:${taskId}?event=status_changed)`;
-    await waitFor(async () => nativeMessages.some(message => message.sessionId === ownerId && message.content === statusCard)
-      && nativeOwnerWorkflows.has(`status_changed:${taskId}`)
-      && await engine.busyCount() === 0, 'one-shot Owner notification native completion');
-    assert.deepEqual(nativeMessages.slice(beforeStatusMessages), [{ sessionId: ownerId, content: statusCard }]);
-    const ownerEvidence = nativeOwnerWorkflows.get(`status_changed:${taskId}`);
-    assert.equal(ownerEvidence.overview.status, 'done');
-    assert.equal(ownerEvidence.outcomes.items[0].summary, 'Synthetic isolated completion');
-    assert.equal(ownerEvidence.subscriptions.items[0].event.status, 'done');
-    assert.deepEqual(nativeOwnerCalls.filter(call => call.key === `status_changed:${taskId}`)
+    const statusCard = `[As Orchestrator: Task status updated](task:${taskId}?event=status_changed)`;
+    await waitFor(async () => nativeMessages.some(message => message.sessionId === orchestratorId && message.content === statusCard)
+      && nativeOrchestratorWorkflows.has(`status_changed:${taskId}`)
+      && await engine.busyCount() === 0, 'one-shot Orchestrator notification native completion');
+    assert.deepEqual(nativeMessages.slice(beforeStatusMessages), [{ sessionId: orchestratorId, content: statusCard }]);
+    const orchestratorEvidence = nativeOrchestratorWorkflows.get(`status_changed:${taskId}`);
+    assert.equal(orchestratorEvidence.overview.status, 'done');
+    assert.equal(orchestratorEvidence.outcomes.items[0].summary, 'Synthetic isolated completion');
+    assert.equal(orchestratorEvidence.subscriptions.items[0].event.status, 'done');
+    assert.deepEqual(nativeOrchestratorCalls.filter(call => call.key === `status_changed:${taskId}`)
       .map(call => [call.name, call.input.view]),
     [['task_read', 'overview'], ['task_read', 'outcomes'], ['task_read', 'subscriptions']],
-    'A status notice uses current evidence, not ACK, another subscription, or a message to Executor');
+    'A status notice uses current evidence, not ACK, another subscription, or a message to Assignee');
     assert.deepEqual((await tool('task_report', completeInput)).result, complete.result);
     const subscriptions = (await tool('task_read', { view: 'subscriptions', task_id: taskId })).result.items;
     assert.equal(subscriptions[0].event.status, 'done');
     assert.equal(subscriptions[0].state, 'triggered');
     assert.equal(subscriptions[1].state, 'cancelled');
-    assert.equal(bridgeCalls.filter(call => call.name === 'prompt' && call.body.sessionId === ownerId).length, 1);
+    assert.equal(bridgeCalls.filter(call => call.name === 'prompt' && call.body.sessionId === orchestratorId).length, 1);
 
     stage = 'seeding only isolated durable crash-gap evidence after closing the module';
     await mcp.close();
@@ -756,15 +763,15 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const seed = new PackagedTaskStore(dataRoot);
     const seedCrashGap = label => {
       const task = seed.executeLocal('task_create', {
-        actor_session_id: unionId, request_id: `cold-create-${label}`, owner: ownerId,
+        actor: unionId, request_id: `cold-create-${label}`, orchestrator: orchestratorId,
         title: `Synthetic ${label} recovery`, description: 'Synthetic cold-recovery fixture only.',
       });
       const subscription = seed.executeLocal('task_subscribe', {
-        actor_session_id: unionId, request_id: `cold-subscribe-${label}`, task_id: task.task_id,
+        actor: unionId, request_id: `cold-subscribe-${label}`, task_id: task.task_id,
         write_context: task.write_context, statuses: ['cancelled'],
       }).subscription;
       seed.executeLocal('task_cancel', {
-        actor_session_id: unionId, request_id: `cold-cancel-${label}`, task_id: task.task_id,
+        actor: unionId, request_id: `cold-cancel-${label}`, task_id: task.task_id,
         write_context: task.write_context, reason: 'Synthetic gap between durable transition and external send',
       });
       return subscription;
@@ -791,21 +798,21 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(bridgeCalls.length, beforeColdCalls, 'Runtime up alone cannot recover before HTTP listen');
     await app.listen({ host: '127.0.0.1', port });
     assert.deepEqual(moduleRequests, []);
-    const recoveredCard = `[As Owner: Task status updated](task:${pending.task_id}?event=status_changed)`;
-    expectedStartupNotification = { sessionId: ownerId, text: recoveredCard, mode: 'enqueue' };
+    const recoveredCard = `[As Orchestrator: Task status updated](task:${pending.task_id}?event=status_changed)`;
+    expectedStartupNotification = { sessionId: orchestratorId, text: recoveredCard, mode: 'enqueue' };
     assert.equal(moduleHost.ready(), undefined, 'Service-ready dispatch must be nonblocking');
     moduleHost.ready();
-    await waitFor(async () => nativeMessages.some(message => message.sessionId === ownerId && message.content === recoveredCard)
-      && nativeOwnerWorkflows.has(`status_changed:${pending.task_id}`)
-      && await engine.busyCount() === 0, 'cold-start pending notification to the native isolated Owner');
+    await waitFor(async () => nativeMessages.some(message => message.sessionId === orchestratorId && message.content === recoveredCard)
+      && nativeOrchestratorWorkflows.has(`status_changed:${pending.task_id}`)
+      && await engine.busyCount() === 0, 'cold-start pending notification to the native isolated Orchestrator');
     expectedStartupNotification = undefined;
-    assert.deepEqual(nativeMessages.slice(beforeColdMessages), [{ sessionId: ownerId, content: recoveredCard }]);
-    assert.equal(nativeOwnerWorkflows.get(`status_changed:${pending.task_id}`).overview.status, 'cancelled');
-    assert.deepEqual(nativeOwnerCalls.filter(call => call.key === `status_changed:${pending.task_id}`)
+    assert.deepEqual(nativeMessages.slice(beforeColdMessages), [{ sessionId: orchestratorId, content: recoveredCard }]);
+    assert.equal(nativeOrchestratorWorkflows.get(`status_changed:${pending.task_id}`).overview.status, 'cancelled');
+    assert.deepEqual(nativeOrchestratorCalls.filter(call => call.key === `status_changed:${pending.task_id}`)
       .map(call => [call.name, call.input.view]), [['task_read', 'overview'], ['task_read', 'subscriptions']],
     'A recovered cancellation notice does not fabricate an outcome or attempt a terminal ACK');
     assert.deepEqual(bridgeCalls.slice(beforeColdCalls).filter(call => call.name === 'prompt'), [{
-      name: 'prompt', body: { sessionId: ownerId, text: recoveredCard, mode: 'enqueue' },
+      name: 'prompt', body: { sessionId: orchestratorId, text: recoveredCard, mode: 'enqueue' },
     }]);
     const recovered = await app.inject({
       method: 'POST', url: `${apiBase}/read`, headers, payload: { view: 'subscriptions', task_id: pending.task_id },
@@ -835,7 +842,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const fresh = await app.inject({ method: 'POST', url: `${apiBase}/read`, headers, payload: { view: 'execution', task_id: taskId } });
     assert.equal(fresh.statusCode, 200, fresh.body);
     assert.equal(fresh.json().result.description, description);
-    assert.equal(fresh.json().result.executor, executorId);
+    assert.equal(fresh.json().result.assignee, assigneeId);
     assert.equal(fresh.json().result.acknowledged_revision, 2);
     assert.equal(fresh.json().result.status, 'done');
     const savedSubscriptions = await app.inject({
@@ -848,7 +855,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(persistedActivity.json().result.items[0].text, latest.activity.text);
     assert.ok(reports.every(({ error }) => error.code === 'MODULE_VERSION_MISMATCH'), reports.map(({ error }) => String(error)).join('\n'));
     assert.deepEqual(providerErrors, []);
-    t.diagnostic('Verified packaged Task, native node role/Skill assembly, MCP registration, Owner-responsibility current-evidence reads on status notices without ACK or resubscription, Executor read/ACK/report, service-ready recovery without inbound requests, and no accepted/unknown resend across a second cold startup. Synthetic provider proves wiring, not autonomous model judgment.');
+    t.diagnostic('Verified packaged Task, native node role/Skill assembly, MCP registration, Orchestrator-responsibility current-evidence reads on status notices without ACK or resubscription, Assignee read/ACK/report, service-ready recovery without inbound requests, and no accepted/unknown resend across a second cold startup. Synthetic provider proves wiring, not autonomous model judgment.');
   } catch (error) {
     failed = true;
     t.diagnostic(`Integration failed while ${stage}.`);

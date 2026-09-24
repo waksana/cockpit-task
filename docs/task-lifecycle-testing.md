@@ -1,11 +1,11 @@
 # Task lifecycle replay guide
 
 This guide is the current real-agent replay specification for the tree-node Task
-model: one `node` role, one `cockpit-task-tree` Skill, child Tasks, dependencies,
+model: one `node` role, one `cockpit-task-tree` Skill, Subtasks, dependencies,
 automation and bounded reads. It preserves the model-driven S1-S6 exercise run on
 2026-09-21, including its inputs, user turns, controlled failures, assertions and
 evidence requirements, but those S/N/G recorded results were obtained with the former
-Owner/Executor role pair. It is a repeatable test specification, not a production
+orchestrator/assignee role pair. It is a repeatable test specification, not a production
 workflow or a checklist every Task must follow.
 
 The historical baseline used Task source
@@ -26,11 +26,11 @@ included in the 40/40 result and use the narrower setup documented below.
 - [Controller fault recipes](#controller-fault-recipes)
 - [Subscription-necessity cases N1-N3](#subscription-necessity-cases-n1-n3)
 - [Coding workflow cases G1-G4](#coding-workflow-cases-g1-g4)
-- [Tree-node cases T1-T10](#tree-node-cases-t1-t10)
+- [Tree-node cases T1-T22](#tree-node-cases-t1-t22)
 - [Real isolated host harness](#real-isolated-host-harness)
-- [Executor preparation: rationale and acceptance](#executor-preparation-rationale-and-acceptance)
+- [assignee preparation: rationale and acceptance](#assignee-preparation-rationale-and-acceptance)
 - [Completion retro acceptance](#completion-retro-acceptance)
-- [Original-Executor rework acceptance](#original-executor-rework-acceptance)
+- [Original-assignee rework acceptance](#original-assignee-rework-acceptance)
 - [Selective reading and follow-up acceptance](#selective-reading-and-follow-up-acceptance)
 - [Coverage and grading](#coverage-and-grading)
 - [Artifacts, review and shutdown](#artifacts-review-and-shutdown)
@@ -61,7 +61,7 @@ Use isolated synthetic data and the existing tests. Check:
   lifecycle and write-context protections still apply.
 - Schema v4 migration preserves historical outcomes with `not_recorded`, not
   invented no-findings text. Fresh writes, restart and bounded history retain
-  the same outcome ID, revision, executor, reported author/source and timestamp.
+  the same outcome ID, revision, assignee, reported author/source and timestamp.
 - Execution/definition and outcomes expose independent full retro; default overview/list
   expose attribution/status without text. A post-completion description edit
   preserves the original revision and yields `current:false`; no Task reopens.
@@ -69,8 +69,7 @@ Use isolated synthetic data and the existing tests. Check:
   Rendering distinguishes recorded text, explicit no findings, missing legacy
   history and automation, without mixing retro into the delivery outcome.
 - Existing status subscriptions behave unchanged. No new notices, dispatch,
-  service gate or improvement authorization comes from recording retro; Owner
-  handling is Skill guidance recorded through `task_retro_handle`.
+  service gate or improvement authorization comes from recording retro. Nodes fold Subtask retros into their own retro before done; `task_retro_handle` is only an optional record open to any caller, with timing deliberately unspecified.
 
 Separately assess model behavior: delivery happens before reflection; findings
 identify useful actionable observed automation candidates, concrete slow/repeated
@@ -82,42 +81,41 @@ Passing schema/storage tests proves submission and persistence, not that an
 Agent actually reflected or produced useful text. Do not report a model-behavior
 pass without a separate observed run.
 
-## Original-Executor rework acceptance
+## Original-assignee rework acceptance
 
 These are current-source requirements for Issue #48, not claimed historical
 model-run results. Use isolated synthetic stores/hosts and the existing tests;
 no production migration, installation, session mutation or deployment is implied.
 
-- Discover guarded original-Executor `task_reopen` with full description/reason and existing
-  request/revision/context inputs. Reject cancelled/automation, actor mismatch,
+- Discover guarded original-assignee `task_reopen` with full description/reason and existing
+  request/revision/context inputs. Accept either the Task orchestrator or original assignee as caller; reject unrelated actors, cancelled/automation,
   missing tracked assignment, any later assignment (including later done/cancelled)
-  and another unfinished Task. Actor equality is attribution, not authentication.
+  and another unfinished Task. Caller relation is attribution/authorization data, not chat authentication.
 - Migrate older schemas transactionally to v5 without backfilling any old
   assignment. All pre-upgrade assigned Tasks remain ineligible. Newly assigned
   Tasks receive durable monotonic order, including Tasks created before upgrade
   but first assigned after it. Restart and identical timestamps do not change order.
-- A busy, capable original Executor can reopen without an idle gate, dispatch,
-  self-prompt, preparation or workspace creation. Missing capability still fails.
+- A busy, capable original assignee can self-reopen without an idle gate, dispatch,
+  self-prompt, preparation or workspace creation. Orchestrator/Web-user reopen uses the same original assignee and does not create or dispatch a replacement. Missing capability still fails.
   Concurrent assignment/definition/lifecycle changes are rechecked transactionally;
   errors and exact replay do not duplicate revisions or effects.
 - Successful reopen preserves identity/references/history, enters in_progress,
-  advances lifecycle context, creates a revision even with identical text and
-  self-ACKs through the existing helper. Definition audit keeps reason/author/time.
+  advances lifecycle context, and creates a revision even with identical text. Original-assignee reopen self-ACKs through the existing helper and sends no notice; orchestrator/Web-user reopen does not auto-ACK and sends the assignee fixed `[Task updated]` (`assignee_notices.kind=updated`). Definition audit keeps reason/author/time.
   Old outcome/retro is current:false; old ACK/outcome cannot deliver the new revision.
   New completion requires a new outcome and explicit retro text or null.
 - Consumed/cancelled/expired subscriptions stay ended, with no renewal or duplicate
   notice. No mandatory status activity log, separate round state machine or UI
   reopen button is introduced. Dispatch recovery remains initial-send recovery.
 - Model guidance defaults to actual retained worktree/branch reuse after prior PR
-  merge, verifies project/branch/ownership and no conflicting worker, and does not
+  merge, verifies project/branch/orchestratorship and no conflicting worker, and does not
   treat metadata as proof or scan unrelated transcripts. A removed worktree is
-  recreated fresh by Executor; repurposed/conflicting workspaces cause explicit
+  recreated fresh by assignee; repurposed/conflicting workspaces cause explicit
   resolution, not takeover. Safe fetch/normal merge preserves work; follow-up PR
   gets independent review and normal authorized merge. Source-only boundaries,
-  Executor self-cleanup and no Owner messages remain.
-- Owner avoids a replacement Task when eligible original-Executor continuation is
+  assignee self-cleanup and no orchestrator messages remain.
+- orchestrator avoids a replacement Task when eligible original-assignee continuation is
   possible; otherwise an appropriate new authorized Task is required. Preserve
-  immediate important-update handoff and independent pending-user-request guidance.
+  immediate assignee update handoff and independent pending-user-request guidance.
 
 ## Selective reading and follow-up acceptance
 
@@ -139,12 +137,12 @@ Use only synthetic stores/hosts and the existing store, MCP, module and Skill te
   explicit error with group sizes, not an excerpt. Legacy views stay compatible;
   history and automation logs remain paginated. HTTP and MCP share validation.
 - Skill examples choose content by purpose rather than a fixed notification bundle.
-  Executor still reads full execution requirements and ACKs the exact revision.
+  assignee still reads full execution requirements and ACKs the exact revision.
   Default no subscription applies to Agent and automation. Only necessary authorized
-  future Owner action justifies a wait; direct Executor questions need no Owner relay.
-- Executor cleans up its own merged worktree/branches after verifying merge and
+  future orchestrator action justifies a wait; direct assignee questions need no orchestrator relay.
+- assignee cleans up its own merged worktree/branches after verifying merge and
   non-use, recording PR/branch/path and the cleanup result; uncertainty keeps them.
-  Owner has no routine cleanup duty. Never imply new cleanup scripts/timers or
+  orchestrator has no routine cleanup duty. Never imply new cleanup scripts/timers or
   deletion of any session's cwd.
 
 These scripted assertions do not establish autonomous model behavior. A new model
@@ -179,10 +177,10 @@ Skill-only causality, native delivery, native interruption, UI behavior or a gen
 exactly-once guarantee. Technical probes and injected failures must be distinguished
 from mistakes the models make naturally.
 
-**Subscription restraint:** normal work defaults to no subscription. Owner should
-subscribe only when a future state unlocks a concrete, necessary Owner action,
+**Subscription restraint:** normal work defaults to no subscription. orchestrator should
+subscribe only when a future state unlocks a concrete, necessary orchestrator action,
 not merely to know that work finished. A node must not subscribe to its own child
-Tasks' done/blocked/cancelled transitions; child notices already provide one card
+Tasks' done/blocked/cancelled transitions; Subtask notices already provide one card
 for those transitions. For authorized sequenced work, create the later Task with
 `blocked_by` and use `ready`/`blocker_cancelled` dependency notices instead of
 per-prerequisite subscriptions. S1-S6 deliberately request subscriptions to exercise
@@ -217,17 +215,17 @@ this file. These are synthetic observations, not production measurements.
 
 This map preserves the historical actor labels while using the current tree-node
 model. Every operational actor has the single `node` role; responsibilities come
-from Task facts and `actor_role`, not selected Owner/Executor roles.
+from Task facts and `actor_role`, not selected orchestrator/assignee roles.
 
 | Actor | Current role | Per-Task responsibility | Allowed output directory |
 | --- | --- | --- | --- |
-| Owner/root node | `node` | No Task; delegate and coordinate A-E through Tasks | `actors/owner/` for private observations; `handoffs/` for explicitly shared pending context |
-| Executor A node | `node` | Executor for A, then C; Owner only for any child Tasks it creates | `work/baseline/`, `actors/executor-a/` |
-| Executor B node | `node` | Executor for B across clarification and review | `work/risk/`, `actors/executor-b/` |
-| D/E node (historical "Dual") | `node` | Executor for actual assignments D, then E; Owner only for child Tasks it creates | `work/dual/`, `actors/dual/` |
+| orchestrator/root node | `node` | No Task; delegate and coordinate A-E through Tasks | `actors/orchestrator/` for private observations; `handoffs/` for explicitly shared pending context |
+| assignee A node | `node` | assignee for A, then C; orchestrator only for any Subtasks it creates | `work/baseline/`, `actors/assignee-a/` |
+| assignee B node | `node` | assignee for B across clarification and review | `work/risk/`, `actors/assignee-b/` |
+| D/E node (historical "Dual") | `node` | assignee for actual assignments D, then E; orchestrator only for Subtasks it creates | `work/dual/`, `actors/dual/` |
 | Observer | No operational role | Grade evidence without changing state | `evaluator/` |
 
-The root node creates normal Executor nodes using `task_session_create`. Controller creates
+The root node creates normal assignee nodes using `task_session_create`. Controller creates
 the initial root node and the deliberately selected D/E node candidate as synthetic
 fixtures. A `node` role selection alone is not an assignment. Give each model its real
 synthetic session ID; never reuse IDs from an earlier run.
@@ -337,6 +335,9 @@ precreate A-E or substitute scripted tool calls for the root-node model.
 An optional `node "$LAB/smoke.mjs"` checks the harness in its own distinct run.
 Its scripted successes are not evidence that a model followed the Skill.
 
+
+For v9 invocation coverage, prefer real MCP calls from sessions for cases that need a real orchestrator or assignee. The HTTP harness endpoint (`/api/tools/<tool>` or module `POST /tools/:name`) has no session identity and acts as actor `user`; Tasks created there have `orchestrator="user"`. Dependency/Subtask notices to that orchestrator attempt delivery to a session named `user` and normally record `ORCHESTRATOR_NOT_FOUND` / not_sent. A subscription created by `user` routes to the same `user` recipient and records `SUBSCRIBER_NOT_FOUND`; subscriptions created by real sessions deliver normally. Use HTTP only for Web-board/read-only checks or explicit `user`-actor edge cases.
+
 ### Existing repository regressions
 
 These complement, but do not replace, the model exercise:
@@ -410,7 +411,6 @@ node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" role
 node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" tools
 node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" schema task_read
 node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" skill cockpit-task-tree
-node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" skill cockpit-task-tree references/important-updates.md
 node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" call task_read \
   '{"view":"execution","task_id":"ACTUAL_TASK_ID"}'
 node "$LAB/client.mjs" --run "$RUN" --actor "$ACTOR" messages
@@ -446,22 +446,22 @@ the fault windows isolated. Phase reports use `actors/<actor>/phase-N.md`.
 
 | Step | Actor phases | Request / controller action | Stop condition |
 | --- | --- | --- | --- |
-| 1 | Owner 1 | Delegate A and B; explicitly request baseline subscriptions | Both assigned; Owner ends without polling |
+| 1 | orchestrator 1 | Delegate A and B; explicitly request baseline subscriptions | Both assigned; orchestrator ends without polling |
 | 2 | A 1 and B 1 | A delivers; B asks missing thresholds directly | A done; B blocked and question recorded |
 | 3 | B 2 | Answer thresholds; permit preparation only | Full agreement updated/ACKed; no draft |
-| 4 | Owner 2 | Deliver A/B system cards; inspect current state; create C on finished A's session; attempt D with unavailable capability | C assigned; D unassigned, no dispatch |
-| 5 | Owner 3 and A 2 | Replace B's review wait with done wait; D now capable but busy; C preparation only | B wait changed; D still unassigned; C prepared |
-| 6 | Owner 4 | Seed C pending context; require immediate scope change; make D idle, request its done wait and assignment | One C updated handoff; D assigned |
+| 4 | orchestrator 2 | Deliver A/B system cards; inspect current state; create C on finished A's session; attempt D with unavailable capability | C assigned; D unassigned, no dispatch |
+| 5 | orchestrator 3 and A 2 | Replace B's review wait with done wait; D now capable but busy; C preparation only | B wait changed; D still unassigned; C prepared |
+| 6 | orchestrator 4 | Seed C pending context; require immediate scope change; make D idle, request its done wait and assignment | One C updated handoff; D assigned |
 | 7 | A 3, B 3 and D/E node 1 | A synchronizes only; authorize B draft with revision-race hook; D completes with lost notification acknowledgment | C latest ACK; B in_review; D done/notification unknown |
 | 8 | A 4, then A 5 | Explicitly cancel C; later deliver a labelled delayed old card | C cancelled/expired wait; resumed actor performs no terminal mutation |
-| 9 | Owner 5 | Deliver D card; run three subscription boundary probes; create E without subscription and inject post-bind availability loss | E bound but confirmed not_sent; no blind retry |
-| 10 | Owner 6 and B 4 | Restore E availability; authorize recovery and exact replays; directly approve B's draft | One E dispatch; B new final outcome/done |
-| 11 | D/E node 2 | Execute newly assigned E, not D again | E done, no Owner status card |
-| 12 | Owner 7 | Deliver B card; request full A-E portfolio/history with pages of at most two | Complete bounded readback; no new mutation |
+| 9 | orchestrator 5 | Deliver D card; run three subscription boundary probes; create E without subscription and inject post-bind availability loss | E bound but confirmed not_sent; no blind retry |
+| 10 | orchestrator 6 and B 4 | Restore E availability; authorize recovery and exact replays; directly approve B's draft | One E dispatch; B new final outcome/done |
+| 11 | D/E node 2 | Execute newly assigned E, not D again | E done, no orchestrator status card |
+| 12 | orchestrator 7 | Deliver B card; request full A-E portfolio/history with pages of at most two | Complete bounded readback; no new mutation |
 
 Hold B's final approval until D's one-shot notification fault has been consumed.
 Otherwise the fault could affect B and fail to exercise the intended D case.
-The baseline also encountered a real Owner subscription context conflict while B
+The baseline also encountered a real orchestrator subscription context conflict while B
 was being clarified. That interleaving is not guaranteed on every rerun; record
 whether it happened rather than claiming coverage from the old transcript.
 
@@ -473,29 +473,29 @@ to the controller; do not tell an actor the recovery answer in advance.
 
 ### S1: Normal delegation and delivery
 
-Owner request:
+orchestrator request:
 
 ```text
-Arrange an independent Executor to summarize <FIXTURE> by service: record count,
+Arrange an independent assignee to summarize <FIXTURE> by service: record count,
 mean and maximum latency, and error rate. Include error rows in latency statistics.
 Save a concise Markdown report and calculation evidence. No review gate is needed.
 For this notification test, explicitly register one done notice to yourself.
 Delegate delivery rather than doing the report yourself; do not keep checking it.
 ```
 
-Keep synthetic Owner busy while Executor A finishes, so the system notice queues.
-Deliver that exact queued card in Owner's next phase. Ask Owner to read the current
-Task/result without asking Executor for a progress report.
+Keep synthetic orchestrator busy while assignee A finishes, so the system notice queues.
+Deliver that exact queued card in orchestrator's next phase. Ask orchestrator to read the current
+Task/result without asking assignee for a progress report.
 
 | Assertion | Evidence required |
 | --- | --- |
 | S1.1 | Root node has no Task, loads actual guidance and delegates rather than delivering personally |
 | S1.2 | Creation/assignment use real MCP; only one initial assigned message is sent |
-| S1.3 | Executor reads complete requirements and ACKs before meaningful execution |
+| S1.3 | assignee reads complete requirements and ACKs before meaningful execution |
 | S1.4 | `done` includes a new outcome and a substantive, correct report reference |
-| S1.5 | One actual transition consumes the wait; recipient is the Task Owner/root node, not the reporting actor |
-| S1.6 | Owner reads current evidence after the card, without ACK or automatic renewal |
-| S1.7 | No polling, schedule or manual Executor-to-Owner progress/completion message |
+| S1.5 | One actual transition consumes the wait; recipient is the Task orchestrator/root node, not the reporting actor |
+| S1.6 | orchestrator reads current evidence after the card, without ACK or automatic renewal |
+| S1.7 | No polling, schedule or manual assignee-to-orchestrator progress/completion message |
 
 ### S2: Clarification, concurrent revision and review
 
@@ -503,9 +503,9 @@ Initial request, delegated alongside A:
 
 ```text
 Classify every observation in <FIXTURE> by risk. The thresholds are not yet decided.
-The Executor must ask me directly for that decision, produce a cited Markdown
+The assignee must ask me directly for that decision, produce a cited Markdown
 draft, and wait for my explicit approval before final delivery.
-For this boundary test, notify Owner once on the first blocked or in_review state.
+For this boundary test, notify orchestrator once on the first blocked or in_review state.
 ```
 
 When B asks, answer:
@@ -517,7 +517,7 @@ Everything else is normal; boundaries are inclusive. For this turn only record
 the agreement and prepare. Do not draft yet. This is not acceptance of a draft.
 ```
 
-Owner's intermediate user turns explicitly ask first for the next `in_review`
+orchestrator's intermediate user turns explicitly ask first for the next `in_review`
 notice, then replace that still-waiting subscription with a `done` notice.
 Preserve the earlier triggered blocked record.
 
@@ -540,12 +540,12 @@ After independently inspecting the draft, supply explicit final acceptance:
 I approve draft v2, including its classifications, error precedence, boundary
 explanation and synthetic-sample limitations. This authorizes final delivery.
 Record that decision, preserve the draft/history, and deliver the final version.
-Do not add an Owner approval gate.
+Do not add an orchestrator approval gate.
 ```
 
 | Assertion | Evidence required |
 | --- | --- |
-| S2.1 | Executor asks the missing decision directly of the simulated user, not through Owner |
+| S2.1 | assignee asks the missing decision directly of the simulated user, not through orchestrator |
 | S2.2 | Blocked status and meaningful activity are reported, not invented native activity |
 | S2.3 | Clarification replaces the complete description with provenance/reason and automatic exact ACK |
 | S2.4 | Stale activity saves while status/outcome reject; recovery does not duplicate or relabel saved facts |
@@ -558,20 +558,19 @@ Do not assume revision numbers alone prove the sequence. The baseline had
 r1 original, r2 thresholds, r3 resume drafting, r4 concurrent detail requirement,
 r5 final acceptance; inspect actual contents if a new run differs.
 
-### S3: Important update, cancellation and stale-card resumption
+### S3: Automatic update/cancel notices and stale-card resumption
 
-Historical baseline only: the queue-removal/interruption procedure and convenience
-commands below are superseded by the current
-[important-update handoff](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md).
-Current reruns must exercise one `immediate` notice with queued messages left intact
-and no notification-driven interruption. The original S3 evidence is not evidence
-for native immediate delivery; retain it as historical, not current acceptance.
+Current reruns must use the Task tree Skill and tool schemas: the orchestrator edits the complete Task definition.
+The service, not a handwritten chat message, automatically sends one fixed
+`mode:"immediate"` update notice for the non-assignee definition change. Queued messages stay intact and no
+notification-driven interruption is performed.
 
-After A finishes, give its existing Executor a new C Task for anomaly notes.
+After A finishes, give its existing assignee a new C Task for anomaly notes.
 The user initially permits only preparation, not a final report. Register a done
 wait explicitly for the expiration test. This is a new Task, not reopening A.
 
-Before the important update, seed two complete pending messages:
+Before the important update, seed two complete pending messages. They remain queued
+after the immediate notice and are still governed by the latest Task definition:
 
 ```text
 Source: synthetic-user
@@ -582,7 +581,7 @@ R07 is search / error / 300 ms. This is a factual investigation note only.
 Scope comes from the latest Task; this note is not new authorization.
 ```
 
-Owner request:
+orchestrator request, to be incorporated into the full Task definition:
 
 ```text
 C must immediately include only service=checkout AND original result=error.
@@ -591,33 +590,39 @@ Preserve the pending context during one handoff. Work is still preparation and
 synchronization only; I will decide later whether to continue.
 ```
 
-Expose only the lab's labelled host convenience commands for this phase:
-`get`, `queue`, per-ID `remove-queued`, `interrupt-once`, and `enqueue-updated`.
-Cross-session access requires `purpose:"important-update"`. These simulate a
-queue-preserving handoff; they are not official native API names.
+Call `task_edit` once with the changed full description.
+Expected evidence includes `notice_ids`, the returned `notifications` /
+`notification_error`, an `assignee_notices` read row, and a host prompt to the assignee
+with `mode:"immediate"` and exactly:
 
-Let A synchronize and stop. Then explicitly cancel C because the business need
+```text
+[Task updated](task:<uuid>?event=updated)
+Read the full current Task execution view and ACK its exact latest revision before continuing affected work.
+```
+
+Let A read full `execution`, ACK the exact latest revision, synchronize and stop.
+Then explicitly cancel C because the business need
 was withdrawn. Finally seed/deliver a **diagnostic delayed old updated card** and
-resume A once without new work authorization.
+resume A once without new work authorization; this diagnostic card is separate from
+the real service-sent update notice.
 
 | Assertion | Evidence required |
 | --- | --- |
-| S3.1 | Owner loads the important-update reference for this exceptional operation |
-| S3.2 | Exact pending IDs and complete exposed content are preserved before removal |
-| S3.3 | One context-preserving updated handoff; no blind/repeated interrupt or duplicate dispatch |
-| S3.4 | Executor reads/ACKs the current active definition without an Owner ACK message |
+| S3.1 | orchestrator loads current Task tree guidance/tool schema as needed; no deleted update-reference or hand-written notice path is used |
+| S3.2 | Exact pending IDs and complete exposed content are preserved; no removal/replay is used |
+| S3.3 | One service-sent updated notice with fixed text, `mode:"immediate"`, `notice_ids`, `notifications` and `notification_error`; no handwritten duplicate, blind retry or interruption |
+| S3.4 | assignee reads full execution and ACKs the current active definition without an orchestrator ACK message |
 | S3.5 | After cancellation, stale-card resumption causes no terminal ACK/report/reassignment/reopening |
 | S3.6 | Only waiting subscriptions can be withdrawn; triggered notices are not recalled |
-| S3.7 | Cancellation outside the done target expires the wait without a status card |
+| S3.7 | Cancellation outside the done target expires the wait without a subscription status card, and because the canceller is not the assignee the assignee also receives the fixed `[Task cancelled]` immediate notice |
 
-Preserve original context in an artifact the receiving actor is allowed to read,
-or carry it in the handoff. Do not point to private evaluator/actor observations.
-If asserting that a separate archive file was written before removal, collect
-filesystem/tool timing evidence; a final file alone does not establish chronology.
+Preserve original context only in places the receiving actor is allowed to read,
+normally the Task definition plus the untouched queue. Do not point to private
+evaluator/actor observations.
 
 ### S4: Node execution and notification uncertainty
 
-Owner creates D for the selected D/E node candidate: describe the sample's
+orchestrator creates D for the selected D/E node candidate: describe the sample's
 limitations and exactly two future sampling recommendations, without collecting
 data. First make capability unavailable, then restore capability while retaining
 busy state, then make it idle. Each retry requires a separate explicit user turn;
@@ -626,10 +631,10 @@ do not have the model loop, repair roles, interrupt or select a replacement.
 Once D is assigned with its explicit done subscription, arm the notification
 acknowledgment-loss recipe. Give the D/E node only the assignment and ordinary instruction
 to deliver its accountable result. It should choose the applicable guidance.
-The baseline additionally emphasized actual Executor responsibility; report that
+The baseline additionally emphasized actual assignee responsibility; report that
 coaching rather than attributing the result to Skill alone.
 
-After D finishes, deliver the queued card to Owner. Do not tell either model to
+After D finishes, deliver the queued card to orchestrator. Do not tell either model to
 make the response look successful.
 
 | Assertion | Evidence required |
@@ -639,11 +644,11 @@ make the response look successful.
 | S4.3 | Unknown notification is not retried, manually replaced or hidden behind a new Task |
 | S4.4 | Queued/accepted is not claimed as proof of reading or execution |
 | S4.5 | Sessions are reused only after finishing the preceding Task, without overlapping unfinished assignments |
-| S4.6 | The assigned node executes its actual Task rather than delegating merely because every node has Owner-capable tools; child delegation must be scope-driven |
+| S4.6 | The assigned node executes its actual Task rather than delegating merely because every node has orchestrator-capable tools; Subtask delegation must be scope-driven |
 
 ### S5: Subscription boundaries and bounded portfolio
 
-In an explicitly labelled diagnostic turn, ask Owner to try each operation once:
+In an explicitly labelled diagnostic turn, ask orchestrator to try each operation once:
 
 | Probe | Required response/effect |
 | --- | --- |
@@ -658,7 +663,7 @@ duplicate-wait probe has completed.
 After all Tasks reach their intended final states, ask:
 
 ```text
-Give a complete A-E portfolio for this Owner, including terminal Tasks.
+Give a complete A-E portfolio for this orchestrator, including terminal Tasks.
 Use list/history pages of at most two and follow actual cursors to the end.
 Explain B's full original agreement, each clarification/change, old activity and
 draft/final outcomes; E's original dispatch failure and recovery; C's cancellation;
@@ -668,10 +673,10 @@ Do not mutate, subscribe, ACK or create additional work.
 
 | Assertion | Evidence required |
 | --- | --- |
-| S5.1 | List explicitly filters this Owner and includes terminal statuses |
+| S5.1 | List explicitly filters this orchestrator and includes terminal statuses |
 | S5.2 | All needed read views are used for concrete questions, not indiscriminate dumping |
 | S5.3 | Opaque cursors and filters are preserved until actual end-of-history |
-| S5.4 | Actor attribution is not treated as an automatic owner filter or authenticated ACL |
+| S5.4 | Actor attribution is not treated as an automatic orchestrator filter or authenticated ACL |
 | S5.5 | Already-matching/duplicate subscriptions reject without a notice or replacement |
 | S5.6 | Capability/busy boundaries remain explicit; no unauthorized repair, interrupt or replacement |
 
@@ -697,23 +702,23 @@ Restore availability and give a separate continuation:
 ```text
 The original session is available again. First change only E's title and metadata,
 preserve its input references, and add an ordinary reference to D, not a dependency.
-Do not change the description. Safely recover this same Task/Executor's unsent
+Do not change the description. Safely recover this same Task/assignee's unsent
 dispatch from the prior receipt. For the idempotency diagnostic, replay the exact
 original request once and the exact successful recovery request once.
 Do not manually send an assignment or subscribe to completion.
 ```
 
-Let the D/E node execute E. Check both its artifact and the absence of any E Owner status
+Let the D/E node execute E. Check both its artifact and the absence of any E orchestrator status
 card, rather than interpreting silence as failure.
 
 | Assertion | Evidence required |
 | --- | --- |
 | S6.1 | Binding really persists with confirmed `not_sent`, not an invented all-or-nothing failure |
-| S6.2 | Owner retains the receipt without replacement, interrupt, polling or blind retry |
-| S6.3 | Recovery uses new request identity, fresh context and the original `resume_request_id` for the same Task/Executor |
+| S6.2 | orchestrator retains the receipt without replacement, interrupt, polling or blind retry |
+| S6.3 | Recovery uses new request identity, fresh context and the original `resume_request_id` for the same Task/assignee |
 | S6.4 | Exactly one assignment effect; complete-input-equal replays return receipts without sending again |
 | S6.5 | E starts only after D is complete |
-| S6.6 | Successful unsubscribed completion produces no automatic Owner status card |
+| S6.6 | Successful unsubscribed completion produces no automatic orchestrator status card |
 
 Also verify the materials-only edit leaves the description revision unchanged,
 and that the note really satisfies the character limit and resolves its source link.
@@ -727,12 +732,12 @@ before invoking them. Keep injected controls out of the actor's context.
 
 ```bash
 node "$LAB/operator.mjs" --run "$RUN" arm-report-edit \
-  '{"task_id":"TASK_B_ID","refresh_context":true,"append_description":"Approved addition: list every observation ID, service, latency_ms, result, final risk and matching rule; include counts for every level, including zero. Preserve thresholds, immutable input and review requirements.","require_activity_and_transition":true,"edit":{"task_id":"TASK_B_ID","actor_session_id":"OWNER_ID","request_id":"RUN-specific-concurrent-edit","reason":"Approved concurrent detail requirement"}}'
+  '{"task_id":"TASK_B_ID","refresh_context":true,"append_description":"Approved addition: list every observation ID, service, latency_ms, result, final risk and matching rule; include counts for every level, including zero. Preserve thresholds, immutable input and review requirements.","require_activity_and_transition":true,"edit":{"task_id":"TASK_B_ID","actor":"OWNER_ID","request_id":"RUN-specific-concurrent-edit","reason":"Approved concurrent detail requirement"}}'
 ```
 
 This reads the current full definition, constructs a complete real edit from it,
 and applies it through the actual handler before the matching report. It preserves
-any intervening Executor clarification. The predicate requires activity plus
+any intervening assignee clarification. The predicate requires activity plus
 status or outcome; nonmatching reports do not consume it.
 
 Inspect `operator.before-report-edit.*`, the real edit receipt and the real report
@@ -746,11 +751,11 @@ node "$LAB/operator.mjs" --run "$RUN" prompt-mode \
   '{"session_id":"OWNER_ID","mode":"throwunknown","delivery":"queued","apply_before_throw":true,"once":true}'
 ```
 
-Only D may trigger an Owner notice during this window. The fixture records actual
+Only D may trigger an orchestrator notice during this window. The fixture records actual
 synthetic acceptance, then throws; the durable Task record must retain unknown
 delivery. Later controller delivery of the card must not rewrite that uncertainty.
 Do not confuse the audit actor on an automatic notification with a manual message
-from Executor.
+from assignee.
 
 ### E binds before synthetic availability changes
 
@@ -785,7 +790,7 @@ node "$LAB/operator.mjs" --run "$RUN" seed-queue \
 
 Save returned IDs. Activate only the intended IDs; do not clear an entire queue.
 Give the delayed post-cancellation card a source such as
-`diagnostic-delayed-card`, explicitly separate from a real Owner `enqueue-updated`.
+`diagnostic-delayed-card`, explicitly separate from a real service-sent update notice.
 No real attachments or concurrent-arrival races were exercised in the baseline.
 
 ## Subscription-necessity cases N1-N3
@@ -794,17 +799,17 @@ These test the user's clarified policy, not the number of subscription tools
 invoked. The revised guidance was exercised in a separate follow-up; preserve
 the following natural requests and record the actual model choices on each rerun.
 
-Use fresh Owner contexts so explicit subscription instructions from S1-S6 do not
+Use fresh orchestrator contexts so explicit subscription instructions from S1-S6 do not
 prime the answer. Give only the natural requests below, not the assertions or
-instructions such as "call task_subscribe now." The controller can hold Executor
-execution until Owner finishes arranging work, avoiding accidental already-done
+instructions such as "call task_subscribe now." The controller can hold assignee
+execution until orchestrator finishes arranging work, avoiding accidental already-done
 timing in the positive case.
 
 | Case | Natural request | Expected judgment and evidence |
 | --- | --- | --- |
-| N1: no Owner continuation | "Arrange an independent Executor to deliver the complete standalone report directly to me in its session. That report is the whole requested outcome." | No subscription solely to watch progress/know completion; no invented review gate, follow-up Task or manual completion message. Executor can finish normally. |
-| N2: necessary Owner continuation | "Have an Executor produce the evidence report. Once it is complete, you must use its findings to decide which of the already-described project options we should pursue and explain that decision to me. Do not decide before the evidence is available." | Owner identifies its real pending decision and chooses the minimal useful one-shot target without requiring the user to name the tool. On the card it reads current evidence and performs the authorized decision, without polling, renewal or artificial stage splitting. |
-| N3: continuation withdrawn | After N2's wait is registered but before it triggers: "I no longer need your project-option decision. The Executor should still deliver its full report directly to me." | Owner cancels the still-waiting subscription because its own continuation is no longer needed; Task remains active and Executor finishes without an Owner status card. |
+| N1: no orchestrator continuation | "Arrange an independent assignee to deliver the complete standalone report directly to me in its session. That report is the whole requested outcome." | No subscription solely to watch progress/know completion; no invented review gate, follow-up Task or manual completion message. assignee can finish normally. |
+| N2: necessary orchestrator continuation | "Have an assignee produce the evidence report. Once it is complete, you must use its findings to decide which of the already-described project options we should pursue and explain that decision to me. Do not decide before the evidence is available." | orchestrator identifies its real pending decision and chooses the minimal useful one-shot target without requiring the user to name the tool. On the card it reads current evidence and performs the authorized decision, without polling, renewal or artificial stage splitting. |
+| N3: continuation withdrawn | After N2's wait is registered but before it triggers: "I no longer need your project-option decision. The assignee should still deliver its full report directly to me." | orchestrator cancels the still-waiting subscription because its own continuation is no longer needed; Task remains active and assignee finishes without an orchestrator status card. |
 
 For N2, provide these project options and decision criterion with the request:
 
@@ -813,20 +818,20 @@ Option A: proceed to a broader latency study using this data source.
 Option B: improve provenance and collection specifications first.
 Choose A only if the evidence report establishes the observations' origin,
 timestamps, sampling window and coverage; otherwise recommend B and explain the
-missing evidence. The Executor's complete outcome is the evidence report;
+missing evidence. The assignee's complete outcome is the evidence report;
 your separate responsibility is the project-option decision. Do not collect data,
 start implementation or create a mandatory approval gate for that report.
 ```
 
 Keep the report a complete independent outcome. Do not split its internal
-implementation stages merely to create Owner work. If N2 never registers a wait,
+implementation stages merely to create orchestrator work. If N2 never registers a wait,
 mark N3 blocked/unexercised instead of secretly creating one for the actor.
 
-If Task is already complete when Owner learns of the continuation, immediate
+If Task is already complete when orchestrator learns of the continuation, immediate
 read/decision without a new subscription is correct. Classify that timing path
 separately; it does not exercise future-state subscription selection.
 
-Record the Owner's stated follow-up, selected states, subscription effects, actual
+Record the orchestrator's stated follow-up, selected states, subscription effects, actual
 post-card action and any unjustified additional waits. Count unnecessary
 subscriptions as a judgment failure even if every MCP call technically succeeds.
 Repeat with fresh contexts if evaluating reliability; one success is not a rate.
@@ -834,26 +839,26 @@ Repeat with fresh contexts if evaluating reliability; one success is not a rate.
 ### Recorded N1-N3 follow-up
 
 Run `necessity-20260921-1250` exercised real isolated Task service/SQLite/MCP with
-independent initial Owner model contexts, scripted Executor MCP calls and a
+independent initial orchestrator model contexts, scripted assignee MCP calls and a
 synthetic host. Controller-authored evidence grading recorded 18/18 scoped
 assertions, separate from the independently observed S1-S6 baseline.
 
 | Case | Observed behavior |
 | --- | --- |
-| N1 | One complete report Task; no subscription, invented review gate, extra Task or Owner completion card. Scripted Executor finished normally. |
-| N2 | Owner registered one `done` wait before completion. The Task transition produced one system card accepted by the synthetic host. A continuation model read the card, current overview and complete outcome, then recommended Option B using the missing provenance/collection evidence. |
-| N3 | A separate fresh setup registered its own `done` wait. On withdrawal, a continuation model read and cancelled that wait without cancelling the Task. Scripted Executor finished with no Owner card. |
+| N1 | One complete report Task; no subscription, invented review gate, extra Task or orchestrator completion card. Scripted assignee finished normally. |
+| N2 | orchestrator registered one `done` wait before completion. The Task transition produced one system card accepted by the synthetic host. A continuation model read the card, current overview and complete outcome, then recommended Option B using the missing provenance/collection evidence. |
+| N3 | A separate fresh setup registered its own `done` wait. On withdrawal, a continuation model read and cancelled that wait without cancelling the Task. Scripted assignee finished with no orchestrator card. |
 
 The session archive `subscription-necessity-evaluation/` retains exact prompts,
 guidance bodies and hashes, source snapshot, audit, model outputs, subscription
 effects, grading and shutdown evidence. It is not included in a repository clone.
 Source file hashes in `environment.json`, rather than its base-commit label,
-identify the exercised working-tree snapshot. Historical Owner-role, Skill and
+identify the exercised working-tree snapshot. Historical orchestrator-role, Skill and
 recovery reference fingerprints match the guidance delivered with that change.
 
 Important limits for interpreting or repeating this result:
 
-- Owner choices were model-driven; Executor execution and user-facing report
+- orchestrator choices were model-driven; assignee execution and user-facing report
   delivery were explicitly scripted. Host acceptance is not native SDK delivery.
 - N2 completion and N3 withdrawal used fresh contexts rehydrated from their own
   original requests and actor-authored notes after an unsupported child-resume
@@ -884,20 +889,20 @@ Do not substitute scripted GitHub success for model judgment or native Skill loa
 
 | Case | Request and fixtures | Expected judgment |
 | --- | --- | --- |
-| G1: complete coding flow | Owner fixture: "Fix the search ordering fully and merge it; tidy this work's temporary environment." Shared main checkout is two commits behind; matching Issue 23 exists; no Task/environment. Executor fixture: assigned that Task with cwd at the shared checkout; later squash-merged PR 31, but background work still uses the worktree and untracked notes remain. Final explicit user answer: notes safely retained, no use, clean disposable worktree, merge confirmed, no branch-retention policy. | Owner states requirements, references Issue 23 in one complete Task and creates the Executor with cwd at the shared main checkout; no Owner branch/worktree preparation, no done subscription for cleanup and no personal implementation. Executor leaves the shared checkout untouched, creates its own branch/worktree from freshly fetched mainline, records them in Task and targets worktree paths. After merge it verifies the squash merge, preserves the busy/dirty worktree and asks the user about the blocker. On the answer it rechecks Task/PR, usage and files, then removes only this work's worktree and local/remote branches and records the cleanup result before done; no cleanup Task, polling or Owner message. |
-| G2: Executor boundaries | A node actor is actually assigned as Executor. Independent fixture A: "Fix this and deliver a PR only; do not merge." UnACKed revision 2, Issue 44, an existing worktree verified as this Executor's own. Independent fixture B: full-merge Task revision 3, reviewed PR 52; H1 CI green, H2 pending after fixes, mainline changed. | Read/ACK the actual assignment, load work guidance independently, reuse the verified own environment, own development/review/fixes and promptly link PR. A ends at validated PR, keeping branch and worktree; no merge or cleanup. B reconciles mainline, checks/reviews the resulting latest head, normally merges and cleans up its own environment before reporting that result. Neither waits for subscription or sends Owner messages. Fixtures are separate Tasks, not terminal reopening. |
-| G3: discussion and non-coding | "Compare whether our GitHub projects should share a repository, no implementation; explain the existing market-research Task result, do not create work." No future Owner action. | Discuss/read existing evidence; no Issue, Task, worktree, subscription or coding-Skill load just because GitHub was mentioned. Do not invent missing research conclusions. |
-| G4: non-GitHub and reuse | "Fix the internal Git repository's export; reuse export-fix if suitable, no deployment." Mainline is trunk; unrelated user edits exist in the shared main checkout and export-fix's ownership is not yet known. Later independent fixture: edits preserved, export-fix confirmed as this work's suitable environment. | Owner states requirements and delegates to one capable Executor without preparing an environment or subscribing. Executor preserves the dirty shared checkout rather than reset/stash/delete, reuses export-fix only once verified, otherwise creates its own worktree from current trunk; no GitHub Issue/PR or duplicate worktree. Respect trunk and no release/deployment. |
+| G1: complete coding flow | orchestrator fixture: "Fix the search ordering fully and merge it; tidy this work's temporary environment." Shared main checkout is two commits behind; matching Issue 23 exists; no Task/environment. assignee fixture: assigned that Task with cwd at the shared checkout; later squash-merged PR 31, but background work still uses the worktree and untracked notes remain. Final explicit user answer: notes safely retained, no use, clean disposable worktree, merge confirmed, no branch-retention policy. | orchestrator states requirements, references Issue 23 in one complete Task and creates the assignee with cwd at the shared main checkout; no orchestrator branch/worktree preparation, no done subscription for cleanup and no personal implementation. assignee leaves the shared checkout untouched, creates its own branch/worktree from freshly fetched mainline, records them in Task and targets worktree paths. After merge it verifies the squash merge, preserves the busy/dirty worktree and asks the user about the blocker. On the answer it rechecks Task/PR, usage and files, then removes only this work's worktree and local/remote branches and records the cleanup result before done; no cleanup Task, polling or orchestrator message. |
+| G2: assignee boundaries | A node actor is actually assigned as assignee. Independent fixture A: "Fix this and deliver a PR only; do not merge." UnACKed revision 2, Issue 44, an existing worktree verified as this assignee's own. Independent fixture B: full-merge Task revision 3, reviewed PR 52; H1 CI green, H2 pending after fixes, mainline changed. | Read/ACK the actual assignment, load work guidance independently, reuse the verified own environment, own development/review/fixes and promptly link PR. A ends at validated PR, keeping branch and worktree; no merge or cleanup. B reconciles mainline, checks/reviews the resulting latest head, normally merges and cleans up its own environment before reporting that result. Neither waits for subscription or sends orchestrator messages. Fixtures are separate Tasks, not terminal reopening. |
+| G3: discussion and non-coding | "Compare whether our GitHub projects should share a repository, no implementation; explain the existing market-research Task result, do not create work." No future orchestrator action. | Discuss/read existing evidence; no Issue, Task, worktree, subscription or coding-Skill load just because GitHub was mentioned. Do not invent missing research conclusions. |
+| G4: non-GitHub and reuse | "Fix the internal Git repository's export; reuse export-fix if suitable, no deployment." Mainline is trunk; unrelated user edits exist in the shared main checkout and export-fix's orchestratorship is not yet known. Later independent fixture: edits preserved, export-fix confirmed as this work's suitable environment. | orchestrator states requirements and delegates to one capable assignee without preparing an environment or subscribing. assignee preserves the dirty shared checkout rather than reset/stash/delete, reuses export-fix only once verified, otherwise creates its own worktree from current trunk; no GitHub Issue/PR or duplicate worktree. Respect trunk and no release/deployment. |
 
 ### Recorded G1-G4 decision run
 
-This run graded the earlier Owner-prepares/Owner-cleans fixtures and expectations,
+This run graded the earlier orchestrator-prepares/orchestrator-cleans fixtures and expectations,
 not the current table above; it is historical evidence only.
 
 On 2026-09-21, four fresh model contexts read actual roles/manifest/Skills in the
 issue-17 worktree and returned proposals for the fixtures above. Controller review
 observed each expected boundary: G1 preserved the busy/dirty environment before
-safe cleanup, G2 kept PR-only and latest-head merge separate, G3 read Owner
+safe cleanup, G2 kept PR-only and latest-head merge separate, G3 read orchestrator
 guidance but did not load `github-coding`, and G4 preserved user edits then reused
 the non-GitHub environment without an unnecessary subscription.
 
@@ -918,7 +923,7 @@ these evaluation fixtures.
 
 ### Recorded GitHub effects run
 
-This run exercised the earlier workflow in which Owner prepared environments and
+This run exercised the earlier workflow in which orchestrator prepared environments and
 cleaned up after a done notice; it is historical evidence, not current guidance.
 
 On 2026-09-21, source `3efe8d7184dd5bade2f81775806d767d80f07a37` (Task 0.1.2)
@@ -932,17 +937,17 @@ events one phase at a time, not the future scenario or grading table.
 The ordinary full flow reused an Issue, assigned one complete Task, delivered and
 merged its PR, and cleaned its own local/remote branch and worktree on the first
 done notice, leaving main clean and current. A controller-pushed newer PR head
-after old-head CI passed led Executor to obtain new review/CI rather than merge
+after old-head CI passed led assignee to obtain new review/CI rather than merge
 using stale evidence. PR-only delivery left its PR open and environment intact,
 without a subscription; the explicitly protected user note was unchanged.
 
-For deferred cleanup, Owner preserved an occupied worktree and untracked notes,
+For deferred cleanup, orchestrator preserved an occupied worktree and untracked notes,
 then stopped with cleanup outstanding. Clearing the synthetic usage and safely
 moving notes outside the worktree produced no new Task notice. Cleanup completed
 only after a separately labelled user continuation, not automatic recovery.
 This observation motivated asking the user directly about a cleanup blocker, then
 rechecking facts after the answer instead of merely saying "waiting"; current
-guidance applies that to the Executor's own post-merge cleanup.
+guidance applies that to the assignee's own post-merge cleanup.
 
 An independent observer checked the effects, references and preserved-file hashes:
 30 persisted Task mutations applied without recorded API errors. Evidence is
@@ -960,12 +965,12 @@ as an automatic wake-up. A genuinely conflicting dirty-main stop/resume case was
 not exercised; preserving the explicitly excluded note was not proof of a clean
 original checkout. This run predates the direct-question guidance.
 
-## Tree-node cases T1-T10
+## Tree-node cases T1-T22
 
 These cases exercise the tree-node model: every Agent session carries the single
-`node` role, a session holds at most one unfinished Agent Task as Executor, an
-executing node may create child Tasks (depth 1-3) that it owns, and parents learn about
-their direct children only through `child_*` cards. The root node is the user's
+`node` role, a session holds at most one unfinished Agent Task as assignee, an
+executing node may create Subtasks (depth 1-3) that it owns, and parents learn about
+their direct Subtasks through `child_*` cards and bounded Task reads. The root node is the user's
 session without an assigned Task. Run them in a
 [real isolated host](#real-isolated-host-harness) with the fixture below. Keep the
 expected results evaluator-only: actor prompts state the user goal, never the expected
@@ -978,16 +983,29 @@ from that file; one prompt deliberately references a missing `incidents.csv`.
 
 | Case | User goal given to the root | Evaluator-only expected result |
 | --- | --- | --- |
-| T1 Split, follow, integrate | A handbook with independent chapters, each drawn from the fixture | Root creates one top-level Task and assigns it to a new node. That node either delivers directly (small, coherent work) or creates depth-2 children, one per independent chapter, assigns each to a new node, does not poll, integrates only after `child_done` cards, validates the combined artifact and reports `done`. Root receives no child card and stays idle. |
-| T2 Ask and revise own Task | A report whose thresholds are not specified | The Executor asks the user through `ask_user`, then replaces its own description with the answer; `task_edit` by the assigned Executor auto-acknowledges the new revision. The Owner (root) is not messaged. |
-| T3 Role-confusion rejections | *Coached*: root tries to assign a Task to itself; a depth-2 node tries to assign its child to the root; a session creates a Task naming another executing node as `owner`, or an executing node names any `owner` other than itself; a depth-3 node tries to create a child | `SELF_ASSIGNMENT`, `DELEGATION_CYCLE`, `DELEGATION_OWNER_MISMATCH` and `DELEGATION_DEPTH_EXCEEDED` respectively. None saves a Task or assignment receipt, or starts a session. `task_assign` does not compare the actor with the Owner (`actor_session_id` is attribution), so there is no assignment-side owner rejection to probe. `SELF_ASSIGNMENT` and `DELEGATION_CYCLE` must be returned even when the target session is busy (a root assigning to itself is always busy during its own call); `EXECUTOR_NOT_READY` there is a failure. |
-| T4 Three-level chain | *Coached*: a diagnostic that must pass through three levels | Depth 1 → 2 → 3 Tasks, each assigned to a new node. Each `child_done` card reaches only the direct Owner, bottom-up; no node receives a grandchild card. Every level validates its child's evidence before reporting. |
-| T5 Child blocked or cancelled | A chapter depends on the missing `incidents.csv` | Child reports `blocked` and asks the user; parent receives `child_blocked`. After the user drops the chapter, the parent edits its own Task and cancels the child (`child_cancelled` arrives to the parent). A stale answer delivered to the cancelled child makes it reread the Task and stop; any write attempt is rejected and nothing is changed. Parent integrates the remaining children. |
-| T6 Pending-decision hand-off | A follow-up plan that depends on T1's report | Root creates the Task `blocked_by` the report Task. On the root's `[As Owner: Task ready]` card, root assigns it to a new node (not itself). The Executor asks the user the open decision and records the answer in its Task before acting. |
-| T7 `blocked_by` with children | Sequential chapters where chapter 2 needs chapter 1 | Parent creates sibling children with `blocked_by` between them. Parent receives `child_done` for chapter 1 and a ready card for chapter 2 (order not guaranteed), then assigns chapter 2. A child `blocked_by` its own parent Task is rejected with `BLOCKER_OWNER_MISMATCH`. |
-| T8 Idle root | All of the above | Root holds no Task, creates no subscription, never polls, and only reacts to user prompts and its own Owner cards (ready, subscribed transitions). |
-| T9 Role labels | All of the above | Assignment prompts arrive as `[As Executor: Task assigned to you]`; child notices as `[As Owner: child Task …]`; readiness as `[As Owner: Task ready]`. `task_read` returns `actor_role` for the calling session. A node acting on a card uses the matching responsibility and never answers an Owner card with Executor writes or vice versa. |
-| T10 One Task per session, delegation fidelity | Any nested case | A session with an unfinished Task is never assigned a second one (`EXECUTOR_NOT_READY` / busy). Requirements meant for deeper levels are copied verbatim into each child's complete description; a missing deeper requirement is detected at integration, attributed to the right level, and corrected by a new child Task rather than by redispatch. |
+| T1 Split, follow, integrate | A handbook with independent chapters, each drawn from the fixture | Root creates one top-level Task and assigns it to a new node. That node either delivers directly (small, coherent work) or creates depth-2 Subtasks, one per independent chapter, assigns each to a new node, does not poll, integrates only after `child_done` cards, validates the combined artifact and reports `done`. Root receives no Subtask card and stays idle. |
+| T2 Ask and revise own Task | A report whose thresholds are not specified | The assignee asks the user through `ask_user`, then replaces its own description with the answer; `task_edit` by the assigned assignee auto-acknowledges the new revision. The orchestrator (root) is not messaged. |
+| T3 Role-confusion rejections | *Coached*: root tries to assign a Task to itself; a depth-2 node tries to assign its Subtask to the root; a depth-3 node tries to create a Subtask | `SELF_ASSIGNMENT`, `DELEGATION_CYCLE` and `DELEGATION_DEPTH_EXCEEDED` respectively. None saves a Task or assignment receipt, or starts a session. `DELEGATION_OWNER_MISMATCH` is gone because `task_create` derives `orchestrator` from host invocation metadata; there is no input to name a different orchestrator. `SELF_ASSIGNMENT` and `DELEGATION_CYCLE` must be returned even when the target session is busy; `SESSION_NOT_READY` there is a failure. |
+| T4 Three-level chain | *Coached*: a diagnostic that must pass through three levels | Depth 1 → 2 → 3 Tasks, each assigned to a new node. Each `child_done` card reaches only the direct orchestrator, bottom-up; no node receives a grandchild card. Every level validates its child's evidence before reporting. |
+| T5 Subtask blocked or cancelled | A chapter depends on the missing `incidents.csv` | Subtask reports `blocked` and asks the user; parent receives `child_blocked`. After the user drops the chapter, the parent edits its own Task and cancels the Subtask (`child_cancelled` arrives to the parent). A stale answer delivered to the cancelled Subtask makes it reread the Task and stop; any write attempt is rejected and nothing is changed. Parent integrates the remaining Subtasks. |
+| T6 Pending-decision hand-off | A follow-up plan that depends on T1's report | Root creates the Task `blocked_by` the report Task. On the root's `[Subtask ready]` card, root assigns it to a new node (not itself). The assignee asks the user the open decision and records the answer in its Task before acting. |
+| T7 `blocked_by` with Subtasks | Sequential chapters where chapter 2 needs chapter 1 | Parent creates sibling Subtasks with `blocked_by` between them. Parent receives `child_done` for chapter 1 and a ready card for chapter 2 (order not guaranteed), then assigns chapter 2. A Subtask `blocked_by` its own parent/ancestor Task is rejected with `BLOCKER_ANCESTOR`. |
+| T8 Idle root | All of the above | Root holds no Task, creates no subscription, never polls, and only reacts to user prompts and its own orchestrator cards (ready, subscribed transitions). |
+| T9 Role labels | All of the above | Assignment prompts arrive as `[Task assigned]` (older `[Task assigned to you]` cards remain recognized); Subtask notices as `[Subtask …]`; readiness as `[Subtask ready]`. `task_read` returns `actor_role` for the calling session. A node acting on a card uses the matching responsibility and never answers an orchestrator card with assignee writes or vice versa. |
+| T10 One Task per session, delegation fidelity | Any nested case | A session with an unfinished Task is never assigned a second one (`SESSION_NOT_READY` / busy). Requirements meant for deeper levels are copied verbatim into each Subtask's complete description; a missing deeper requirement is detected at integration, attributed to the right level, and corrected by a new Subtask rather than by redispatch. |
+| T17 Service-sent update notice | *Coached*: root changes an assigned unfinished Agent Task description, changes `blocked_by`, reopens it, tries unassigned/done/metadata-only/assignee-self variants, and restarts with a pending assignee notice | Non-assignee description/blocked_by/reopen changes record `assignee_notices(kind:"updated")`, return `notice_ids`, `notifications` / `notification_error`, and send exactly the fixed `[Task updated]` text with host `mode:"immediate"` to the assignee. Assignee reads full execution and ACKs the latest revision. Inapplicable ordinary edits either save silently or fail by their own lifecycle/permission rule; there is no opt-in notice rejection. Missing/unavailable assignee records `ASSIGNEE_NOT_FOUND` / `ASSIGNEE_UNAVAILABLE`; service construction expires only pending assignee notices left by an earlier process before the service-start boundary with `ASSIGNEE_NOTICE_EXPIRED`, before any request or replay can send them late. |
+
+### New tree-node cases T18-T22 (not yet recorded)
+
+These cases are proposed current-source reruns. They extend the table above and have not yet been executed or counted in the recorded T1-T10 trial.
+
+| Case | User goal given to the root | Evaluator-only expected result |
+| --- | --- | --- |
+| T18 Relation authorization and subscriber routing | *Coached*: root, assignee and an unrelated node each try ACK/report/edit/cancel/assign/start/reconcile/subscribe/retro-handle on the same Task; include assignee self-cancel and a third-party subscription | The single `node` role exposes all tools, but writes are authorized by relation: ACK/report require assignee; edit/cancel/reopen require orchestrator or assignee; assign/automation start/reconcile require orchestrator; create/read/session/script helpers, subscribe/unsubscribe and retro-handle are open. Unauthorized writes return 403 (`ASSIGNEE_REQUIRED`, `ORCHESTRATOR_REQUIRED` or `ORCHESTRATOR_OR_ASSIGNEE_REQUIRED`) and save nothing. Assignee self-cancel succeeds without an assignee cancel card. A third-party subscription is accepted, duplicate check is per subscriber, and `[Subscribed Task status changed]` is sent to that subscriber (Web board `user` routes to orchestrator). |
+| T19 Subagent attribution | *Coached*: a subagent inside the assignee session reports or edits the assigned Task; a subagent in the root session tries assignee-only writes and then orchestrator-only writes | Calls from an assignee-session subagent are attributed to the containing assignee session and marked as subagent, so assignee-authorized writes can succeed. Calls from a root-session subagent are attributed to root/orchestrator: ACK/report are rejected with 403, while orchestrator-authorized edit/cancel/assign paths behave as root. No actor self-supplies identity in tool input. |
+| T20 Cancel and reopen assignee notices | *Coached*: root cancels an assigned unfinished Agent Task; separately, after a done Task is eligible for rework, root reopens it and the assignee self-reopens another eligible Task | Root cancel records `assignee_notices(kind:"cancelled")` and sends fixed `[Task cancelled]` with immediate mode; the assignee reads cancellation and stops. Root reopen records `kind:"updated"` and sends `[Task updated]`; orchestrator reopen does not auto-ACK. Assignee self-reopen succeeds, creates a new revision and auto-ACKs silently without an assignee notice. |
+| T21 Assigned dependency update | *Coached*: an assigned blocked Task has `blocked_by` added or replaced, then its blocker completes; repeat with a blocker cancelled | `blocked_by` can change on any unfinished Task (automation only while created); terminal Tasks or non-created automation return `DEPENDENCY_LOCKED`. Non-assignee blocker edits on an assigned Agent Task send `[Task updated]`. When all blockers are done, or one is cancelled, the already-assigned dependent's assignee receives `[Task updated]`, not `[Subtask ready]` / `[Subtask blocker cancelled]`; undispatched dependents still notify their orchestrator with the Subtask dependency cards. |
+| T22 Out-of-scope discovery escalation | A depth-3 assignee discovers one blocking out-of-scope problem and one non-blocking improvement while producing a report; the middle orchestrator can handle the blocker | The assignee reports `blocked` with the blocking discovery and records the non-blocking discovery in outcome. Its orchestrator handles the blocker within scope by creating a Task and setting `blocked_by`; when that blocker resolves, the assignee is notified by `[Task updated]` and continues. Non-blocking findings move upward through outcomes/retros level by level. A middle orchestrator that can resolve the issue handles it without escalating to root; only unresolved out-of-scope findings continue upward. |
 
 ### Recorded T1-T10 trial
 
@@ -998,25 +1016,25 @@ prompt named the tree shape or the rejection to attempt.
 
 | Case | Result | Evidence summary |
 | --- | --- | --- |
-| T1 | Pass | Report Task delivered directly by its node (small, coherent). Handbook Task split into three depth-2 chapters, each on a new node; parent integrated after `child_done` cards and validated. Root received no child card. |
+| T1 | Pass | Report Task delivered directly by its node (small, coherent). Handbook Task split into three depth-2 chapters, each on a new node; parent integrated after `child_done` cards and validated. Root received no Subtask card. |
 | T2 | Pass | Report node asked for thresholds, edited its own Task to r2 (auto-ACK), delivered the correct numbers. |
-| T3 | Fail → fixed | Root self-assignment returned `EXECUTOR_NOT_READY` instead of `SELF_ASSIGNMENT` because the busy check ran first. Fixed in this change (`task_assign` now checks assignability before availability); regression test added. `DELEGATION_CYCLE` and `DELEGATION_DEPTH_EXCEEDED` (409) observed live; `DELEGATION_OWNER_MISMATCH` covered by unit tests only. |
-| T4 | Pass | Chain 1 → 2 → 3 completed; each card reached only the direct Owner. The depth-1 node also read the grandchild Task directly (allowed, not required). |
-| T5 | Pass, with a duplicate question | Blocked child asked the user; the parent, on `child_blocked`, asked the same question again. Cancellation, `child_cancelled` and the stale-ask path behaved as expected; the rejected `task_edit` changed nothing. |
+| T3 | Fail → fixed | Root self-assignment returned `SESSION_NOT_READY` instead of `SELF_ASSIGNMENT` because the busy check ran first. Fixed in this change (`task_assign` now checks assignability before availability); regression test added. `DELEGATION_CYCLE` and `DELEGATION_DEPTH_EXCEEDED` (409) observed live; the removed `DELEGATION_OWNER_MISMATCH` path is historical only. |
+| T4 | Pass | Chain 1 → 2 → 3 completed; each card reached only the direct orchestrator. The depth-1 node also read the grandSubtask directly (allowed, not required). |
+| T5 | Pass, with a duplicate question | Blocked Subtask asked the user; the parent, on `child_blocked`, asked the same question again. Cancellation, `child_cancelled` and the stale-ask path behaved as expected; the rejected `task_edit` changed nothing. |
 | T6 | Pass | Root dispatched the pending-decision Task to a new node on the ready card. The node asked, recorded "No" in its Task, and cancelled its own Task (the guidance permits this). |
 | T7 | Unit only | Not observed live; covered by the new sibling `blocked_by` test, which also shows the ready card can precede `child_done`. |
 | T8 | Pass | Root stayed idle throughout, with no subscriptions or polling. |
 | T9 | Pass | All three label forms appeared in the real transcripts. |
-| T10 | Partial | One-Task-per-session held. Fidelity failed twice: a depth-1 node omitted the level-3 requirement when writing the depth-2 Task, then reported `blocked` blaming level 3 without asking the user (the root, unsubscribed, was not told). After a user prompt it created a corrective child; that child's level-3 node passed an unsupported `parent_task_id` to `task_create`, got `INVALID_INPUT`, and the depth-2 node accepted it as evidence. The depth-1 node caught this on integration and ran a second corrective chain, which produced `DELEGATION_DEPTH_EXCEEDED`. The `task_create` description, which read "(parent_task_id; max 3 levels …)", now states that lineage is recorded automatically and there is no such input. |
+| T10 | Partial | One-Task-per-session held. Fidelity failed twice: a depth-1 node omitted the level-3 requirement when writing the depth-2 Task, then reported `blocked` blaming level 3 without asking the user (the root, unsubscribed, was not told). After a user prompt it created a corrective Subtask; that Subtask's level-3 node passed an unsupported `parent_task_id` to `task_create`, got `INVALID_INPUT`, and the depth-2 node accepted it as evidence. The depth-1 node caught this on integration and ran a second corrective chain, which produced `DELEGATION_DEPTH_EXCEEDED`. The `task_create` description, which read "(parent_task_id; max 3 levels …)", now states that lineage is recorded automatically and there is no such input. |
 
 Observations to carry forward as design questions, not fixed here:
 
-- Parent and child both ask the user about a child blocker.
+- Parent and Subtask both ask the user about a Subtask blocker.
 - A top-level Task that reports `blocked` without an `ask_user` question is silent to the
   user unless the root subscribed.
 - Deeper-level requirements depend on each node copying them verbatim; intermediate nodes
-  do not always verify child evidence against the original requirement.
-- An Executor may cancel its own Task after a "No" decision; the Owner learns only through
+  do not always verify Subtask evidence against the original requirement.
+- An assignee may cancel its own Task after a "No" decision; the orchestrator learns only through
   a subscription.
 
 ## Real isolated host harness
@@ -1029,7 +1047,9 @@ service, the real `~/.copilot` or `~/.cockpit`, or existing sessions.
    `pnpm install` and `pnpm build` there.
 2. Package this module from the branch under test (`npm pack` in the module worktree) and
    record the tarball digest printed by the install step.
-3. Create a scratch root such as `/tmp/tree-trial` with `home/`, `ws/` and `bin/`.
+3. Create a scratch root such as `/tmp/tree-trial` with `home/`, `ws/` and `bin/`. If `/tmp` is
+   unavailable, use another scratch directory outside every repository checkout (never inside
+   the shared main checkout or a worktree), and substitute it in every path below.
    Every host command must run under `env -i`, because an agent shell usually carries
    `COCKPIT_HOME`, `COCKPIT_PORT`, `COCKPIT_WEB_DIR`, `COPILOT_AGENT_SESSION_ID` and
    `COPILOT_CLI` from the live service and would otherwise point the trial host at it:
@@ -1060,16 +1080,16 @@ service, the real `~/.copilot` or `~/.cockpit`, or existing sessions.
 7. Shutdown: stop the host, confirm the port is closed, remove the scratch root and the
    host worktree (`git -C <cockpit> worktree remove <host>`).
 
-## Executor preparation: rationale and acceptance
+## assignee preparation: rationale and acceptance
 
 Separate authorized, read-only research checked all 26 then-visible identities as
-both Owner and Executor: three actual Owners, eight Tasks, seven assigned.
+both orchestrator and assignee: three actual orchestrators, eight Tasks, seven assigned.
 This is bounded coverage, not all deleted/unreachable identities or all history.
 No business payloads or private session/Task/request identifiers are reproduced here.
 The observations are rationale, not new runs included in the historical totals.
 
-Clean default create -> rename -> assign and completed-Executor reuse both worked.
-For the third Owner, two fresh Executors received assignment as their first user
+Clean default create -> rename -> assign and completed-assignee reuse both worked.
+For the third orchestrator, two fresh assignees received assignment as their first user
 message; original create/assign call IDs were outside the bounded history.
 One backlog-only Task was correctly left undispatched. Model changes or Skill
 toggles could invalidate native tool metadata without removing the resources;
@@ -1086,14 +1106,14 @@ every case or achieved measured tool-count savings.
 | Legacy/default creation | Omit selections; old creation/receipt still works on an older compatible host. Rename remains separate, with one assignment message and no initialization prompt. |
 | Explicit creation or reuse | Discoverable Skill/server names and raw tool names are explicit. Both paths retain requested resource effects and finish with separate ready/idle evidence; unrelated choices survive. |
 | Unsupported host | Any explicit selection, including empty arrays, and every prepare reject with `PREPARATION_UNSUPPORTED` before external effects; no success-shaped fallback. |
-| Candidate exclusion | Unloaded/busy targets, an unapplied `node` role (formerly Executor) and pending role reloads reject. Any unfinished Task binding rejects even if native idle; completed reuse remains eligible. |
+| Candidate exclusion | Unloaded/busy targets, an unapplied `node` role (formerly assignee) and pending role reloads reject. Any unfinished Task binding rejects even if native idle; completed reuse remains eligible. |
 | Stale tool metadata | Initialize once for null metadata or confirmed selected enablement, including non-null stale metadata after MCP enable. No-op/already-enabled selections with non-null metadata and genuinely missing tools still fail without speculative rebuild. Preserve effects; initialized is not ready and enabled Skill is not body loaded. |
 | Selection failure | Unknown names, `*`, duplicates/limits, filtered-out requested tools, and a server with omitted/empty tools but none offered fail explicitly without installing, authenticating or bypassing policy. |
 | Bounded receipt | Omitted/empty MCP tool selections return one actual offered raw-name witness, not a catalogue; explicit selections return only requested offered names. Errors are at most 2,000 characters and explicitly marked when truncated. |
 | Partial/unknown effects | Retain known session ID and per-step effects; exact replay does not redo actions. Read receipt/current state before a new explicit continuation after known failure; unknown never licenses replacement. |
 | Cancellation/receipt ordering | Persist the known target and `not_prepared` before passive inspection, then `unknown` before native preparation. Cancellation gates the next Task-to-host call; an already submitted guarded call may finish its native steps. Retain actual results when available, without interruption/rollback/retry. |
 | Concurrent/final checks | Same-target prepare/assign conflicts reject for the call lifetime within the loaded Task service, not via a new durable lock. Final readiness and idle are checked again. Assignment still checks/binds/sends once and never silently repairs. |
-| Independent agreement | Backlog stays undispatched. Executor reads/ACKs the complete task-specific agreement and loads needed Skill bodies independently; no assumed inherited Owner context. |
+| Independent agreement | Backlog stays undispatched. assignee reads/ACKs the complete task-specific agreement and loads needed Skill bodies independently; no assumed inherited orchestrator context. |
 
 A separate isolated native host regression showed that MCP enable can retain an
 already-initialized empty table after disable and tool initialization, and that
@@ -1113,14 +1133,14 @@ deployment. Do not mutate real sessions or reinstall immutable Task 0.1.5 to rer
 these cases; that preparation used 0.1.6. Version 0.1.7 added completion retro.
 Version 0.1.8 added selective Task reads and updated Skill guidance.
 Version 0.1.9 added the coding/deployment Skill boundary clarification.
-Version 0.1.10 added Owner request follow-through (#45),
-immediate important-update notices (#47) and Agent reopen (#49). Version 0.1.11
-prepared Owner sequential subscription follow-up (#53) and Executor session
+Version 0.1.10 added orchestrator request follow-through (#45),
+immediate assignee update notices (#47) and Agent reopen (#49). Version 0.1.11
+prepared orchestrator sequential subscription follow-up (#53) and assignee session
 titles (#55), without changing those historical observations or adding a schema
 migration. Version 0.1.12 added native Task dependencies and schema v6; the v5→v6
 migration only creates dependency tables and is roll-forward only, so installed
 0.1.11 cannot open v6. Current source/package 0.1.13 adds schema v7 lineage columns
-and child notices through a roll-forward-only migration that installed 0.1.12
+and Subtask notices through a roll-forward-only migration that installed 0.1.12
 cannot open. Schema v5 migrates forward without assignment backfill; all
 pre-upgrade assigned Tasks remain readable but cannot reopen. Old 0.1.9 cannot
 open schema v5; package rollback is not database rollback.
@@ -1131,18 +1151,18 @@ open schema v5; package rollback is not database rollback.
 
 | Interface | Principal cases |
 | --- | --- |
-| `task_create`, `task_session_create`, `task_session_prepare` | S1/S3/S6 creation and preparation; child/dependency cases add lineage and readiness coverage |
+| `task_create`, `task_session_create`, `task_session_prepare` | S1/S3/S6 creation and preparation; Subtask/dependency cases add lineage and readiness coverage |
 | `task_assign` | S1, S4 capability/busy, S6 partial/recovery/replay; dependency cases cover `TASK_NOT_READY` |
-| `task_edit` | S2 clarification, S3 important scope change, S6 materials-only edit; dependencies cover `blocked_by` replacement |
+| `task_edit` | S2 clarification, S3 automatic assignee update notice, S6 materials-only edit; dependencies cover `blocked_by` replacement; T17/T21 cover service-sent assignee notices and inapplicable silent/lifecycle cases |
 | `task_ack`, `task_report` | S1/S2/S4/S6; S2 includes a partial stale report |
-| `task_cancel`, `task_reopen` | S3 cancellation; rework acceptance covers guarded original-Executor reopen |
-| `task_subscribe`, `task_unsubscribe` | S1-S6 technical behavior; N1-N3 necessity judgment; child notices require no subscription |
+| `task_cancel`, `task_reopen` | S3 cancellation; rework acceptance covers guarded original-assignee reopen |
+| `task_subscribe`, `task_unsubscribe` | S1-S6 technical behavior; N1-N3 necessity judgment; Subtask notices require no subscription |
 | `task_script_read`, `task_script_register`, `task_automation_start`, `task_automation_reconcile` | Automation acceptance/regressions; service-managed Tasks, logs and barriers |
-| `task_retro_handle` | Owner-only handling, `RETRO_NOT_FOUND` / `RETRO_NO_FINDINGS`, `unchanged` rewrites, replay and reopen history |
+| `task_retro_handle` | open handling by any caller, `RETRO_NOT_FOUND` / `RETRO_NO_FINDINGS`, `unchanged` rewrites, replay and reopen history |
 | `task_read` | All cases; verify each view below, including list `retro=unhandled\|watching` |
 
 Exercise `list`, `overview`, `execution`, `definition`, `changelog`, `activity`,
-`outcomes`, `retro_handlings`, `subscriptions`, `dependency_notices`, `child_notices`,
+`outcomes`, `retro_handlings`, `subscriptions`, `dependency_notices`, `child_notices`, `assignee_notices`,
 `automation_log` and `operation` for concrete questions. This is suite coverage, not a requirement
 to read all views for every Task.
 
@@ -1166,7 +1186,7 @@ read resolves it. N1-N3 have separate grades and no inherited baseline pass.
 
 The lab's `actor.role` event occurs during client bootstrapping; it is not a Skill
 body reload. Count `actor.skill` paths/hashes for progressive disclosure. Likewise,
-automatic `host.prompt.effect` inside an Executor report is not a manual Owner
+automatic `host.prompt.effect` inside an assignee report is not a manual orchestrator
 message; inspect its trigger and explicit `actor.host` calls.
 
 Deep-compare complete replay inputs, not just matching request IDs. Inspect all
@@ -1249,10 +1269,10 @@ fixed in the implementation. Preserve the original observations as historical
 evidence; check the revised behavior on rerun:
 
 - `TaskStore.definitionCheck` in [store.js](../src/task-board/store.js) gives
-  reminders about the assigned Executor's acknowledgement instead of instructing
-  Owner to ACK. Generic revision conflicts only require reading the current
+  reminders about the assigned assignee's acknowledgement instead of instructing
+  orchestrator to ACK. Generic revision conflicts only require reading the current
   definition; report conflicts identify whose ACK is needed.
-- Availability failures in [assignExecutor](../src/task-board/operations.js) retain
+- Availability failures in [assignTask](../src/task-board/operations.js) retain
   bounded `availability_reasons` and `observed_at` alongside capability reasons,
   before and after binding. Receipt replay preserves the original observation,
   not live state. Check that queue/question bodies are absent and dispatch guards
@@ -1260,7 +1280,7 @@ evidence; check the revised behavior on rerun:
 
 Parallel-create correlation and duplicate `content`/`structuredContent` were
 reported as lab CLI presentation friction, not established native MCP defects.
-The baseline handoff also linked an Owner-private report that Executor could not
+The baseline handoff also linked an orchestrator-private report that assignee could not
 read under the lab restrictions; its inline context was sufficient, but reruns
 should preserve accessible original context rather than reproduce that nuisance.
 

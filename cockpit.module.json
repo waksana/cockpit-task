@@ -19,7 +19,7 @@
     {
       "id": "node",
       "name": "Node",
-      "description": "Deliver your assigned Task directly or through child Tasks you own; without a Task, stay available and delegate through Tasks.",
+      "description": "Deliver your Task directly or through Subtasks you orchestrate; without a Task, stay available and delegate through Tasks.",
       "instructions": "roles/task-node.md",
       "skillDirectories": [
         "skills/cockpit-task-tree",

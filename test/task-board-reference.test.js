@@ -12,11 +12,11 @@ test('references validate Task IDs and keep ordinary references compatible', () 
 
 test('event references explain their purpose without copying the Task definition', () => {
   const id = 'd10c0c92-3580-4cdd-85bf-d7fcf22ab3ff';
-  assert.equal(taskReference(id, 'assigned'), `[As Executor: Task assigned to you](task:${id}?event=assigned)`);
-  assert.equal(taskReference(id, 'updated'), `[As Executor: Task updated](task:${id}?event=updated)`);
-  assert.equal(taskReference(id, 'status_changed'), `[As Owner: Task status updated](task:${id}?event=status_changed)`);
-  assert.equal(taskReference(id, 'ready'), `[As Owner: Task ready](task:${id}?event=ready)`);
-  assert.equal(taskReference(id, 'blocker_cancelled'), `[As Owner: Task blocker cancelled](task:${id}?event=blocker_cancelled)`);
+  assert.equal(taskReference(id, 'assigned'), `[Task assigned](task:${id}?event=assigned)`);
+  assert.equal(taskReference(id, 'updated'), `[Task updated](task:${id}?event=updated)`);
+  assert.equal(taskReference(id, 'status_changed'), `[Subscribed Task status changed](task:${id}?event=status_changed)`);
+  assert.equal(taskReference(id, 'ready'), `[Subtask ready](task:${id}?event=ready)`);
+  assert.equal(taskReference(id, 'blocker_cancelled'), `[Subtask blocker cancelled](task:${id}?event=blocker_cancelled)`);
   for (const invalid of ['assign', 'update', 'done', 'ASSIGNED', '', null, {}, '__proto__', 'updated&event=assigned']) {
     assert.throws(() => taskReference(id, invalid), /Invalid Task event/);
   }

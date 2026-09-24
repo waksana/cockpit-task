@@ -32,12 +32,12 @@ Task 是运行于 Cockpit 的模块，不启动独立 daemon 或监听端口。
 | 显式资源准备 | 仅资源感知 create / prepare 要求 `context.host.resourcePreparationVersion === 1`；缺失在副作用前拒绝，旧创建不受影响 |
 | HTTP | 命名空间 routes，保留 headers、JSON body、取消 signal、响应状态与流 |
 | 角色 | 模块角色声明、所选角色资源装配、持久记录、冷恢复及按需 readiness |
-| MCP | 模块 HTTP 配置、准确的声明 key `cockpit-task`、角色工具子集与版本绑定 |
+| MCP | 模块 HTTP 配置、准确的声明 key `cockpit-task`、角色工具子集与版本绑定，并由宿主为每次 tool call 注入 `_meta["cockpit/invocation"]` |
 | 前端 | Web API v2、UI v1、shared-surfaces v1 (`uiSurfaceVersion: 1`)、Markdown link renderer、模块 request、事件和 portal |
 | 运行时 | Node.js 24 或以上 |
 
 API-v1 或某个宿主发行版本标签本身不证明上述能力齐备。Task 在打开或迁移
-SQLite **之前**检查模块身份、service-ready v1 及公共宿主桥接；缺失明确拒绝，
+SQLite **之前**检查模块身份、service-ready v1 及公共宿主桥接；v9 另要求 MCP 调用时存在 invocation metadata；缺失明确拒绝，
 不能降级成未装配 session、跳过通知恢复或私有访问。
 
 通用 service-ready 接口的兼容性说明见
@@ -74,20 +74,20 @@ HTTP MCP 配置和工具选择。Web 与 MCP 创建共用宿主角色选择流�
 | --- | --- | --- |
 | node（Node） | `cockpit-task-tree`、`github-coding` | 全部十七个：read、create、session_create、session_prepare、assign、edit、cancel、subscribe、unsubscribe、script_read、script_register、automation_start、automation_reconcile、ack、report、reopen、retro_handle |
 
-原 `owner`、`executor` 角色已删除且无别名；宿主冷启动到 0.1.13 前，操作者须备份并迁移
+原 `orchestrator`、`assignee` 角色已删除且无别名；宿主冷启动到 0.1.13 前，操作者须备份并迁移
 `$COCKPIT_HOME/session-roles/<sessionId>.json`，把 `cockpit-task/owner` 和
 `cockpit-task/executor` 替换为去重后的 `cockpit-task/node`，保留其他角色；仅追加 `node`
 仍会因保存了未声明角色而加载失败，回滚到 0.1.12 时应同时恢复该备份。
 `node` 声明 `skills/cockpit-task-tree` 与 `skills/github-coding` 发现根；
 不复制到其他目录，不新增装载接口。工作 Skill 仅在编码工作需要时读取，非编码不触发；
-Skill 可发现不等于正文已读，子 Task 的 Executor 不继承 Owner 的加载上下文。
+Skill 可发现不等于正文已读，Subtask 的 assignee 不继承 orchestrator 的加载上下文。
 
-工具子集是 agent 能力装配，不是 Task 逐记录 ACL。业务 actor 为自报来源；
-具有工具不证明用户授权或另一个 Executor 已阅读要求。
-节点可同时是自己 Task 的 Executor 与子 Task 的 Owner，但不放宽“一项未结束执行 Task”的限制。
+工具子集是 agent 能力装配，不是 Task 逐记录 ACL。业务 actor 由宿主 MCP invocation 派生（HTTP 路由固定为 `user`），不是工具参数；
+具有工具不证明用户授权或另一个 assignee 已阅读要求。
+节点可同时是自己 Task 的 assignee 与Subtask 的 orchestrator，但不放宽“一项未结束执行 Task”的限制。
 
 默认 Agent Task 使用上述 session 指派边界；可信脚本 automation 由模块持久单队列
-执行，不创建或占用 Executor session，不伪造 ACK。启动仍显式授权，宿主不提供
+执行，不创建或占用 assignee session，不伪造 ACK。启动仍显式授权，宿主不提供
 额外调度引擎；Linux 进程组观察、恢复屏障与取消的非回滚边界见
 [轻量自动化](task-automation.md)。它是同用户可信执行，不是沙箱或认证服务。
 
@@ -115,7 +115,7 @@ Host API 使用 camelCase，Task MCP 使用 snake_case。Task adapter 仅依赖�
 | `session/get` | `{sessionId}` → `{meta}`；未知 session 为 `meta:null` |
 | `session/resources-prepare` | `{sessionId,skills?,mcpServers?:[{name,tools?}]}` → `{sessionId,ok,skills,mcpServers,tools,error?}`；严格验证、分步回执 |
 | `roles/readiness` | `{sessionId,roles:[{moduleId:"cockpit-task",roleId:"node"}]}` → 含 `sessionId,loaded,ready,roles,reasons` 的显式检查结果 |
-| `prompt` | `{sessionId,text,mode:"enqueue"}` → `{ok,queued?}` |
+| `prompt` | `{sessionId,text,mode:"enqueue"|"immediate"}` → `{ok,queued?}`；首次指派/订阅等普通通知用 enqueue，重要更新通知由模块用 immediate |
 | `session/rename` | `{sessionId,name}` → `{ok,title?}`；仅用于指派后的会话标题步骤 |
 
 指派的标题步骤依赖宿主在完整 `session/get` 中提供 `nativeName` 与 `nativeNameUserSet`
@@ -146,10 +146,10 @@ Host API 使用 camelCase，Task MCP 使用 snake_case。Task adapter 仅依赖�
 显式选择仅回传所请求且实际 offered 的名称。错误字符串最多 2,000 字符，截断有标记。
 
 宿主接口不理解 Task 业务占用。Task 自身拒绝任何绑定未结束 Task 的目标，
-要求已应用 Executor、无待重载角色，并在已加载 Task 服务的调用存续期间保护
+要求已应用 assignee、无待重载角色，并在已加载 Task 服务的调用存续期间保护
 同目标 prepare/assign 互斥；这不是新增持久锁或锁恢复协议。
 `roles/readiness` 的已应用角色和待重载信息用于这项检查；保存的角色标签不能替代。
-准备回执与最后的 Executor readiness 分开；任何失败保留分步效果和有界观察，
+准备回执与最后的 assignee readiness 分开；任何失败保留分步效果和有界观察，
 不使用成功形状的 fallback。
 
 Task 在下一次宿主调用开始前检查取消。单次受保护的 `session/resources-prepare`
@@ -183,22 +183,19 @@ Task adapter 不单独调用 [Cockpit #97](https://github.com/waksana/cockpit/pu
 这些是失败时观察，读取/重放回执不会刷新宿主或变成持续监控。
 完整原因码及安全恢复条件见 [MCP 契约](task-mcp-contract.md#task_assign)。
 
-`task_reopen` 使用相同公开适配器检查原 Executor 存在且能力就绪，但不是接单：
-当前 session 正在执行用户授权返工时可调用，不要求 idle/空队列或无当前 MCP 操作。
-不创建/加载/重载 session、不修复资源、不调用 prepare 或 prompt，也不发新派单。
-服务在宿主观察后仍于本地写事务核对原归属、revision/context、持久指派序号资格
-及无其他未结束 Task。能力、业务资格与用户授权分别判断；actor 相等不是认证，
+`task_reopen` 使用相同公开适配器检查原 assignee 存在且能力就绪，但不是接单：
+orchestrator 或原 assignee 可调用；工作仍继续归原 assignee，不要求 idle/空队列或无当前 MCP 操作。
+不创建/加载/重载 session、不修复资源、不调用 prepare，也不发新派单。
+服务在宿主观察后仍于本地写事务核对调用者关系、revision/context、持久指派序号资格
+及无其他未结束 Task。原 assignee 调用会 self-ACK 且不发 prompt；orchestrator/Web-user 调用不 auto-ACK，并通过 assignee notice 发送固定 `[Task updated]`。能力、业务资格与用户授权分别判断；调用 session 等于原 assignee 不是用户授权认证，
 不读取聊天验证用户决定。首次 assign/prepare 的原生空闲门槛保持不变。
 
-### 重要更新使用已有单次操作
+### Assignee notices are service-sent immediate prompts
 
-Owner 的例外更新流程由
-[随包参考](../skills/cockpit-task-tree/cockpit-task-tree/references/important-updates.md)
-指导，不是 Task 工具或自动循环。先保存 Task，核对仍为同一未结束指派且最新版未 ACK，
-再通过已有 `cockpit_send_prompt` 的 `mode:"immediate"` 发送一次 updated 引用及读取/ACK 要求。
+Agents never send Task notices to other agents. When someone other than the assignee changes an assigned unfinished Agent Task description or `blocked_by`, reopens it, cancels it, or a blocker of an assigned dependent resolves/cancels, the module writes an `assignee_notices` row and uses host `prompt` with `mode:"immediate"` to send fixed updated/cancelled text to the assignee. Callers do not use `cockpit_send_prompt` or free text for these cards.
 运行中的 immediate 是向当前轮次插入消息，不是新开一轮；不整理、删除或重放队列，
 也不为通知中断主轮次或后台工作。它不能回答待决 ask/plan/elicitation，受理不等于已读或 ACK，
-失败或未知效果只作有界核对，不盲重试或自动升级为中断。Task 不新增通知 API 或调度器。
+失败或未知效果只作有界核对，不盲重试或自动升级为中断。
 
 ## 4. 模块 HTTP 与官方 MCP transport
 
@@ -213,6 +210,11 @@ Task 普通 HTTP API 和 HTTP MCP 共用业务服务及 SQLite。宿主只负责
 | `POST /mcp` | 初始化、工具调用和通知 |
 | `GET /mcp` | MCP 协议流 |
 | `DELETE /mcp` | 关闭 MCP 协议 session |
+
+
+MCP `POST /mcp` 的每个 tool call 必须携带 host-injected `_meta["cockpit/invocation"]`，至少包含 `sessionId`，并可包含 `runtimeSessionId`、`subagent`、`agentName`。Task 不信任工具输入中的身份字段；缺少 invocation 时 `INVOCATION_REQUIRED`（400）且不写入，包括 reads。subagent 调用归因到 containing session，完整 invocation 存入 operation receipt，供 `task_read(view=operation)` 返回 `actor` 和 `invocation`。request fingerprint 覆盖工具、已验证输入和派生 actor，不覆盖完整 invocation。该契约来自 waksana/cockpit#205，因此本模块必须与包含该宿主能力的 Cockpit 联合部署。
+
+模块 HTTP 路由（`POST /read`、`POST /tools/:name`、`GET /tasks/:id/native`）没有 native session 身份，固定以 actor `user` 执行。通过 HTTP 创建的 Task 因而 `orchestrator="user"`；后续依赖或 Subtask 通知会尝试查找名为 `user` 的 orchestrator session，通常记录 `ORCHESTRATOR_NOT_FOUND` / not_sent。`user` 自己登记的 subscription 也路由到 `user`，通常记录 `SUBSCRIBER_NOT_FOUND`；真实 session 登记的 subscription 正常发给该 session。Web board 只应读取。
 
 模块使用官方 `WebStandardStreamableHTTPServerTransport`，将公开 headers/body/signal
 转换为 Web Request，以 parsedBody 传递 JSON，保留响应状态/headers，
@@ -236,12 +238,13 @@ HTTP request ID、协议 session ID 与持久 request_id 的业务幂等是不�
 调用一次；关闭已开始则跳过，不自动重试。回调不阻塞宿主启动/关闭，
 通过 `context.signal` 取消，错误经模块报告通道公开。
 
-必须等 listen 之后，恢复的 Owner 才能连接模块 MCP；激活、提前的
+必须等 listen 之后，恢复的 orchestrator 才能连接模块 MCP；激活、提前的
 `agent/status:up` 或 inbound read 都不能启动恢复。
 Task 的 service-ready v1 检查在数据库打开/升级前执行。
 
-Task 回调按固定 high-water mark 分批恢复持久 `pending` 通知，不等新业务流量。
-先被动检查原 Owner 存在，再持久 claim 为 unknown 后发送；不创建替代 Owner。
+Assignee notice expiry happens earlier: `TaskService` construction synchronously expires pending assignee notices left by a previous process before accepting any request, so replay cannot send them late.
+Task 回调按固定 high-water mark 分批恢复其余持久 `pending` 通知，不等新业务流量。
+先被动检查原接收者存在，再持久 claim 为 unknown 后发送；不创建替代接收者。
 unknown、accepted、queued 和已记录 not_sent 失败不自动再试，
 宿主 prompt 没有幂等键，因此不承诺外部 exactly-once。
 这是通用生命周期回调，不是宿主 Task 事件总线或消息调度器。

@@ -27,7 +27,7 @@ const references = z.array(reference).max(LIMITS.references)
   .refine(value => JSON.stringify(value).length <= 8000, 'References must fit within 8000 characters');
 const blockedBy = z.array(id).max(LIMITS.blockers)
   .refine(values => new Set(values.map(value => value.toLowerCase())).size === values.length, 'Blocker Task IDs must be unique')
-  .describe('Complete set of Task IDs (same Owner, max 20) that must all be done before this Task can be assigned or started. Readiness gate only: never changes status, assigns or dispatches');
+  .describe('Complete set of Task IDs (max 20, any orchestrator, never an ancestor of this Task) that must all be done before this Task can be assigned or started. Readiness gate only: never changes status, assigns or dispatches');
 // Validate JSON iteratively so cyclic, deep, exotic and non-finite JS inputs fail safely.
 function validMetadata(value) {
   const seen = new Set();
@@ -57,8 +57,7 @@ const metadata = z.preprocess((value, context) => {
   }
   return value;
 }, z.record(z.string(), z.unknown()));
-const actor = { actor_session_id: session };
-const mutation = { ...actor, request_id: request };
+const mutation = { request_id: request };
 const resourceNames = max => z.array(text(200)).max(max)
   .refine(values => new Set(values).size === values.length, 'Resource names must be unique');
 const resources = {
@@ -72,8 +71,7 @@ const resources = {
 };
 const existing = { ...mutation, task_id: id, write_context: text(1000) };
 const pagination = { limit: z.number().int().min(1).max(LIMITS.history).optional(), cursor: text(2000).optional() };
-const readActor = { actor_session_id: session.optional() };
-const taskRead = view => z.strictObject({ ...readActor, view: z.literal(view), task_id: id });
+const taskRead = view => z.strictObject({ view: z.literal(view), task_id: id });
 const scriptId = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 const argument = z.string().max(4000).refine(value => !value.includes('\0'), 'Arguments cannot contain NUL');
 const parameterValue = z.union([argument, z.number().int().safe(), z.boolean()]);
@@ -98,43 +96,46 @@ const readInclude = z.array(z.enum(READ_GROUPS)).min(1).max(READ_GROUPS.length)
 export const schemas = {
   task_read: z.discriminatedUnion('view', [
     z.strictObject({
-      ...readActor, view: z.literal('list'), owner: session.optional(), executor: session.optional(), parent_task_id: id.optional(),
+      view: z.literal('list'), orchestrator: session.optional(), assignee: session.optional(), parent_task_id: id.optional(),
       retro: retroFilter.optional(),
       status: z.enum(['todo', 'in_progress', 'blocked', 'in_review', 'done', 'cancelled', 'unfinished', 'all']).optional(),
       query: text(200).optional(), limit: z.number().int().min(1).max(LIMITS.list).optional(), cursor: text(2000).optional(),
     }),
     taskRead('overview').extend({ include: readInclude.optional() }),
     ...['execution', 'definition'].map(taskRead),
-    z.strictObject({ ...readActor, view: z.literal('changelog'), task_id: id, ...pagination, revision: revision.optional() })
+    z.strictObject({ view: z.literal('changelog'), task_id: id, ...pagination, revision: revision.optional() })
       .refine(x => x.revision === undefined || (x.cursor === undefined && x.limit === undefined), 'A revision selector cannot be paginated'),
-    ...['activity', 'outcomes', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices'].map(view => z.strictObject({ ...readActor, view: z.literal(view), task_id: id, ...pagination })),
+    ...['activity', 'outcomes', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices'].map(view => z.strictObject({ view: z.literal(view), task_id: id, ...pagination })),
     z.strictObject({
-      ...readActor, view: z.literal('automation_log'), task_id: id,
+      view: z.literal('automation_log'), task_id: id,
       offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
       limit: z.number().int().min(1).max(8192).optional(),
     }),
-    z.strictObject({ ...readActor, view: z.literal('operation'), request_id: request }),
+    z.strictObject({ view: z.literal('operation'), request_id: request }),
   ]),
   task_create: z.strictObject({
-    ...mutation, owner: session, title: text(240), description: text(LIMITS.description),
+    ...mutation, title: text(240), description: text(LIMITS.description),
     references: references.optional(), metadata: metadata.optional(), blocked_by: blockedBy.optional(),
     automation: z.strictObject({ script_id: scriptId, parameters }).optional(),
   }).refine(definitionFits, 'Combined serialized description and materials exceed 64000 characters'),
   task_script_register: z.strictObject({ ...mutation, ...scriptSchema.shape })
     .refine(value => JSON.stringify(value).length <= 13000, 'Script registration exceeds 13000 characters'),
   task_script_read: z.strictObject({
-    ...readActor, script_id: scriptId.optional(),
+    script_id: scriptId.optional(),
     limit: z.number().int().min(1).max(50).optional(), cursor: text(2000).optional(),
   }).refine(value => !value.script_id || (value.limit === undefined && value.cursor === undefined), 'A script selector cannot be paginated'),
   task_automation_start: z.strictObject({ ...existing, revision }),
   task_automation_reconcile: z.strictObject({ ...existing, reason: text(2000) }),
   task_session_create: z.strictObject({ ...mutation, cwd: text(4000), ...resources }),
   task_session_prepare: z.strictObject({ ...mutation, session_id: session, ...resources }),
-  task_assign: z.strictObject({ ...existing, revision, executor: session, resume_request_id: request.optional() }),
+  task_assign: z.strictObject({
+    ...existing, revision, assignee: session,
+    resume_request_id: request.optional().describe('Only to finish a dispatch whose finalized operation shows assignment=applied and message=not_sent: the earlier request_id, same Task and assignee. Pending, queued, accepted or unknown sends cannot resume'),
+  }),
   task_edit: z.strictObject({
     ...existing, revision, reason: text(2000), title: text(240).optional(),
     description: text(LIMITS.description).optional(), references: references.optional(), metadata: metadata.optional(),
-    blocked_by: blockedBy.optional().describe('Replaces the complete blocker set (add/remove by listing the new set; [] clears). Only while the Task awaits dispatch'),
+    blocked_by: blockedBy.optional().describe('Replaces the complete blocker set (add/remove by listing the new set; [] clears). Any unfinished Task (automation only before it starts)'),
   }).refine(x => ['title', 'description', 'references', 'metadata', 'blocked_by'].some(key => x[key] !== undefined), 'An editable field is required'),
   task_ack: z.strictObject({ ...existing, revision }),
   task_reopen: z.strictObject({
@@ -171,14 +172,13 @@ export const schemas = {
 };
 // The MCP SDK publishes properties only for object roots, not discriminated unions.
 const readToolSchema = z.strictObject({
-  ...readActor,
-  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'automation_log', 'operation']),
-  task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes, retro_handlings, subscriptions, dependency_notices, child_notices and automation_log'),
+  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices', 'automation_log', 'operation']),
+  task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes, retro_handlings, subscriptions, dependency_notices, child_notices, assignee_notices and automation_log'),
   include: readInclude.optional(),
   request_id: request.optional().describe('Required only for the operation view'),
-  owner: session.optional().describe('List filter only'),
-  executor: session.optional().describe('List filter only'),
-  parent_task_id: id.optional().describe('List filter only: direct child Tasks of this parent'),
+  orchestrator: session.optional().describe('List filter only: Tasks this session orchestrates'),
+  assignee: session.optional().describe('List filter only: Tasks assigned to this session'),
+  parent_task_id: id.optional().describe('List filter only: direct Subtasks of this parent Task'),
   retro: retroFilter.optional().describe('List filter only: latest retro has findings and is unhandled, or is marked watching; status then defaults to all'),
   status: z.enum(['todo', 'in_progress', 'blocked', 'in_review', 'done', 'cancelled', 'unfinished', 'all']).optional().describe('List filter only; defaults to unfinished, or all with a retro filter'),
   query: text(200).optional().describe('List title filter only'),
@@ -201,4 +201,29 @@ export function parseInput(name, input) {
     throw new TaskError('INVALID_INPUT', parsed.error.issues.map(x => `${x.path.join('.') || 'input'}: ${x.message}`).join('; ').slice(0, 2000), 400);
   }
   return parsed.data;
+}
+
+// Caller identity is never tool input. The service attaches the host-provided actor and
+// invocation after public validation; internal re-parsing keeps them.
+export function parseInternal(name, input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return parseInput(name, input);
+  const { actor, invocation, ...fields } = input;
+  return {
+    ...parseInput(name, fields),
+    ...(actor !== undefined ? { actor } : {}), ...(invocation !== undefined ? { invocation } : {}),
+  };
+}
+
+export const INVOCATION_META_KEY = 'cockpit/invocation';
+// Host-injected MCP _meta (waksana/cockpit#205) names the calling session; models cannot set it.
+export function invocationFromMeta(meta) {
+  const value = meta && typeof meta === 'object' ? meta[INVOCATION_META_KEY] : undefined;
+  if (!value || typeof value !== 'object' || typeof value.sessionId !== 'string'
+    || !value.sessionId.trim() || value.sessionId.length > 200) return null;
+  return {
+    sessionId: value.sessionId,
+    ...(typeof value.runtimeSessionId === 'string' ? { runtimeSessionId: value.runtimeSessionId.slice(0, 200) } : {}),
+    subagent: value.subagent === true,
+    ...(typeof value.agentName === 'string' ? { agentName: value.agentName.slice(0, 200) } : {}),
+  };
 }

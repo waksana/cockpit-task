@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { LIMITS, TaskError, parseInput, definitionFits } from './contracts.js';
+import { LIMITS, TaskError, parseInternal, definitionFits } from './contracts.js';
 import { AutomationStore } from './automation-store.js';
 import { groupAlive } from './automation-runner.js';
 
@@ -16,9 +16,11 @@ const canonical = value => {
   return JSON.stringify(value);
 };
 const hash = value => createHash('sha256').update(canonical(value)).digest('hex');
+// Replays match on tool, input and actor session, not on which agent inside that session retried.
+const fingerprint = (tool, { invocation, ...input }) => hash({ tool, input });
 const fail = (code, message, status = 409, result = null) => { throw new TaskError(code, message, status, result); };
 const notificationTable = table => {
-  if (!['subscriptions', 'dependency_notices', 'child_notices'].includes(table)) throw new Error('Unknown notification table');
+  if (!['subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices'].includes(table)) throw new Error('Unknown notification table');
   return table;
 };
 function decode(value, code) {
@@ -38,13 +40,16 @@ export class TaskStore {
     try {
       chmodSync(file, 0o600);
       const version = this.db.prepare('PRAGMA user_version').get().user_version;
-      if (version > 8) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
+      if (version > 9) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
       this.db.exec(`
       PRAGMA journal_mode=WAL;
       PRAGMA synchronous=FULL;
       PRAGMA foreign_keys=ON;
       PRAGMA busy_timeout=5000;
       BEGIN IMMEDIATE;
+      `);
+      // Schemas before v9 are built with their historical names, then renamed once by v9.
+      if (version < 9) this.db.exec(`
       CREATE TABLE IF NOT EXISTS tasks (
         seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
         title TEXT NOT NULL, description TEXT NOT NULL, owner TEXT NOT NULL,
@@ -119,7 +124,7 @@ export class TaskStore {
         ALTER TABLE outcomes ADD COLUMN retro_recorded INTEGER NOT NULL DEFAULT 0
           CHECK(retro_recorded IN (0,1));
       `);
-      this.db.exec(`
+      if (version < 9) this.db.exec(`
         CREATE TABLE IF NOT EXISTS task_assignments (
           seq INTEGER PRIMARY KEY AUTOINCREMENT,
           task_id TEXT NOT NULL UNIQUE REFERENCES tasks(id),
@@ -164,7 +169,7 @@ export class TaskStore {
       const taskColumns = new Set(this.db.prepare('PRAGMA table_info(tasks)').all().map(column => column.name));
       if (!taskColumns.has('parent_task_id')) this.db.exec('ALTER TABLE tasks ADD COLUMN parent_task_id TEXT REFERENCES tasks(id)');
       if (!taskColumns.has('depth')) this.db.exec('ALTER TABLE tasks ADD COLUMN depth INTEGER NOT NULL DEFAULT 1 CHECK(depth >= 1)');
-      this.db.exec(`
+      if (version < 9) this.db.exec(`
         CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_task_id,seq) WHERE parent_task_id IS NOT NULL;
         CREATE TABLE IF NOT EXISTS child_notices (
           seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
@@ -188,14 +193,59 @@ export class TaskStore {
         );
         CREATE INDEX IF NOT EXISTS retro_handlings_outcome ON retro_handlings(outcome_id,seq);
         CREATE INDEX IF NOT EXISTS retro_handlings_task ON retro_handlings(task_id,seq);
-        PRAGMA user_version=8;
-        COMMIT;
       `);
+      if (version < 9) this.migrateVocabulary();
+      this.db.exec('PRAGMA user_version=9; COMMIT;');
       this.automation = new AutomationStore(this, { platform });
     } catch (error) {
       this.db.close();
       throw error;
     }
+  }
+
+  migrateVocabulary() {
+    // Schema v9 renames Owner/Executor to orchestrator/assignee in place; rows are otherwise unchanged.
+    const renameEvent = table => `UPDATE ${table} SET event=json_remove(json_set(event,'$.actor',json_extract(event,'$.actor_session_id')),'$.actor_session_id')
+      WHERE event IS NOT NULL AND json_type(event,'$.actor_session_id') IS NOT NULL;`;
+    this.db.exec(`
+      DROP INDEX IF EXISTS executor_occupancy;
+      DROP INDEX IF EXISTS task_assignments_executor;
+      DROP INDEX IF EXISTS subscriptions_waiting_owner;
+      ALTER TABLE tasks RENAME COLUMN owner TO orchestrator;
+      ALTER TABLE tasks RENAME COLUMN executor TO assignee;
+      ALTER TABLE activities RENAME COLUMN executor TO assignee;
+      ALTER TABLE outcomes RENAME COLUMN executor TO assignee;
+      ALTER TABLE task_assignments RENAME COLUMN executor TO assignee;
+      ALTER TABLE subscriptions RENAME COLUMN owner TO subscriber;
+      ALTER TABLE subscriptions RENAME COLUMN actor_session_id TO author;
+      ALTER TABLE dependency_notices RENAME COLUMN owner TO orchestrator;
+      ALTER TABLE child_notices RENAME COLUMN owner TO orchestrator;
+      ALTER TABLE operations ADD COLUMN invocation TEXT;
+      -- Service-sent notices to a Task's assignee when someone else changes its description,
+      -- reopens it or cancels it.
+      CREATE TABLE assignee_notices (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+        task_id TEXT NOT NULL REFERENCES tasks(id), revision INTEGER NOT NULL, assignee TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK(kind IN ('updated','cancelled')),
+        event TEXT NOT NULL, created_at TEXT NOT NULL,
+        delivery_status TEXT NOT NULL DEFAULT 'pending'
+          CHECK(delivery_status IN ('pending','unknown','accepted','queued','not_sent')),
+        attempted_at TEXT, completed_at TEXT, delivery_error TEXT
+      );
+      CREATE INDEX assignee_notices_task ON assignee_notices(task_id,seq);
+      CREATE INDEX assignee_notices_pending ON assignee_notices(seq) WHERE delivery_status='pending';
+      CREATE UNIQUE INDEX assignee_occupancy ON tasks(assignee)
+        WHERE assignee IS NOT NULL AND status NOT IN ('done','cancelled');
+      CREATE INDEX task_assignments_assignee ON task_assignments(assignee,seq);
+      CREATE UNIQUE INDEX subscriptions_waiting_subscriber ON subscriptions(task_id,subscriber) WHERE state='waiting';
+      ${renameEvent('subscriptions')}
+      ${renameEvent('dependency_notices')}
+      ${renameEvent('child_notices')}
+      UPDATE operations SET input=json_remove(json_set(input,'$.assignee',json_extract(input,'$.executor')),'$.executor')
+        WHERE tool='task_assign' AND json_type(input,'$.executor') IS NOT NULL;
+      UPDATE operations SET result=json_remove(json_set(result,'$.operation.assignee',json_extract(result,'$.operation.executor')),'$.operation.executor')
+        WHERE tool='task_assign' AND json_type(result,'$.operation.executor') IS NOT NULL;
+    `);
   }
 
   close() { this.db.close(); }
@@ -222,13 +272,21 @@ export class TaskStore {
     if (input.revision !== row.revision) fail('DESCRIPTION_UPDATED', 'Task description has changed; read the current definition before retrying');
   }
   executable(row) {
-    if (row.kind === 'automation') fail('AUTOMATION_MANAGED', 'Automation has no Agent Executor or ACK; execution facts are written only by the service');
+    if (row.kind === 'automation') fail('AUTOMATION_MANAGED', 'Automation has no Agent assignee or ACK; execution facts are written only by the service');
     if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Terminal Tasks cannot accept execution or acknowledgement');
-    if (!row.executor) fail('ASSIGNMENT_REQUIRED', 'Task has no fixed Executor');
+    if (!row.assignee) fail('ASSIGNMENT_REQUIRED', 'Task has no fixed assignee');
+  }
+  authorize(row, actor, relations) {
+    // Host-supplied identity makes the relationship authoritative; a subagent acts for its session.
+    const orchestrator = row.orchestrator === actor || actor === 'user';
+    const allowed = (relations.includes('orchestrator') && orchestrator) || (relations.includes('assignee') && row.assignee && row.assignee === actor);
+    if (allowed) return;
+    const code = relations.length > 1 ? 'ORCHESTRATOR_OR_ASSIGNEE_REQUIRED' : `${relations[0].toUpperCase()}_REQUIRED`;
+    fail(code, `Only the Task ${relations.join(' or ')} may do this; nothing was saved`, 403);
   }
   identity(row) {
     return {
-      id: row.id, task_id: row.id, title: row.title, owner: row.owner, executor: row.executor,
+      id: row.id, task_id: row.id, title: row.title, orchestrator: row.orchestrator, assignee: row.assignee,
       status: row.status, revision: row.revision, acknowledged_revision: row.acknowledged_revision,
       created_at: row.created_at, updated_at: row.updated_at, write_context: this.context(row),
       kind: row.kind, parent_task_id: row.parent_task_id ?? null, depth: row.depth ?? 1,
@@ -237,47 +295,41 @@ export class TaskStore {
   }
   currentAssignment(session) {
     // Occupancy guarantees at most one unfinished Agent assignment per session.
-    return this.db.prepare("SELECT id,depth FROM tasks WHERE executor=? AND kind='agent' AND status NOT IN ('done','cancelled')").get(session) ?? null;
+    return this.db.prepare("SELECT id,depth FROM tasks WHERE assignee=? AND kind='agent' AND status NOT IN ('done','cancelled')").get(session) ?? null;
   }
-  delegationParent(owner, actor) {
-    // A child can only be created by the session executing its parent, as that child's Owner.
-    const parent = this.currentAssignment(owner);
-    const own = actor === owner ? parent : this.currentAssignment(actor);
-    if (parent && actor !== owner) {
-      fail('DELEGATION_OWNER_MISMATCH', `Session ${owner} is executing Task ${parent.id}; only that session can create its child Tasks, as their Owner`);
-    }
-    if (own && actor !== owner) {
-      fail('DELEGATION_OWNER_MISMATCH', `You are executing Task ${own.id}; Tasks you create are its child Tasks, so owner must be your own session`);
-    }
+  delegationParent(actor) {
+    // The creator orchestrates the new Task; if it is executing a Task, the new Task is that Task's Subtask.
+    const parent = this.currentAssignment(actor);
     if (!parent) return { parent_task_id: null, depth: 1 };
     if (parent.depth >= LIMITS.delegationDepth) {
-      fail('DELEGATION_DEPTH_EXCEEDED', `Owner is executing Task ${parent.id} at delegation level ${parent.depth}; child Tasks are limited to ${LIMITS.delegationDepth} levels. Deliver this level directly, or ask the user how to restructure the work`);
+      fail('DELEGATION_DEPTH_EXCEEDED', `You are executing Task ${parent.id} at delegation level ${parent.depth}; Subtasks are limited to ${LIMITS.delegationDepth} levels. Deliver this level directly, or ask the user how to restructure the work`);
     }
     return { parent_task_id: parent.id, depth: parent.depth + 1 };
   }
   lineage(row) {
     const ancestors = [];
     for (let id = row.parent_task_id; id && ancestors.length < LIMITS.delegationDepth; ) {
-      const ancestor = this.db.prepare('SELECT id,owner,executor,parent_task_id FROM tasks WHERE id=?').get(id);
+      const ancestor = this.db.prepare('SELECT id,orchestrator,assignee,parent_task_id FROM tasks WHERE id=?').get(id);
       if (!ancestor) break;
       ancestors.push(ancestor);
       id = ancestor.parent_task_id;
     }
     return ancestors;
   }
-  assertAssignable(row, executor) {
-    if (executor === row.owner) {
-      fail('SELF_ASSIGNMENT', 'A Task cannot be assigned to its own Owner; assign another session. Only a node that already holds a Task, or on explicit user instruction, does the work itself');
+  assertAssignable(row, assignee) {
+    if (assignee === row.orchestrator) {
+      fail('SELF_ASSIGNMENT', 'A Task cannot be assigned to its own orchestrator; assign another session. For explicitly authorized rework of your own completed Task use task_reopen');
     }
-    const loop = this.lineage(row).find(ancestor => ancestor.owner === executor || ancestor.executor === executor);
+    const loop = this.lineage(row).find(ancestor => ancestor.orchestrator === assignee || ancestor.assignee === assignee);
     if (loop) {
-      fail('DELEGATION_CYCLE', `Session ${executor} already owns or executes ancestor Task ${loop.id}; assign child Tasks to a session outside their lineage`);
+      fail('DELEGATION_CYCLE', `Session ${assignee} already orchestrates or is assigned ancestor Task ${loop.id}; assign Subtasks to a session outside their lineage`);
     }
   }
   actorRole(row, actor) {
     if (!actor) return undefined;
-    const owner = row.owner === actor, executor = row.executor === actor;
-    return owner && executor ? 'owner_and_executor' : executor ? 'executor' : owner ? 'owner' : 'none';
+    const orchestrator = row.orchestrator === actor, assignee = row.assignee === actor;
+    // Self-assignment is rejected; only legacy rows can hold both relations.
+    return orchestrator && assignee ? 'orchestrator_and_assignee' : assignee ? 'assignee' : orchestrator ? 'orchestrator' : 'none';
   }
   dependencies(taskId) {
     const blocked_by = this.db.prepare(`SELECT d.blocker_id AS task_id, t.status FROM task_dependencies d
@@ -285,7 +337,7 @@ export class TaskStore {
     return { blocked_by, ready: blocked_by.every(entry => entry.status === 'done') };
   }
   awaitingDispatch(row) {
-    if (row.status !== 'todo' || row.executor) return false;
+    if (row.status !== 'todo' || row.assignee) return false;
     return row.kind !== 'automation' || this.automation.run(row.id, { includeLog: false }).state === 'created';
   }
   assertReady(row) {
@@ -300,14 +352,17 @@ export class TaskStore {
     const added = next.filter(value => !current.includes(value));
     const removed = current.filter(value => !next.includes(value));
     if (!added.length && !removed.length) return false;
-    if (!this.awaitingDispatch(row)) {
-      fail('DEPENDENCY_LOCKED', 'blocked_by can change only while the Task awaits dispatch (unassigned todo, or automation not yet started)');
+    if (terminal(row.status) || (row.kind === 'automation' && this.automation.run(row.id, { includeLog: false }).state !== 'created')) {
+      fail('DEPENDENCY_LOCKED', 'blocked_by can change only on an unfinished Task (automation only before it starts)');
     }
     for (const id of added) {
       if (id === row.id) fail('DEPENDENCY_SELF', 'A Task cannot be blocked by itself', 400);
-      const blocker = this.db.prepare('SELECT id,owner,status FROM tasks WHERE id=?').get(id);
+      const blocker = this.db.prepare('SELECT id,status FROM tasks WHERE id=?').get(id);
       if (!blocker) fail('BLOCKER_NOT_FOUND', `Blocker Task ${id} does not exist`, 404);
-      if (blocker.owner !== row.owner) fail('BLOCKER_OWNER_MISMATCH', 'Blockers must belong to the same Owner as the dependent Task');
+      // An ancestor finishes only after its Subtasks, so waiting on it would deadlock.
+      if (this.lineage(row).some(ancestor => ancestor.id === id)) {
+        fail('BLOCKER_ANCESTOR', `Blocker Task ${id} is an ancestor of this Task and can only finish after it; order work among siblings instead`);
+      }
       if (blocker.status === 'cancelled') fail('BLOCKER_CANCELLED', `Blocker Task ${id} is cancelled and can never become done`);
     }
     for (const id of removed) this.db.prepare('DELETE FROM task_dependencies WHERE task_id=? AND blocker_id=?').run(row.id, id);
@@ -338,7 +393,7 @@ export class TaskStore {
   effects(row, status = 'applied') {
     return {
       status, task_id: row.id, revision: row.revision, acknowledged_revision: row.acknowledged_revision,
-      task_status: row.status, executor: row.executor, write_context: this.context(row),
+      task_status: row.status, assignee: row.assignee, write_context: this.context(row),
       kind: row.kind, ...(row.kind === 'automation' ? { automation: this.automation.project(this.automation.run(row.id)) } : {}),
     };
   }
@@ -350,20 +405,25 @@ export class TaskStore {
       request_id: row.request_id, tool: row.tool, status: row.status,
       ...(typeof input.task_id === 'string' ? { task_id: input.task_id } : {}),
       result: row.result ? JSON.parse(row.result) : null, error: row.error ? JSON.parse(row.error) : null,
+      ...(typeof input.actor === 'string' ? { actor: input.actor } : {}),
+      ...(row.invocation ? { invocation: JSON.parse(row.invocation) } : {}),
       created_at: row.created_at, updated_at: row.updated_at,
     };
   }
   receipt(name, input) {
     const existing = this.db.prepare('SELECT * FROM operations WHERE request_id=?').get(input.request_id);
-    if (existing && existing.fingerprint !== hash({ tool: name, input })) {
-      fail('REQUEST_ID_CONFLICT', 'request_id was already used with different input');
+    if (existing && existing.fingerprint !== fingerprint(name, input)) {
+      fail('REQUEST_ID_CONFLICT', 'request_id was already used with different input or by a different session');
     }
     return existing;
   }
   insertReceipt(name, input, result = null) {
     const at = now();
-    this.db.prepare('INSERT INTO operations(request_id,tool,fingerprint,input,status,result,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)')
-      .run(input.request_id, name, hash({ tool: name, input }), JSON.stringify(input), 'pending', JSON.stringify(result), at, at);
+    const { invocation, ...fields } = input;
+    // The invocation records which agent (main or subagent) inside the actor session made the call.
+    this.db.prepare('INSERT INTO operations(request_id,tool,fingerprint,input,status,result,created_at,updated_at,invocation) VALUES(?,?,?,?,?,?,?,?,?)')
+      .run(input.request_id, name, fingerprint(name, input), JSON.stringify(fields), 'pending', JSON.stringify(result), at, at,
+        invocation ? JSON.stringify(invocation) : null);
   }
   saveReceipt(requestId, result, error, final = true) {
     const changed = this.db.prepare('UPDATE operations SET status=?,result=?,error=?,updated_at=? WHERE request_id=?')
@@ -371,7 +431,7 @@ export class TaskStore {
     if (!changed.changes) fail('OPERATION_NOT_FOUND', 'Operation does not exist', 404);
   }
   reserveOperation(name, rawInput) {
-    const input = parseInput(name, rawInput);
+    const input = parseInternal(name, rawInput);
     if (!['task_assign', 'task_session_create', 'task_session_prepare'].includes(name)) fail('INVALID_OPERATION', 'Only external operations require reservation', 400);
     return this.transaction(() => {
       if (this.receipt(name, input)) {
@@ -402,7 +462,7 @@ export class TaskStore {
     });
   }
   executeLocal(name, rawInput, { validate = () => {} } = {}) {
-    const input = parseInput(name, rawInput);
+    const input = parseInternal(name, rawInput);
     if (name === 'task_read') return this.read(input);
     if (name === 'task_script_read') return this.automation.script(input);
     const handlers = {
@@ -438,16 +498,17 @@ export class TaskStore {
   create(input) {
     if (input.automation) this.automation.assertPlatform();
     const id = randomUUID(), at = now();
-    const { parent_task_id, depth } = this.delegationParent(input.owner, input.actor_session_id);
-    this.db.prepare('INSERT INTO tasks(id,title,description,owner,refs,metadata,created_at,updated_at,parent_task_id,depth) VALUES(?,?,?,?,?,?,?,?,?,?)')
-      .run(id, input.title, input.description, input.owner, JSON.stringify(input.references || []), JSON.stringify(input.metadata || {}), at, at, parent_task_id, depth);
-    this.recordDefinition(this.row(id), 'Initial definition', input.actor_session_id, at);
+    const { parent_task_id, depth } = this.delegationParent(input.actor);
+    this.db.prepare('INSERT INTO tasks(id,title,description,orchestrator,refs,metadata,created_at,updated_at,parent_task_id,depth) VALUES(?,?,?,?,?,?,?,?,?,?)')
+      .run(id, input.title, input.description, input.actor, JSON.stringify(input.references || []), JSON.stringify(input.metadata || {}), at, at, parent_task_id, depth);
+    this.recordDefinition(this.row(id), 'Initial definition', input.actor, at);
     if (input.automation) this.automation.create(id, input.automation);
-    if (input.blocked_by?.length) this.setBlockers(this.row(id), input.blocked_by, input.actor_session_id, at);
+    if (input.blocked_by?.length) this.setBlockers(this.row(id), input.blocked_by, input.actor, at);
     return { result: { ...this.effects(this.row(id)), ...this.dependencies(id) } };
   }
   edit(input) {
     const row = this.row(input.task_id);
+    this.authorize(row, input.actor, ['orchestrator', 'assignee']);
     this.checkContext(row, input, true);
     this.currentRevision(row, input);
     if (row.kind === 'automation' && ['queued', 'starting', 'running'].includes(this.automation.run(row.id).state)) {
@@ -460,7 +521,7 @@ export class TaskStore {
       fail('INVALID_INPUT', 'Combined serialized description and materials exceed 64000 characters', 400);
     }
     const at = now();
-    const blockersChanged = input.blocked_by !== undefined && this.setBlockers(row, input.blocked_by, input.actor_session_id, at);
+    const blockersChanged = input.blocked_by !== undefined && this.setBlockers(row, input.blocked_by, input.actor, at);
     const metadataChanged = (input.title !== undefined && input.title !== row.title)
       || canonical(JSON.parse(references)) !== canonical(JSON.parse(row.refs))
       || canonical(JSON.parse(metadata)) !== canonical(JSON.parse(row.metadata)) || blockersChanged;
@@ -470,13 +531,16 @@ export class TaskStore {
     this.db.prepare('UPDATE tasks SET title=?,description=?,refs=?,metadata=?,revision=?,editable=editable+?,updated_at=? WHERE id=?')
       .run(input.title ?? row.title, input.description ?? row.description, references, metadata, revision, Number(metadataChanged), at, row.id);
     if (descriptionChanged) {
-      this.recordDefinition(this.row(row.id), input.reason, input.actor_session_id, at);
-      if (!terminal(row.status) && row.executor === input.actor_session_id) this.recordAck(this.row(row.id), input.actor_session_id);
+      this.recordDefinition(this.row(row.id), input.reason, input.actor, at);
+      if (!terminal(row.status) && row.assignee === input.actor) this.recordAck(this.row(row.id), input.actor);
     }
+    // Every new revision someone else writes for a working assignee is announced by the service itself.
+    const notify = (descriptionChanged || blockersChanged) && row.kind === 'agent' && row.assignee && !terminal(row.status) && row.assignee !== input.actor;
+    const notice_ids = notify ? [this.recordAssigneeNotice(this.row(row.id), input, at)] : [];
     return {
       result: {
         ...this.effects(this.row(row.id)), description_changed: descriptionChanged, metadata_changed: metadataChanged,
-        ...dependencyResult,
+        ...dependencyResult, ...(notify ? { notice_ids } : {}),
       },
     };
   }
@@ -486,7 +550,7 @@ export class TaskStore {
   }
   recordAck(row, author) {
     this.db.prepare('INSERT OR IGNORE INTO acknowledgements(task_id,revision,confirmed_for,author,at) VALUES(?,?,?,?,?)')
-      .run(row.id, row.revision, row.executor, author, now());
+      .run(row.id, row.revision, row.assignee, author, now());
     this.db.prepare('UPDATE tasks SET acknowledged_revision=?,updated_at=? WHERE id=?').run(row.revision, now(), row.id);
   }
   reopenCandidate(input) {
@@ -495,15 +559,13 @@ export class TaskStore {
     this.currentRevision(row, input);
     if (row.kind !== 'agent') fail('AUTOMATION_MANAGED', 'Automation Tasks cannot reopen');
     if (row.status !== 'done') fail('TASK_STATE_CONFLICT', 'Only a done Agent Task can reopen');
-    if (!row.executor || row.executor !== input.actor_session_id) {
-      fail('EXECUTOR_MISMATCH', 'Only the recorded original Executor may reopen; actor attribution is not authentication');
-    }
-    const assignment = this.db.prepare('SELECT seq FROM task_assignments WHERE task_id=? AND executor=?').get(row.id, row.executor);
+    this.authorize(row, input.actor, ['orchestrator', 'assignee']);
+    const assignment = this.db.prepare('SELECT seq FROM task_assignments WHERE task_id=? AND assignee=?').get(row.id, row.assignee);
     if (!assignment) fail('REOPEN_NOT_ELIGIBLE', 'Tasks assigned before assignment-order tracking cannot reopen');
-    const occupied = this.db.prepare("SELECT 1 FROM tasks WHERE executor=? AND status NOT IN ('done','cancelled')").get(row.executor);
-    if (occupied) fail('EXECUTOR_OCCUPIED', 'Executor already has an unfinished Task');
-    const later = this.db.prepare('SELECT 1 FROM task_assignments WHERE executor=? AND seq>? LIMIT 1').get(row.executor, assignment.seq);
-    if (later) fail('REOPEN_NOT_ELIGIBLE', 'Executor has since been assigned another Task, including completed or cancelled work');
+    const occupied = this.db.prepare("SELECT 1 FROM tasks WHERE assignee=? AND status NOT IN ('done','cancelled')").get(row.assignee);
+    if (occupied) fail('ASSIGNEE_OCCUPIED', 'Assignee already has an unfinished Task');
+    const later = this.db.prepare('SELECT 1 FROM task_assignments WHERE assignee=? AND seq>? LIMIT 1').get(row.assignee, assignment.seq);
+    if (later) fail('REOPEN_NOT_ELIGIBLE', 'Assignee has since been assigned another Task, including completed or cancelled work');
     if (!definitionFits({ description: input.description, references: JSON.parse(row.refs), metadata: JSON.parse(row.metadata) })) {
       fail('INVALID_INPUT', 'Combined serialized description and materials exceed 64000 characters', 400);
     }
@@ -515,27 +577,34 @@ export class TaskStore {
     this.db.prepare("UPDATE tasks SET status='in_progress',description=?,revision=revision+1,lifecycle=lifecycle+1,updated_at=? WHERE id=?")
       .run(input.description, at, row.id);
     const current = this.row(row.id);
-    this.recordDefinition(current, input.reason, input.actor_session_id, at);
-    this.recordAck(current, input.actor_session_id);
-    return { result: this.effects(this.row(row.id)) };
+    this.recordDefinition(current, input.reason, input.actor, at);
+    if (row.assignee === input.actor) {
+      this.recordAck(current, input.actor);
+      return { result: this.effects(this.row(row.id)) };
+    }
+    // Reopened by someone else: the original assignee must read and ACK before resuming.
+    const notice_ids = [this.recordAssigneeNotice(current, input, at)];
+    return { result: { ...this.effects(this.row(row.id)), notice_ids } };
   }
   ack(input) {
     const row = this.row(input.task_id);
     this.checkContext(row, input);
     this.executable(row);
+    this.authorize(row, input.actor, ['assignee']);
     this.currentRevision(row, input);
     if (row.acknowledged_revision === row.revision) return { result: this.effects(row, 'unchanged') };
-    this.recordAck(row, input.actor_session_id);
+    this.recordAck(row, input.actor);
     return { result: this.effects(this.row(row.id)) };
   }
   report(input) {
-    input = parseInput('task_report', input);
+    input = parseInternal('task_report', input);
     const row = this.row(input.task_id);
     this.checkContext(row, input);
     this.executable(row);
+    this.authorize(row, input.actor, ['assignee']);
     const ack = this.db.prepare('SELECT 1 FROM acknowledgements WHERE task_id=? AND revision=? AND confirmed_for=?')
-      .get(row.id, input.revision, row.executor);
-    if (!ack) fail('ACK_REQUIRED', 'The fixed Executor has not acknowledged the specified revision');
+      .get(row.id, input.revision, row.assignee);
+    if (!ack) fail('ACK_REQUIRED', 'The fixed assignee has not acknowledged the specified revision');
     const stale = input.revision !== row.revision;
     const field = requested => ({ status: requested ? 'rejected' : 'not_requested' });
     const fields = {
@@ -546,15 +615,15 @@ export class TaskStore {
     let subscription_ids = [], notice_ids = [];
     if (input.activity) {
       const id = randomUUID();
-      this.db.prepare('INSERT INTO activities(id,task_id,revision,executor,author,text,at) VALUES(?,?,?,?,?,?,?)')
-        .run(id, row.id, input.revision, row.executor, input.actor_session_id, input.activity.text, at);
+      this.db.prepare('INSERT INTO activities(id,task_id,revision,assignee,author,text,at) VALUES(?,?,?,?,?,?,?)')
+        .run(id, row.id, input.revision, row.assignee, input.actor, input.activity.text, at);
       fields.activity = { status: 'saved', id, revision: input.revision };
     }
     if (!stale) {
       if (input.outcome) {
         const id = randomUUID();
-        this.db.prepare('INSERT INTO outcomes(id,task_id,revision,executor,author,summary,refs,at,retro,retro_recorded) VALUES(?,?,?,?,?,?,?,?,?,?)')
-          .run(id, row.id, input.revision, row.executor, input.actor_session_id, input.outcome.summary, JSON.stringify(input.outcome.references || []), at,
+        this.db.prepare('INSERT INTO outcomes(id,task_id,revision,assignee,author,summary,refs,at,retro,retro_recorded) VALUES(?,?,?,?,?,?,?,?,?,?)')
+          .run(id, row.id, input.revision, row.assignee, input.actor, input.outcome.summary, JSON.stringify(input.outcome.references || []), at,
             input.retro ?? null, Number(input.retro !== undefined));
         fields.outcome = { status: 'saved', id, revision: input.revision };
         if (input.retro !== undefined) fields.retro = { status: 'saved', outcome_id: id, revision: input.revision };
@@ -576,19 +645,24 @@ export class TaskStore {
         ...(subscription_ids.length ? { subscription_ids } : {}),
         ...(notice_ids.length ? { notice_ids } : {}),
       },
-      error: rejected ? { code: 'DESCRIPTION_UPDATED', message: 'Task description has changed; requested status, outcome and retro were not saved. Read the current definition; its acknowledgement belongs to the assigned Executor', status: 409 } : null,
+      error: rejected ? { code: 'DESCRIPTION_UPDATED', message: 'Task description has changed; requested status, outcome and retro were not saved. Read the current definition; its acknowledgement belongs to the assignee', status: 409 } : null,
     };
   }
   cancel(input) {
     const row = this.row(input.task_id);
+    this.authorize(row, input.actor, ['orchestrator', 'assignee']);
     this.checkContext(row, input);
     if (row.status === 'cancelled') return { result: this.effects(row, 'unchanged') };
     if (row.status === 'done') fail('TASK_STATE_CONFLICT', 'A completed Task cannot be cancelled');
-    const cancellation = { reason: input.reason, author: input.actor_session_id, source: 'reported', at: now() };
+    const cancellation = { reason: input.reason, author: input.actor, source: 'reported', at: now() };
     this.db.prepare("UPDATE tasks SET status='cancelled',lifecycle=lifecycle+1,cancellation=?,updated_at=? WHERE id=?")
       .run(JSON.stringify(cancellation), cancellation.at, row.id);
     const subscription_ids = this.transitionSubscriptions(row, 'cancelled', input, cancellation.at);
     const notice_ids = [...this.transitionDependents(row, 'cancelled', input, cancellation.at), ...this.transitionChild(row, 'cancelled', input, cancellation.at, subscription_ids)];
+    // An assignee still working is told to stop by the service, never by another agent.
+    if (row.kind === 'agent' && row.assignee && row.assignee !== input.actor) {
+      notice_ids.push(this.recordAssigneeNotice(this.row(row.id), input, cancellation.at, 'cancelled'));
+    }
     if (row.kind === 'automation') this.automation.cancel(row.id);
     return {
       result: {
@@ -599,8 +673,8 @@ export class TaskStore {
   }
   subscription(row) {
     return {
-      subscription_id: row.id, task_id: row.task_id, owner: row.owner,
-      actor_session_id: row.actor_session_id, statuses: JSON.parse(row.statuses), state: row.state,
+      subscription_id: row.id, task_id: row.task_id, subscriber: row.subscriber,
+      author: row.author, statuses: JSON.parse(row.statuses), state: row.state,
       created_at: row.created_at, ended_at: row.ended_at, ended_by: row.ended_by,
       event: row.event ? JSON.parse(row.event) : null,
       notification: {
@@ -619,12 +693,14 @@ export class TaskStore {
     this.checkContext(row, input);
     if (input.statuses.includes(row.status)) fail('ALREADY_IN_TARGET_STATUS', 'Task is already in a target status; no subscription was created');
     if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Subscriptions require an unfinished Task; no subscription was created');
-    if (this.db.prepare("SELECT 1 FROM subscriptions WHERE task_id=? AND owner=? AND state='waiting'").get(row.id, row.owner)) {
-      fail('SUBSCRIPTION_EXISTS', 'This Task Owner already has a waiting subscription; inspect or cancel it explicitly');
+    // Whoever subscribes is notified; a Web board user has no session, so its notice goes to the orchestrator.
+    const subscriber = input.actor === 'user' ? row.orchestrator : input.actor;
+    if (this.db.prepare("SELECT 1 FROM subscriptions WHERE task_id=? AND subscriber=? AND state='waiting'").get(row.id, subscriber)) {
+      fail('SUBSCRIPTION_EXISTS', 'This subscriber already has a waiting subscription on this Task; inspect or cancel it explicitly');
     }
     const id = randomUUID();
-    this.db.prepare("INSERT INTO subscriptions(id,task_id,owner,actor_session_id,statuses,state,created_at) VALUES(?,?,?,?,?,'waiting',?)")
-      .run(id, row.id, row.owner, input.actor_session_id, JSON.stringify(input.statuses), now());
+    this.db.prepare("INSERT INTO subscriptions(id,task_id,subscriber,author,statuses,state,created_at) VALUES(?,?,?,?,?,'waiting',?)")
+      .run(id, row.id, subscriber, input.actor, JSON.stringify(input.statuses), now());
     return { result: { ...this.effects(row), subscription: this.getSubscription(id) } };
   }
   unsubscribe(input) {
@@ -634,7 +710,7 @@ export class TaskStore {
     if (subscription.state === 'cancelled') return { result: { status: 'unchanged', task_id: input.task_id, subscription } };
     if (subscription.state !== 'waiting') fail('SUBSCRIPTION_NOT_WAITING', 'Subscription already ended; a consumed notification cannot be recalled');
     this.db.prepare("UPDATE subscriptions SET state='cancelled',ended_at=?,ended_by=? WHERE id=? AND state='waiting'")
-      .run(now(), input.actor_session_id, subscription.subscription_id);
+      .run(now(), input.actor, subscription.subscription_id);
     return { result: { status: 'applied', task_id: input.task_id, subscription: this.getSubscription(subscription.subscription_id) } };
   }
   transitionSubscriptions(row, status, input, at) {
@@ -644,7 +720,7 @@ export class TaskStore {
     for (const subscription of subscriptions) {
       if (JSON.parse(subscription.statuses).includes(status)) {
         const event = {
-          event_id: randomUUID(), request_id: input.request_id, from_status: row.status, status, at, actor_session_id: input.actor_session_id,
+          event_id: randomUUID(), request_id: input.request_id, from_status: row.status, status, at, actor: input.actor,
           ...(input.source === 'automation' ? { source: 'automation', run_id: input.run_id } : {}),
         };
         this.db.prepare("UPDATE subscriptions SET state='triggered',ended_at=?,event=?,delivery_status='pending' WHERE id=?")
@@ -661,43 +737,72 @@ export class TaskStore {
     if (status === row.status || !terminal(status)) return [];
     const blocker = this.row(row.id);
     const dependents = this.db.prepare(`SELECT t.* FROM task_dependencies d JOIN tasks t ON t.id=d.task_id
-      WHERE d.blocker_id=? ORDER BY d.seq`).all(row.id).filter(dependent => this.awaitingDispatch(dependent));
+      WHERE d.blocker_id=? ORDER BY d.seq`).all(row.id);
     const ids = [];
     for (const dependent of dependents) {
       const kind = status === 'done' ? 'ready' : 'blocker_cancelled';
       if (kind === 'ready' && !this.dependencies(dependent.id).ready) continue;
+      // An assigned dependent is its assignee's to resume: the service points it back at its Task.
+      if (!this.awaitingDispatch(dependent)) {
+        if (dependent.kind === 'agent' && dependent.assignee && !terminal(dependent.status)) {
+          ids.push(this.recordAssigneeNotice(dependent, input, at));
+        }
+        continue;
+      }
       const id = randomUUID();
       const event = {
         event_id: randomUUID(), blocker_id: row.id, blocker_status: status, request_id: input.request_id, at,
-        actor_session_id: input.actor_session_id,
+        actor: input.actor,
         ...(input.source === 'automation' ? { source: 'automation', run_id: input.run_id } : {}),
       };
-      const inserted = this.db.prepare(`INSERT OR IGNORE INTO dependency_notices(id,task_id,blocker_id,blocker_lifecycle,owner,kind,event,created_at)
-        VALUES(?,?,?,?,?,?,?,?)`).run(id, dependent.id, row.id, blocker.lifecycle, dependent.owner, kind, JSON.stringify(event), at);
+      const inserted = this.db.prepare(`INSERT OR IGNORE INTO dependency_notices(id,task_id,blocker_id,blocker_lifecycle,orchestrator,kind,event,created_at)
+        VALUES(?,?,?,?,?,?,?,?)`).run(id, dependent.id, row.id, blocker.lifecycle, dependent.orchestrator, kind, JSON.stringify(event), at);
       if (inserted.changes) ids.push(id);
     }
     return ids;
   }
   transitionChild(row, status, input, at, triggered = []) {
-    // A child's done/blocked/cancelled transition wakes its Owner (the parent's Executor) while the parent is unfinished.
+    // A Subtask's done/blocked/cancelled transition wakes its orchestrator (the parent's assignee) while the parent is unfinished.
     if (!row.parent_task_id || status === row.status || !['done', 'blocked', 'cancelled'].includes(status)) return [];
-    if (triggered.length) return [];
+    // A subscription card to the same orchestrator already covers this transition; anyone else's does not.
+    const covered = triggered.some(id => this.db.prepare('SELECT subscriber FROM subscriptions WHERE id=?').get(id)?.subscriber === row.orchestrator);
+    if (covered) return [];
     const parent = this.row(row.parent_task_id);
-    if (terminal(parent.status) || parent.executor !== row.owner) return [];
+    if (terminal(parent.status) || parent.assignee !== row.orchestrator) return [];
     const child = this.row(row.id);
     const id = randomUUID();
     const event = {
       event_id: randomUUID(), parent_task_id: parent.id, from_status: row.status, status, request_id: input.request_id, at,
-      actor_session_id: input.actor_session_id,
+      actor: input.actor,
       ...(input.source === 'automation' ? { source: 'automation', run_id: input.run_id } : {}),
     };
-    const inserted = this.db.prepare(`INSERT OR IGNORE INTO child_notices(id,task_id,parent_task_id,child_lifecycle,owner,status,event,created_at)
-      VALUES(?,?,?,?,?,?,?,?)`).run(id, row.id, parent.id, child.lifecycle, row.owner, status, JSON.stringify(event), at);
+    const inserted = this.db.prepare(`INSERT OR IGNORE INTO child_notices(id,task_id,parent_task_id,child_lifecycle,orchestrator,status,event,created_at)
+      VALUES(?,?,?,?,?,?,?,?)`).run(id, row.id, parent.id, child.lifecycle, row.orchestrator, status, JSON.stringify(event), at);
     return inserted.changes ? [id] : [];
+  }
+  recordAssigneeNotice(row, input, at, kind = 'updated') {
+    const id = randomUUID();
+    const event = {
+      event_id: randomUUID(), revision: row.revision, request_id: input.request_id, at, actor: input.actor,
+      ...(input.source === 'automation' ? { source: 'automation', run_id: input.run_id } : {}),
+    };
+    this.db.prepare('INSERT INTO assignee_notices(id,task_id,revision,assignee,kind,event,created_at) VALUES(?,?,?,?,?,?,?)')
+      .run(id, row.id, row.revision, row.assignee, kind, JSON.stringify(event), at);
+    return id;
+  }
+  assigneeNotice(row) {
+    return {
+      notice_id: row.id, task_id: row.task_id, assignee: row.assignee, kind: row.kind, revision: row.revision,
+      event: JSON.parse(row.event), created_at: row.created_at,
+      notification: {
+        status: row.delivery_status, attempted_at: row.attempted_at, completed_at: row.completed_at,
+        error: row.delivery_error ? JSON.parse(row.delivery_error) : null,
+      },
+    };
   }
   childNotice(row) {
     return {
-      notice_id: row.id, task_id: row.task_id, parent_task_id: row.parent_task_id, owner: row.owner,
+      notice_id: row.id, task_id: row.task_id, parent_task_id: row.parent_task_id, orchestrator: row.orchestrator,
       kind: `child_${row.status}`, status: row.status, event: JSON.parse(row.event), created_at: row.created_at,
       notification: {
         status: row.delivery_status, attempted_at: row.attempted_at, completed_at: row.completed_at,
@@ -707,7 +812,7 @@ export class TaskStore {
   }
   notice(row) {
     return {
-      notice_id: row.id, task_id: row.task_id, blocker_id: row.blocker_id, owner: row.owner, kind: row.kind,
+      notice_id: row.id, task_id: row.task_id, blocker_id: row.blocker_id, orchestrator: row.orchestrator, kind: row.kind,
       event: JSON.parse(row.event), created_at: row.created_at,
       notification: {
         status: row.delivery_status, attempted_at: row.attempted_at, completed_at: row.completed_at,
@@ -723,7 +828,12 @@ export class TaskStore {
   notificationChannel(id) {
     // Subscriptions and dependency notices share one durable delivery discipline.
     if (this.db.prepare('SELECT 1 FROM subscriptions WHERE id=?').get(id)) {
-      return { table: 'subscriptions', event: 'status_changed', read: () => this.getSubscription(id) };
+      return { table: 'subscriptions', event: 'status_changed', recipient: 'subscriber', read: () => this.getSubscription(id) };
+    }
+    const assigneeNotice = this.db.prepare('SELECT kind FROM assignee_notices WHERE id=?').get(id);
+    if (assigneeNotice) {
+      const read = () => this.assigneeNotice(this.db.prepare('SELECT * FROM assignee_notices WHERE id=?').get(id));
+      return { table: 'assignee_notices', event: assigneeNotice.kind, recipient: 'assignee', mode: 'immediate', read };
     }
     const child = this.db.prepare('SELECT * FROM child_notices WHERE id=?').get(id);
     if (child) {
@@ -759,13 +869,14 @@ export class TaskStore {
     });
   }
   bindAssignment(rawInput) {
-    const input = parseInput('task_assign', rawInput);
+    const input = parseInternal('task_assign', rawInput);
     return this.transaction(() => {
       const receipt = this.receipt('task_assign', input);
       if (!receipt || receipt.status !== 'pending') fail('OPERATION_NOT_PENDING', 'Assignment needs its own pending receipt');
       if (receipt.binding_context) fail('ASSIGNMENT_CONFLICT', 'This operation already bound the Task; do not repeat it');
       const row = this.row(input.task_id);
       if (row.kind === 'automation') fail('AUTOMATION_MANAGED', 'Automation Tasks cannot be assigned to an Agent');
+      this.authorize(row, input.actor, ['orchestrator']);
       this.checkContext(row, input);
       this.currentRevision(row, input);
       if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Terminal Tasks cannot be assigned');
@@ -774,58 +885,58 @@ export class TaskStore {
         const prior = old?.result ? JSON.parse(old.result)?.operation : null;
         const oldInput = old ? JSON.parse(old.input) : null;
         if (!old || old.tool !== 'task_assign' || old.status !== 'final' || old.resumed_by
-          || oldInput.task_id !== input.task_id || oldInput.executor !== input.executor
-          || prior?.message !== 'not_sent' || prior.assignment !== 'applied' || row.executor !== input.executor) {
+          || oldInput.task_id !== input.task_id || oldInput.assignee !== input.assignee
+          || prior?.message !== 'not_sent' || prior.assignment !== 'applied' || row.assignee !== input.assignee) {
           fail('UNSAFE_DISPATCH_RECOVERY', 'Recovery requires an unused finalized receipt proving this fixed assignment was not sent');
         }
         this.db.prepare('UPDATE operations SET resumed_by=? WHERE request_id=?').run(input.request_id, input.resume_request_id);
       } else {
-        if (row.executor || row.status !== 'todo') fail('ASSIGNMENT_CONFLICT', 'Only an unassigned todo can be assigned');
-        this.assertAssignable(row, input.executor);
+        if (row.assignee || row.status !== 'todo') fail('ASSIGNMENT_CONFLICT', 'Only an unassigned todo can be assigned');
+        this.assertAssignable(row, input.assignee);
         this.assertReady(row);
         try {
-          this.db.prepare('UPDATE tasks SET executor=?,lifecycle=lifecycle+1,updated_at=? WHERE id=?')
-            .run(input.executor, now(), row.id);
+          this.db.prepare('UPDATE tasks SET assignee=?,lifecycle=lifecycle+1,updated_at=? WHERE id=?')
+            .run(input.assignee, now(), row.id);
         } catch (error) {
-          if (error.code?.startsWith('ERR_SQLITE') && error.message.includes('tasks.executor')) {
-            fail('EXECUTOR_OCCUPIED', 'Executor already has an unfinished Task');
+          if (error.code?.startsWith('ERR_SQLITE') && error.message.includes('tasks.assignee')) {
+            fail('ASSIGNEE_OCCUPIED', 'Assignee already has an unfinished Task');
           }
           throw error;
         }
-        this.db.prepare('INSERT INTO task_assignments(task_id,executor,author,at) VALUES(?,?,?,?)')
-          .run(row.id, input.executor, input.actor_session_id, now());
+        this.db.prepare('INSERT INTO task_assignments(task_id,assignee,author,at) VALUES(?,?,?,?)')
+          .run(row.id, input.assignee, input.actor, now());
       }
       const task = this.row(row.id);
       this.db.prepare('UPDATE operations SET binding_context=?,result=?,updated_at=? WHERE request_id=?')
-        .run(this.context(task), JSON.stringify({ operation: { request_id: input.request_id, status: 'running', task_id: task.id, executor: task.executor, assignment: 'applied', message: 'not_sent', write_context: this.context(task) } }), now(), input.request_id);
+        .run(this.context(task), JSON.stringify({ operation: { request_id: input.request_id, status: 'running', task_id: task.id, assignee: task.assignee, assignment: 'applied', message: 'not_sent', write_context: this.context(task) } }), now(), input.request_id);
       return this.summary(task);
     });
   }
   moduleSessionTitle(sessionId, excludeRequestId) {
     // Only this module's own confirmed rename counts as module-set; the latest one wins.
     const row = this.db.prepare(`SELECT json_extract(result,'$.operation.session_title.title') AS title FROM operations
-      WHERE tool='task_assign' AND request_id<>? AND json_extract(result,'$.operation.executor')=?
+      WHERE tool='task_assign' AND request_id<>? AND json_extract(result,'$.operation.assignee')=?
         AND json_extract(result,'$.operation.session_title.status')='renamed'
       ORDER BY updated_at DESC, rowid DESC LIMIT 1`).get(excludeRequestId, sessionId);
     return typeof row?.title === 'string' ? row.title : null;
   }
   preparationPreflight(sessionId) {
-    const task = this.db.prepare("SELECT id FROM tasks WHERE executor=? AND status NOT IN ('done','cancelled')").get(sessionId);
-    if (task) fail('EXECUTOR_OCCUPIED', 'Select an Executor without an unfinished Task; preparation does not repair an existing assignment');
+    const task = this.db.prepare("SELECT id FROM tasks WHERE assignee=? AND status NOT IN ('done','cancelled')").get(sessionId);
+    if (task) fail('ASSIGNEE_OCCUPIED', 'Select a session without an unfinished Task; preparation does not repair an existing assignment');
   }
   dispatchPreflight(rawInput) {
-    const input = parseInput('task_assign', rawInput);
+    const input = parseInternal('task_assign', rawInput);
     const receipt = this.receipt('task_assign', input);
     if (!receipt || receipt.status !== 'pending' || !receipt.binding_context) fail('OPERATION_NOT_PENDING', 'No pending bound dispatch exists');
     const row = this.row(input.task_id);
     this.checkContext(row, { write_context: receipt.binding_context });
     this.currentRevision(row, input);
     this.executable(row);
-    if (row.executor !== input.executor || row.status !== 'todo') fail('ASSIGNMENT_CONFLICT', 'Task is no longer awaiting this dispatch');
+    if (row.assignee !== input.assignee || row.status !== 'todo') fail('ASSIGNMENT_CONFLICT', 'Task is no longer awaiting this dispatch');
     return this.summary(row);
   }
   overview(row, includeCancellation = true) {
-    const activity = this.db.prepare('SELECT id,revision,executor,author,text,at FROM activities WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
+    const activity = this.db.prepare('SELECT id,revision,assignee,author,text,at FROM activities WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
     const outcome = this.db.prepare('SELECT id,revision,at FROM outcomes WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
     return {
       ...this.summary(row),
@@ -840,7 +951,7 @@ export class TaskStore {
     if (!outcome?.retro_recorded) return { status: 'not_recorded' };
     return {
       status: 'recorded', outcome_id: outcome.id, revision: outcome.revision,
-      executor: outcome.executor, author: outcome.author, at: outcome.at, source: 'reported',
+      assignee: outcome.assignee, author: outcome.author, at: outcome.at, source: 'reported',
       current: outcome.revision === row.revision, has_findings: outcome.retro !== null,
       ...(includeText ? { text: outcome.retro } : {}),
       ...(outcome.retro !== null ? { handling: this.retroHandling(outcome.id, includeText) } : {}),
@@ -859,9 +970,6 @@ export class TaskStore {
   handleRetro(input) {
     const row = this.row(input.task_id);
     if (row.kind === 'automation') fail('AUTOMATION_MANAGED', 'Automation has no Agent retro to handle');
-    if (row.owner !== input.actor_session_id) {
-      fail('OWNER_REQUIRED', 'Only the Task Owner, the node that created it, handles its retro; an Executor never handles its own retro. Actor attribution is not authentication');
-    }
     const outcome = this.db.prepare('SELECT * FROM outcomes WHERE task_id=? AND id=? AND retro_recorded=1').get(row.id, input.outcome_id.toLowerCase());
     if (!outcome) fail('RETRO_NOT_FOUND', 'outcome_id is not a recorded retro of this Task; read the Task retro or outcomes and use its outcome_id');
     if (outcome.retro === null) fail('RETRO_NO_FINDINGS', 'This retro was submitted as null (no findings) and needs no handling');
@@ -873,12 +981,12 @@ export class TaskStore {
     }
     const id = randomUUID(), at = now();
     this.db.prepare('INSERT INTO retro_handlings(id,task_id,outcome_id,status,note,refs,author,at) VALUES(?,?,?,?,?,?,?,?)')
-      .run(id, row.id, outcome.id, input.status, input.note, refs, input.actor_session_id, at);
+      .run(id, row.id, outcome.id, input.status, input.note, refs, input.actor, at);
     return { result: { status: 'applied', ...base, handling: this.retroHandling(outcome.id) } };
   }
   latestRetro(row, includeText = false) {
     const outcome = row.kind === 'automation' ? null : this.db.prepare(
-      'SELECT id,revision,executor,author,at,retro,retro_recorded FROM outcomes WHERE task_id=? AND retro_recorded=1 ORDER BY seq DESC LIMIT 1',
+      'SELECT id,revision,assignee,author,at,retro,retro_recorded FROM outcomes WHERE task_id=? AND retro_recorded=1 ORDER BY seq DESC LIMIT 1',
     ).get(row.id);
     return this.retro(row, outcome, includeText);
   }
@@ -886,7 +994,7 @@ export class TaskStore {
     const include = new Set(input.include);
     // Explicit projections keep unrequested bodies out of the read, not just the response.
     const columns = [
-      'id', 'title', 'owner', 'executor', 'status', 'revision', 'acknowledged_revision',
+      'id', 'title', 'orchestrator', 'assignee', 'status', 'revision', 'acknowledged_revision',
       'created_at', 'updated_at', 'lifecycle', 'editable', 'kind', 'parent_task_id', 'depth',
       ...(include.has('definition') ? ['description', 'refs', 'metadata'] : []),
       ...(include.has('cancellation') ? ['cancellation'] : []),
@@ -895,11 +1003,11 @@ export class TaskStore {
     if (!row) fail('TASK_NOT_FOUND', `Task ${input.task_id} does not exist`, 404);
     const result = this.identity(row);
     if (include.has('activity')) {
-      const entry = this.db.prepare('SELECT id,task_id,revision,executor,author,text,at FROM activities WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
+      const entry = this.db.prepare('SELECT id,task_id,revision,assignee,author,text,at FROM activities WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
       result.activity = entry ? { ...entry, current: entry.revision === row.revision, source: 'reported' } : null;
     }
     if (include.has('outcome')) {
-      const entry = this.db.prepare('SELECT id,task_id,revision,executor,author,summary,refs,at,run_id FROM outcomes WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
+      const entry = this.db.prepare('SELECT id,task_id,revision,assignee,author,summary,refs,at,run_id FROM outcomes WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
       if (entry) {
         const { refs, ...fields } = entry;
         result.outcome = {
@@ -956,20 +1064,20 @@ export class TaskStore {
     };
   }
   read(rawInput) {
-    const input = parseInput('task_read', rawInput);
-    const actor = input.actor_session_id;
+    const input = parseInternal('task_read', rawInput);
+    const actor = input.actor;
     // Role is derived from Task facts relative to the reading session, never from memory.
-    const withRole = item => actor && item?.owner !== undefined ? { ...item, actor_role: this.actorRole(item, actor) } : item;
+    const withRole = item => actor && item?.orchestrator !== undefined ? { ...item, actor_role: this.actorRole(item, actor) } : item;
     if (input.include) return withRole(this.transaction(() => this.selected(input), { readOnly: true }));
     if (input.view === 'operation') return this.operation(input.request_id);
     if (input.view === 'list') {
-      const { owner, executor, parent_task_id: parent, query, retro } = input;
+      const { orchestrator, assignee, parent_task_id: parent, query, retro } = input;
       const status = input.status ?? (retro ? 'all' : 'unfinished');
-      const scope = hash({ view: 'list', owner: owner ?? null, executor: executor ?? null, parent: parent?.toLowerCase() ?? null, query: query ?? null, status, ...(retro ? { retro } : {}) });
+      const scope = hash({ view: 'list', orchestrator: orchestrator ?? null, assignee: assignee ?? null, parent: parent?.toLowerCase() ?? null, query: query ?? null, status, ...(retro ? { retro } : {}) });
       const clauses = ['seq < ?'], values = [this.cursor(input, scope)];
-      if (owner) { clauses.push('owner=?'); values.push(owner); }
+      if (orchestrator) { clauses.push('orchestrator=?'); values.push(orchestrator); }
       if (parent) { clauses.push('parent_task_id=?'); values.push(parent.toLowerCase()); }
-      if (executor) { clauses.push('executor=?'); values.push(executor); }
+      if (assignee) { clauses.push('assignee=?'); values.push(assignee); }
       if (status === 'unfinished') clauses.push("status NOT IN ('done','cancelled')");
       else if (status !== 'all') { clauses.push('status=?'); values.push(status); }
       if (query) { clauses.push('instr(lower(title), lower(?)) > 0'); values.push(query); }
@@ -985,12 +1093,12 @@ export class TaskStore {
     }
     const row = this.row(input.task_id);
     if (input.view === 'automation_log') return this.automation.log(input);
-    if (['subscriptions', 'dependency_notices', 'child_notices'].includes(input.view)) {
+    if (['subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices'].includes(input.view)) {
       const scope = hash({ view: input.view, task_id: row.id });
       const limit = input.limit ?? 5;
       const rows = this.db.prepare(`SELECT * FROM ${notificationTable(input.view)} WHERE task_id=? AND seq < ? ORDER BY seq DESC LIMIT ?`)
         .all(row.id, this.cursor(input, scope), limit + 1);
-      return this.page(rows, limit, scope, entry => ({ subscriptions: this.subscription, dependency_notices: this.notice, child_notices: this.childNotice })[input.view].call(this, entry), { task_id: row.id });
+      return this.page(rows, limit, scope, entry => ({ subscriptions: this.subscription, dependency_notices: this.notice, child_notices: this.childNotice, assignee_notices: this.assigneeNotice })[input.view].call(this, entry), { task_id: row.id });
     }
     if (input.view === 'overview') return withRole(this.overview(row));
     if (input.view === 'execution' || input.view === 'definition') return withRole(this.task(row.id));
@@ -1021,21 +1129,21 @@ export class TaskStore {
       };
     }, { task_id: row.id });
   }
-  definitionCheck({ task_id, actor_session_id } = {}) {
+  definitionCheck({ task_id, actor } = {}) {
     try {
-      const rows = this.db.prepare("SELECT id,executor,status,revision,acknowledged_revision FROM tasks WHERE id=? OR (executor=? AND status NOT IN ('done','cancelled'))")
-        .all(task_id ?? null, actor_session_id ?? null);
+      const rows = this.db.prepare("SELECT id,assignee,status,revision,acknowledged_revision FROM tasks WHERE id=? OR (assignee=? AND status NOT IN ('done','cancelled'))")
+        .all(task_id ?? null, actor ?? null);
       if (task_id && !rows.some(row => row.id === task_id)) fail('TASK_NOT_FOUND', `Task ${task_id} does not exist`, 404);
       if (!rows.length) return { status: 'not_applicable', tasks: [] };
       return {
         status: 'checked',
         tasks: rows.map(row => {
-          const needs_ack = Boolean(row.executor) && !terminal(row.status) && row.acknowledged_revision !== row.revision;
+          const needs_ack = Boolean(row.assignee) && !terminal(row.status) && row.acknowledged_revision !== row.revision;
           return {
             task_id: row.id, revision: row.revision, acknowledged_revision: row.acknowledged_revision, needs_ack,
             ...(needs_ack ? { message: row.acknowledged_revision === null
-              ? "Awaiting the assigned Executor's acknowledgement of the current Task description"
-              : "Task description has changed; awaiting the assigned Executor's acknowledgement of the current revision" } : {}),
+              ? "Awaiting the assignee's acknowledgement of the current Task description"
+              : "Task description has changed; awaiting the assignee's acknowledgement of the current revision" } : {}),
           };
         }),
       };

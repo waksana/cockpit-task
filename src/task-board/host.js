@@ -1,6 +1,6 @@
 import { TaskError } from './contracts.js';
 
-// One tree-node role: a session executes its own assignment and owns the child Tasks it creates.
+// One tree-node role: a session completes its own Task and orchestrates the Subtasks it creates.
 const nodeRoles = [{ moduleId: 'cockpit-task', roleId: 'node' }];
 
 function availabilityReasons(meta) {
@@ -38,7 +38,7 @@ export function createHostAdapter(host) {
     return meta;
   };
   return {
-    ownerExists: async sessionId => (await get(sessionId)) !== null,
+    sessionExists: async sessionId => (await get(sessionId)) !== null,
     create: cwd => host.call('session/new', { cwd, roles: nodeRoles }),
     preparationSupported: host.resourcePreparationVersion === 1,
     prepare: (sessionId, { skills, mcp_servers }) => host.call('session/resources-prepare', {
@@ -49,14 +49,14 @@ export function createHostAdapter(host) {
       const capability = await host.call('roles/readiness', { sessionId, roles: nodeRoles });
       if (capability?.sessionId !== sessionId || typeof capability.ready !== 'boolean'
         || typeof capability.loaded !== 'boolean' || !Array.isArray(capability.reasons)) {
-        throw new TaskError('CAPABILITY_UNAVAILABLE', 'Host returned no confirmed Executor readiness');
+        throw new TaskError('CAPABILITY_UNAVAILABLE', 'Host returned no confirmed Node readiness');
       }
       const meta = await get(sessionId);
       const availability_reasons = availabilityReasons(meta);
       return {
         ready: capability.ready && capability.loaded && meta?.loaded === true,
         idle: availability_reasons.length === 0,
-        executor: capability.rolesNeedReload === false && Array.isArray(capability.appliedRoles)
+        node: capability.rolesNeedReload === false && Array.isArray(capability.appliedRoles)
           && capability.appliedRoles.some(role => role.moduleId === 'cockpit-task' && role.roleId === 'node'),
         details: {
           reasons: capability.reasons, loaded: meta?.loaded ?? null, status: meta?.status ?? null,
@@ -64,10 +64,10 @@ export function createHostAdapter(host) {
         },
       };
     },
-    send: (sessionId, text) => host.call('prompt', { sessionId, text, mode: 'enqueue' }),
+    send: (sessionId, text, { mode = 'enqueue' } = {}) => host.call('prompt', { sessionId, text, mode }),
     async nameState(sessionId) {
       const meta = await get(sessionId);
-      if (meta === null) throw new TaskError('SESSION_NOT_FOUND', 'The Executor session is no longer known to the host');
+      if (meta === null) throw new TaskError('SESSION_NOT_FOUND', 'The assignee session is no longer known to the host');
       // Older hosts omit provenance; omission is unknown, never an auto-generated title.
       if (!Object.hasOwn(meta, 'nativeName') || typeof meta.nativeNameUserSet !== 'boolean'
         || (meta.nativeName !== null && typeof meta.nativeName !== 'string')) return null;
@@ -79,7 +79,7 @@ export function createHostAdapter(host) {
       if (!meta) return {
         source: 'native', session_id: sessionId, loaded: null, available: false,
         observed_at: new Date().toISOString(),
-        error: { code: 'SESSION_NOT_FOUND', message: 'The Executor session is no longer known to the host' },
+        error: { code: 'SESSION_NOT_FOUND', message: 'The assignee session is no longer known to the host' },
       };
       return {
         source: 'native', session_id: sessionId, loaded: meta.loaded, status: meta.status,

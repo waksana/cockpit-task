@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, rmSync, readdirSync, renameSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { TaskStore } from '../src/task-board/store.js';
 import { parseInput, TaskError, LIMITS, READ_GROUPS, toolSchemas } from '../src/task-board/contracts.js';
 
@@ -12,21 +13,21 @@ function fixture(t) {
   let store = new TaskStore(directory);
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   const input = (task, fields = {}) => ({
-    request_id: randomUUID(), actor_session_id: 'owner', task_id: task.task_id,
+    request_id: randomUUID(), actor: 'orchestrator', task_id: task.task_id,
     write_context: task.write_context, revision: task.revision, ...fields,
   });
   const create = (fields = {}) => store.executeLocal('task_create', {
-    request_id: randomUUID(), actor_session_id: 'owner', owner: 'owner',
+    request_id: randomUUID(), actor: 'orchestrator',
     title: 'Task', description: 'Complete definition', ...fields,
   });
-  const bind = (task, executor = 'executor') => {
-    const value = input(task, { executor });
+  const bind = (task, assignee = 'assignee') => {
+    const value = input(task, { assignee });
     store.reserveOperation('task_assign', value);
     return store.bindAssignment(value);
   };
-  const ack = task => store.executeLocal('task_ack', input(task, { actor_session_id: 'executor' }));
+  const ack = task => store.executeLocal('task_ack', input(task, { actor: 'assignee' }));
   const edit = (task, fields = {}) => store.executeLocal('task_edit', input(task, { reason: 'Clarified requirements', ...fields }));
-  const report = (task, fields) => store.executeLocal('task_report', input(task, { actor_session_id: 'executor', ...fields }));
+  const report = (task, fields) => store.executeLocal('task_report', input(task, { actor: 'assignee', ...fields }));
   return {
     get store() { return store; }, directory, input, create, bind, ack, edit, report,
     restart() { store.close(); store = new TaskStore(directory); },
@@ -42,7 +43,7 @@ test('independent durable database, initial definition and exact receipt replay'
   assert.deepEqual(f.create({ request_id }), first);
   assert.equal(first.revision, 1);
   assert.equal(first.task_status, 'todo');
-  assert.equal(first.executor, null);
+  assert.equal(first.assignee, null);
   assert.equal('description' in first, false);
   assert.equal(f.store.read({ view: 'changelog', task_id: first.task_id }).items.length, 1);
   assert.equal(f.store.read({ view: 'changelog', task_id: first.task_id, revision: 1 }).description, 'Complete definition');
@@ -61,13 +62,13 @@ test('offline data-root relocation preserves Task IDs, contexts, receipts and se
   let store = new TaskStore(source);
   t.after(() => { store?.close(); rmSync(root, { recursive: true, force: true }); });
   const createInput = {
-    request_id: randomUUID(), actor_session_id: 'original-owner', owner: 'original-owner',
+    request_id: randomUUID(), actor: 'original-orchestrator',
     title: 'Identity preservation', description: 'Keep user-authored task-board references unchanged.',
   };
   const created = store.executeLocal('task_create', createInput);
   const assignInput = {
-    request_id: randomUUID(), actor_session_id: 'original-owner', task_id: created.task_id,
-    executor: 'original-executor', revision: created.revision, write_context: created.write_context,
+    request_id: randomUUID(), actor: 'original-orchestrator', task_id: created.task_id,
+    assignee: 'original-assignee', revision: created.revision, write_context: created.write_context,
   };
   store.reserveOperation('task_assign', assignInput);
   const assigned = store.bindAssignment(assignInput);
@@ -81,18 +82,19 @@ test('offline data-root relocation preserves Task IDs, contexts, receipts and se
   assert.deepEqual(store.db.prepare('SELECT * FROM operations ORDER BY request_id').all(), receipts);
   assert.deepEqual(store.executeLocal('task_create', createInput), created);
   const acknowledged = store.executeLocal('task_ack', {
-    request_id: randomUUID(), actor_session_id: 'original-executor',
+    request_id: randomUUID(), actor: 'original-assignee',
     task_id: created.task_id, revision: assigned.revision, write_context: assigned.write_context,
   });
   assert.equal(acknowledged.task_id, created.task_id);
-  assert.equal(acknowledged.executor, 'original-executor');
+  assert.equal(acknowledged.assignee, 'original-assignee');
   assert.ok(readdirSync(destination).includes('task-board.sqlite'));
 });
 
 test('strict bounded schemas reject unknown identity fields, malformed JSON and invalid report', () => {
-  const input = { request_id: 'id', actor_session_id: 'actor', owner: 'owner', title: 'Title', description: 'Definition' };
+  const input = { request_id: 'id', title: 'Title', description: 'Definition' };
   for (const addition of [
-    { executor: 'hidden' }, { status: 'done' }, { title: ' ' },
+    { actor: 'actor' }, { actor_session_id: 'actor' }, { orchestrator: 'orchestrator' },
+    { assignee: 'hidden' }, { status: 'done' }, { title: ' ' },
     { description: 'x'.repeat(24001) }, { metadata: { value: Infinity } },
     { metadata: { value: undefined } }, { metadata: { value: new Date() } },
     { metadata: { value: 'x'.repeat(8001) } },
@@ -133,7 +135,7 @@ test('selected overview returns only requested full latest records, distinguishi
   assert.deepEqual(empty.retro, { status: 'not_recorded' });
   assert.equal(empty.definition.description, 'Complete definition');
   assert.equal(empty.definition.revision, 1);
-  assert.equal(empty.definition.author, 'owner');
+  assert.equal(empty.definition.author, 'orchestrator');
   assert.equal(empty.definition.source, 'reported');
   assert.ok(empty.definition.at);
   assert.equal(f.store.task(task.id).acknowledged_revision, null, 'Reading never ACKs');
@@ -147,8 +149,8 @@ test('selected overview returns only requested full latest records, distinguishi
   assert.equal(selected.activity.text, text);
   assert.equal(selected.activity.current, true);
   assert.equal(selected.activity.source, 'reported');
-  assert.equal(selected.activity.executor, 'executor');
-  assert.equal(selected.activity.author, 'executor');
+  assert.equal(selected.activity.assignee, 'assignee');
+  assert.equal(selected.activity.author, 'assignee');
   assert.ok(selected.activity.at);
   assert.equal('truncated' in selected.activity, false);
   assert.equal(selected.outcome.summary, 'Earlier outcome');
@@ -172,7 +174,7 @@ test('selected overview returns only requested full latest records, distinguishi
   assert.equal(done.retro.outcome_id, done.outcome.id);
   const context = read(['context']);
   assert.deepEqual(Object.keys(context).sort(), [
-    'id', 'task_id', 'title', 'owner', 'executor', 'status', 'revision', 'acknowledged_revision',
+    'id', 'task_id', 'title', 'orchestrator', 'assignee', 'status', 'revision', 'acknowledged_revision',
     'created_at', 'updated_at', 'write_context', 'kind', 'parent_task_id', 'depth', 'blocked_by', 'ready',
   ].sort());
   assert.equal(context.status, 'done');
@@ -214,10 +216,10 @@ test('selection uses one SQLite read snapshot even when another connection commi
         const row = get(...args);
         changed = true;
         const current = other.executeLocal('task_edit', f.input(task, {
-          actor_session_id: 'executor', reason: 'New requirement', description: 'Revision two',
+          actor: 'assignee', reason: 'New requirement', description: 'Revision two',
         }));
         other.executeLocal('task_report', f.input(current, {
-          actor_session_id: 'executor', status: 'done', activity: { text: 'Revision two' },
+          actor: 'assignee', status: 'done', activity: { text: 'Revision two' },
           outcome: { summary: 'Revision two result' }, retro: 'New finding',
         }));
         return row;
@@ -249,7 +251,7 @@ test('selection does not load unrequested bodies or histories, including definit
   const prepare = f.store.db.prepare.bind(f.store.db), queries = [];
   f.store.db.prepare = sql => { queries.push(sql); return prepare(sql); };
   f.store.read({ view: 'overview', task_id: task.task_id, include: ['context'] });
-  f.store.definitionCheck({ task_id: task.task_id, actor_session_id: 'owner' });
+  f.store.definitionCheck({ task_id: task.task_id, actor: 'orchestrator' });
   // Context includes the compact dependency projection: one bounded blocker-status query.
   assert.equal(queries.length, 3);
   assert.match(queries[1], /FROM task_dependencies d/);
@@ -293,52 +295,54 @@ test('notification-sized selection fits large legal activity, outcome and retro 
   assert.ok(JSON.stringify(selected).length < LIMITS.selection);
 });
 
-test('ACK is separate from activity/status and reported actor is not an ACL', t => {
+test('ACK and report require the assignee and remain separate from activity/status', t => {
   const f = fixture(t), task = f.bind(f.create());
-  const ack = f.store.executeLocal('task_ack', f.input(task, { actor_session_id: 'other-session' }));
+  rejects(() => f.store.executeLocal('task_ack', f.input(task, { actor: 'other-session' })), 'ASSIGNEE_REQUIRED');
+  const ack = f.store.executeLocal('task_ack', f.input(task, { actor: 'assignee' }));
   assert.equal(ack.task_status, 'todo');
   assert.equal(ack.acknowledged_revision, 1);
   assert.equal(f.store.read({ view: 'activity', task_id: task.id }).items.length, 0);
   assert.equal(f.store.read({ view: 'changelog', task_id: task.id }).items.length, 1);
   assert.equal(f.ack(task).status, 'unchanged');
-  const activity = f.report(task, { actor_session_id: 'cross-task-actor', activity: { text: 'Working' } });
+  rejects(() => f.report(task, { actor: 'cross-task-actor', activity: { text: 'Working' } }), 'ASSIGNEE_REQUIRED');
+  const activity = f.report(task, { activity: { text: 'Working' } });
   assert.equal(activity.activity.status, 'saved');
   const entry = f.store.read({ view: 'activity', task_id: task.id }).items[0];
-  assert.equal(entry.author, 'cross-task-actor');
-  assert.equal(entry.executor, 'executor');
+  assert.equal(entry.author, 'assignee');
+  assert.equal(entry.assignee, 'assignee');
   assert.equal(entry.source, 'reported');
 });
 
 test('own definition changes auto-ACK, no-op and metadata edits do not', t => {
   const f = fixture(t), task = f.bind(f.create());
-  const title = f.edit(task, { title: 'Different', actor_session_id: 'executor' });
+  const title = f.edit(task, { title: 'Different', actor: 'assignee' });
   assert.equal(title.revision, 1);
   assert.equal(title.acknowledged_revision, null);
-  const noop = f.edit(title, { description: 'Complete definition', actor_session_id: 'executor' });
+  const noop = f.edit(title, { description: 'Complete definition', actor: 'assignee' });
   assert.equal(noop.status, 'unchanged');
   assert.equal(noop.acknowledged_revision, null);
-  const own = f.edit(title, { description: 'Version two', actor_session_id: 'executor' });
+  const own = f.edit(title, { description: 'Version two', actor: 'assignee' });
   assert.equal(own.revision, 2);
   assert.equal(own.acknowledged_revision, 2);
-  const owner = f.edit(own, { description: 'Version three' });
-  assert.equal(owner.acknowledged_revision, 2);
-  rejects(() => f.report(owner, { revision: 1, activity: { text: 'Never acknowledged version one' } }), 'ACK_REQUIRED');
-  assert.equal(f.report(owner, { revision: 2, activity: { text: 'Version two work' } }).activity.status, 'saved');
+  const orchestrator = f.edit(own, { description: 'Version three' });
+  assert.equal(orchestrator.acknowledged_revision, 2);
+  rejects(() => f.report(orchestrator, { revision: 1, activity: { text: 'Never acknowledged version one' } }), 'ACK_REQUIRED');
+  assert.equal(f.report(orchestrator, { revision: 2, activity: { text: 'Version two work' } }).activity.status, 'saved');
 });
 
-test('definition reminders describe Executor ACK responsibility without instructing Owner to ACK', t => {
+test('definition reminders describe Assignee ACK responsibility without instructing Orchestrator to ACK', t => {
   const f = fixture(t), task = f.bind(f.create());
-  for (const actor_session_id of ['owner', 'executor', 'observer']) {
-    const check = f.store.definitionCheck({ task_id: task.id, actor_session_id }).tasks[0];
+  for (const actor of ['orchestrator', 'assignee', 'observer']) {
+    const check = f.store.definitionCheck({ task_id: task.id, actor }).tasks[0];
     assert.equal(check.needs_ack, true);
-    assert.match(check.message, /Awaiting the assigned Executor's acknowledgement/);
+    assert.match(check.message, /Awaiting the assignee's acknowledgement/);
   }
   const acknowledged = f.ack(task);
-  assert.equal(f.store.definitionCheck({ task_id: task.id, actor_session_id: 'owner' }).tasks[0].message, undefined);
+  assert.equal(f.store.definitionCheck({ task_id: task.id, actor: 'orchestrator' }).tasks[0].message, undefined);
   const changed = f.edit(acknowledged, { description: 'Updated requirements' });
-  const check = f.store.definitionCheck({ task_id: task.id, actor_session_id: 'owner' }).tasks[0];
-  assert.match(check.message, /changed; awaiting the assigned Executor's acknowledgement/);
-  assert.throws(() => f.edit(acknowledged, { description: 'Stale Owner edit' }), error => {
+  const check = f.store.definitionCheck({ task_id: task.id, actor: 'orchestrator' }).tasks[0];
+  assert.match(check.message, /changed; awaiting the assignee's acknowledgement/);
+  assert.throws(() => f.edit(acknowledged, { description: 'Stale Orchestrator edit' }), error => {
     assert.equal(error.code, 'DESCRIPTION_UPDATED');
     assert.match(error.message, /read the current definition before retrying/);
     assert.doesNotMatch(error.message, /acknowledge/i);
@@ -346,7 +350,7 @@ test('definition reminders describe Executor ACK responsibility without instruct
   });
   const { revision, ...cancel } = f.input(changed, { reason: 'User cancelled' });
   f.store.executeLocal('task_cancel', cancel);
-  assert.equal(f.store.definitionCheck({ task_id: task.id, actor_session_id: 'owner' }).tasks[0].message, undefined);
+  assert.equal(f.store.definitionCheck({ task_id: task.id, actor: 'orchestrator' }).tasks[0].message, undefined);
 });
 
 test('skipped ACK revision never authorizes activity, even after higher ACK', t => {
@@ -362,7 +366,7 @@ test('skipped ACK revision never authorizes activity, even after higher ACK', t 
 test('stale mixed report saves only acknowledged activity and replay preserves partial effects', t => {
   const f = fixture(t), one = f.ack(f.bind(f.create()));
   const two = f.edit(one, { description: 'New requirements' });
-  const input = f.input(one, { actor_session_id: 'executor', activity: { text: 'Old work' }, status: 'done', outcome: { summary: 'Old result' }, retro: null });
+  const input = f.input(one, { actor: 'assignee', activity: { text: 'Old work' }, status: 'done', outcome: { summary: 'Old result' }, retro: null });
   let partial;
   assert.throws(() => f.store.executeLocal('task_report', input), error => {
     partial = error.result;
@@ -434,7 +438,7 @@ test('terminal Tasks reject execution and ACK, preserve outcomes and permit defi
   rejects(() => f.ack(done), 'TASK_STATE_CONFLICT');
   const { revision, ...cancel } = f.input(done, { reason: 'Cannot rewrite completion' });
   rejects(() => f.store.executeLocal('task_cancel', cancel), 'TASK_STATE_CONFLICT');
-  const changed = f.edit(done, { description: 'Post-completion clarification', actor_session_id: 'executor' });
+  const changed = f.edit(done, { description: 'Post-completion clarification', actor: 'assignee' });
   assert.equal(changed.task_status, 'done');
   assert.equal(changed.revision, 2);
   assert.equal(changed.acknowledged_revision, 1);
@@ -454,24 +458,24 @@ test('cancel needs no ACK, late reports cannot overwrite it, repeated cancel is 
   assert.equal(f.store.read({ view: 'activity', task_id: task.id }).items.length, 0);
 });
 
-test('fixed Executor occupancy is durable, atomic across connections and released only by terminal status', t => {
+test('fixed Assignee occupancy is durable, atomic across connections and released only by terminal status', t => {
   const f = fixture(t), first = f.bind(f.create());
   const other = new TaskStore(f.directory);
   t.after(() => other.close());
-  const second = f.create(), input = f.input(second, { executor: 'executor' });
+  const second = f.create(), input = f.input(second, { assignee: 'assignee' });
   other.reserveOperation('task_assign', input);
-  rejects(() => other.bindAssignment(input), 'EXECUTOR_OCCUPIED');
-  assert.equal(other.task(second.task_id).executor, null);
-  const replace = f.input(first, { executor: 'replacement' });
+  rejects(() => other.bindAssignment(input), 'ASSIGNEE_OCCUPIED');
+  assert.equal(other.task(second.task_id).assignee, null);
+  const replace = f.input(first, { assignee: 'replacement' });
   f.store.reserveOperation('task_assign', replace);
   rejects(() => f.store.bindAssignment(replace), 'ASSIGNMENT_CONFLICT');
-  const { revision, ...cancel } = f.input(first, { reason: 'Release executor' });
+  const { revision, ...cancel } = f.input(first, { reason: 'Release assignee' });
   f.store.executeLocal('task_cancel', cancel);
-  assert.equal(other.bindAssignment(input).executor, 'executor');
+  assert.equal(other.bindAssignment(input).assignee, 'assignee');
 });
 
 test('pending external receipts replay after restart and changed input conflicts', t => {
-  const f = fixture(t), input = { request_id: 'external', actor_session_id: 'owner', cwd: '/synthetic' };
+  const f = fixture(t), input = { request_id: 'external', actor: 'orchestrator', cwd: '/synthetic' };
   assert.equal(f.store.reserveOperation('task_session_create', input).replay, false);
   f.restart();
   const replay = f.store.reserveOperation('task_session_create', input);
@@ -487,26 +491,26 @@ test('pending external receipts replay after restart and changed input conflicts
 });
 
 test('assignment commit stores binding facts atomically and rechecks revision/lifecycle before send', t => {
-  const f = fixture(t), task = f.create(), input = f.input(task, { executor: 'executor' });
+  const f = fixture(t), task = f.create(), input = f.input(task, { assignee: 'assignee' });
   f.store.reserveOperation('task_assign', input);
   const bound = f.store.bindAssignment(input);
   assert.equal(f.store.operation(input.request_id).result.operation.assignment, 'applied');
-  assert.equal(f.store.dispatchPreflight(input).executor, 'executor');
+  assert.equal(f.store.dispatchPreflight(input).assignee, 'assignee');
   rejects(() => f.store.bindAssignment(input), 'ASSIGNMENT_CONFLICT');
   f.edit(bound, { description: 'Changed before dispatch' });
   rejects(() => f.store.dispatchPreflight(input), 'DESCRIPTION_UPDATED');
 });
 
 test('explicit dispatch recovery requires confirmed not-sent result and cannot consume it twice', t => {
-  const f = fixture(t), task = f.create(), original = f.input(task, { executor: 'executor' });
+  const f = fixture(t), task = f.create(), original = f.input(task, { assignee: 'assignee' });
   f.store.reserveOperation('task_assign', original);
   const bound = f.store.bindAssignment(original);
-  const resume = f.input(bound, { executor: 'executor', resume_request_id: original.request_id });
+  const resume = f.input(bound, { assignee: 'assignee', resume_request_id: original.request_id });
   f.store.reserveOperation('task_assign', resume);
   rejects(() => f.store.bindAssignment(resume), 'UNSAFE_DISPATCH_RECOVERY');
   f.store.saveOperation(original.request_id, { result: { operation: { assignment: 'applied', message: 'not_sent', status: 'partially_applied' } } });
-  assert.equal(f.store.bindAssignment(resume).executor, 'executor');
-  assert.equal(f.store.dispatchPreflight(resume).executor, 'executor');
+  assert.equal(f.store.bindAssignment(resume).assignee, 'assignee');
+  assert.equal(f.store.dispatchPreflight(resume).assignee, 'assignee');
   const another = { ...resume, request_id: randomUUID() };
   f.store.reserveOperation('task_assign', another);
   rejects(() => f.store.bindAssignment(another), 'UNSAFE_DISPATCH_RECOVERY');
@@ -515,11 +519,11 @@ test('explicit dispatch recovery requires confirmed not-sent result and cannot c
 test('unknown, accepted and unexpectedly queued dispatches never authorize recovery', t => {
   const f = fixture(t);
   for (const message of ['unknown', 'accepted', 'queued']) {
-    const task = f.create(), original = f.input(task, { executor: `executor-${message}` });
+    const task = f.create(), original = f.input(task, { assignee: `assignee-${message}` });
     f.store.reserveOperation('task_assign', original);
     const bound = f.store.bindAssignment(original);
     f.store.saveOperation(original.request_id, { result: { operation: { assignment: 'applied', message, status: 'unconfirmed' } } });
-    const resume = f.input(bound, { executor: original.executor, resume_request_id: original.request_id });
+    const resume = f.input(bound, { assignee: original.assignee, resume_request_id: original.request_id });
     f.store.reserveOperation('task_assign', resume);
     rejects(() => f.store.bindAssignment(resume), 'UNSAFE_DISPATCH_RECOVERY');
   }
@@ -553,7 +557,7 @@ test('opaque keyset pagination is stable under insertions and rejects task/filte
   assert.equal(next.items.length, 3);
   assert.equal(next.next_cursor, null);
   assert.equal(new Set([...first.items, ...next.items].map(x => x.id)).size, 23);
-  rejects(() => f.store.read({ view: 'list', owner: 'someone', cursor: first.next_cursor }), 'INVALID_CURSOR');
+  rejects(() => f.store.read({ view: 'list', orchestrator: 'someone', cursor: first.next_cursor }), 'INVALID_CURSOR');
   rejects(() => f.store.read({ view: 'list', cursor: 'malformed' }), 'INVALID_CURSOR');
   const a = f.ack(f.bind(f.create())), b = f.create();
   for (let n = 0; n < 3; n++) f.report(a, { activity: { text: `${n}` } });
@@ -564,11 +568,11 @@ test('opaque keyset pagination is stable under insertions and rejects task/filte
 });
 
 test('list defaults unfinished, filters are explicit and never interpreted as actor authorization', t => {
-  const f = fixture(t), unfinished = f.create({ owner: 'other' }), ended = f.create();
+  const f = fixture(t), unfinished = f.create({ actor: 'other' }), ended = f.create();
   const { revision, ...cancel } = f.input(ended, { reason: 'Ended' });
   f.store.executeLocal('task_cancel', cancel);
-  assert.equal(f.store.read({ view: 'list', actor_session_id: 'unrelated' }).items.length, 1);
-  assert.equal(f.store.read({ view: 'list', owner: 'other' }).items[0].id, unfinished.task_id);
+  assert.equal(f.store.read({ view: 'list', actor: 'unrelated' }).items.length, 1);
+  assert.equal(f.store.read({ view: 'list', orchestrator: 'other' }).items[0].id, unfinished.task_id);
   assert.equal(f.store.read({ view: 'list', status: 'cancelled' }).items[0].id, ended.task_id);
   assert.equal(f.store.read({ view: 'list', status: 'all' }).items.length, 2);
   assert.equal(f.store.read({ view: 'list', query: '%' }).items.length, 0);
@@ -576,20 +580,20 @@ test('list defaults unfinished, filters are explicit and never interpreted as ac
 
 test('definition check covers related Task and actors current Task; missing definitions report unavailable', t => {
   const f = fixture(t), a = f.bind(f.create()), b = f.create();
-  const result = f.store.definitionCheck({ task_id: b.task_id, actor_session_id: 'executor' });
+  const result = f.store.definitionCheck({ task_id: b.task_id, actor: 'assignee' });
   assert.equal(result.status, 'checked');
   assert.equal(result.tasks.length, 2);
   assert.equal(result.tasks.find(x => x.task_id === a.id).needs_ack, true);
   assert.equal(result.tasks.find(x => x.task_id === b.task_id).needs_ack, false);
   f.ack(a);
-  assert.equal(f.store.definitionCheck({ actor_session_id: 'executor' }).tasks[0].needs_ack, false);
-  assert.equal(f.store.definitionCheck({ task_id: randomUUID(), actor_session_id: 'executor' }).status, 'unavailable');
-  assert.equal(f.store.definitionCheck({ actor_session_id: 'none' }).status, 'not_applicable');
+  assert.equal(f.store.definitionCheck({ actor: 'assignee' }).tasks[0].needs_ack, false);
+  assert.equal(f.store.definitionCheck({ task_id: randomUUID(), actor: 'assignee' }).status, 'unavailable');
+  assert.equal(f.store.definitionCheck({ actor: 'none' }).status, 'not_applicable');
 });
 
 test('failed business receipts are final and cannot later become newly applied effects', t => {
   const f = fixture(t), task = f.bind(f.create());
-  const report = f.input(task, { activity: { text: 'Not acknowledged yet' } });
+  const report = f.input(task, { actor: 'assignee', activity: { text: 'Not acknowledged yet' } });
   rejects(() => f.store.executeLocal('task_report', report), 'ACK_REQUIRED');
   f.ack(task);
   rejects(() => f.store.executeLocal('task_report', report), 'ACK_REQUIRED');
@@ -633,7 +637,7 @@ test('serialized history pages enforce aggregate budget and retain every remaind
 
 test('list pages respect serialized budget rather than multiplying large summaries by limit', t => {
   const f = fixture(t);
-  for (let i = 0; i < 50; i++) f.create({ title: '"'.repeat(240), owner: '\0'.repeat(200) });
+  for (let i = 0; i < 50; i++) f.create({ title: '"'.repeat(240), actor: '\0'.repeat(200) });
   let cursor;
   const ids = [];
   do {
@@ -687,12 +691,12 @@ test('text and explicit null retro survive restart, exact replay and later defin
   const f = fixture(t);
   for (const text of ['Automate the repeated deterministic fixture setup.', null, 'r'.repeat(LIMITS.retro)]) {
     const task = f.ack(f.bind(f.create()));
-    const request = f.input(task, { actor_session_id: 'executor', status: 'done', outcome: { summary: 'Delivered' }, retro: text });
+    const request = f.input(task, { actor: 'assignee', status: 'done', outcome: { summary: 'Delivered' }, retro: text });
     const done = f.store.executeLocal('task_report', request);
     assert.equal(done.retro.status, 'saved');
     assert.equal(done.retro.outcome_id, done.outcome.id);
     const expected = {
-      status: 'recorded', text, revision: 1, executor: 'executor', author: 'executor', source: 'reported',
+      status: 'recorded', text, revision: 1, assignee: 'assignee', author: 'assignee', source: 'reported',
       outcome_id: done.outcome.id, current: true, has_findings: text !== null,
       ...(text !== null ? { handling: { status: 'unhandled' } } : {}),
     };
@@ -735,7 +739,7 @@ test('completion transaction rolls back outcome, retro, activity and subscriptio
   f.store.executeLocal('task_subscribe', subscriptionInput);
   f.store.db.exec(`CREATE TRIGGER fail_completion BEFORE UPDATE OF status ON tasks
     WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT, 'synthetic completion failure'); END`);
-  const request = f.input(task, { status: 'done', outcome: { summary: 'Delivered' }, retro: 'A useful finding', activity: { text: 'Final work' } });
+  const request = f.input(task, { actor: 'assignee', status: 'done', outcome: { summary: 'Delivered' }, retro: 'A useful finding', activity: { text: 'Final work' } });
   assert.throws(() => f.store.executeLocal('task_report', request), /synthetic completion failure/);
   assert.equal(f.store.task(task.task_id).status, 'todo');
   assert.deepEqual(f.store.task(task.task_id).retro, { status: 'not_recorded' });
@@ -755,10 +759,10 @@ test('competing stores preserve one completion and reject changed lifecycle or u
   f.ack(task);
   const other = new TaskStore(f.directory);
   t.after(() => other.close());
-  const input = f.input(task, { ...fields, retro: 'Winner retrospective' });
+  const input = f.input(task, { actor: 'assignee', ...fields, retro: 'Winner retrospective' });
   f.store.executeLocal('task_report', input);
   assert.equal(other.task(task.task_id).retro.text, input.retro);
-  rejects(() => other.executeLocal('task_report', f.input(task, fields)), 'TASK_STATE_CONFLICT');
+  rejects(() => other.executeLocal('task_report', f.input(task, { actor: 'assignee', ...fields })), 'TASK_STATE_CONFLICT');
   assert.equal(other.read({ view: 'outcomes', task_id: task.task_id }).items.length, 1);
 });
 
@@ -781,28 +785,158 @@ test('completion payload bounds retain every full history entry including escape
   assert.ok(outcomes.slice(1).every(item => item.retro.status === 'not_recorded'));
 });
 
-test('v3 migration preserves historical rows and receipts without inventing a null retro', t => {
-  const f = fixture(t), task = f.ack(f.bind(f.create()));
-  const input = f.input(task, { status: 'done', outcome: { summary: 'Legacy delivery' } });
-  f.store.db.prepare('INSERT INTO outcomes(id,task_id,revision,executor,author,summary,refs,at) VALUES(?,?,?,?,?,?,?,?)')
-    .run('historical-outcome', task.task_id, 1, 'executor', 'executor', input.outcome.summary, '[]', new Date().toISOString());
-  f.store.db.prepare("UPDATE tasks SET status='done',lifecycle=lifecycle+1 WHERE id=?").run(task.task_id);
-  f.store.insertReceipt('task_report', input);
-  const oldResult = { status: 'applied', task_id: task.task_id };
-  f.store.saveReceipt(input.request_id, oldResult, null);
-  f.store.db.exec('ALTER TABLE outcomes DROP COLUMN retro; ALTER TABLE outcomes DROP COLUMN retro_recorded; PRAGMA user_version=3');
-  const tasks = f.store.db.prepare('SELECT * FROM tasks').all();
-  const receipts = f.store.db.prepare('SELECT * FROM operations').all();
-  f.restart();
-  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 8);
-  assert.deepEqual(f.store.db.prepare('SELECT * FROM tasks').all(), tasks);
-  assert.deepEqual(f.store.db.prepare('SELECT * FROM operations').all(), receipts);
-  assert.deepEqual(f.store.task(task.task_id).retro, { status: 'not_recorded' });
-  const outcome = f.store.read({ view: 'outcomes', task_id: task.task_id }).items[0];
-  assert.equal(outcome.summary, input.outcome.summary);
-  assert.deepEqual(outcome.retro, { status: 'not_recorded' });
-  rejects(() => f.store.executeLocal('task_report', input), 'INVALID_INPUT');
-  assert.deepEqual(f.store.read({ view: 'operation', request_id: input.request_id }).result, oldResult);
-  assert.equal(f.store.read({ view: 'outcomes', task_id: task.task_id }).items.length, 1);
-  assert.equal(f.store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+test('v8 migration renames Task vocabulary, events and assignment receipts', t => {
+  const directory = join(process.cwd(), '.task-board-tests', randomUUID());
+  mkdirSync(directory, { recursive: true });
+  let store;
+  t.after(() => { store?.close(); rmSync(directory, { recursive: true, force: true }); });
+  const db = new DatabaseSync(join(directory, 'task-board.sqlite'));
+  const taskId = randomUUID(), secondId = randomUUID(), subscriptionId = randomUUID(), at = new Date().toISOString();
+  db.exec(`
+    CREATE TABLE tasks (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+      title TEXT NOT NULL, description TEXT NOT NULL, owner TEXT NOT NULL,
+      executor TEXT, status TEXT NOT NULL DEFAULT 'todo',
+      revision INTEGER NOT NULL DEFAULT 1, acknowledged_revision INTEGER,
+      refs TEXT NOT NULL, metadata TEXT NOT NULL,
+      lifecycle INTEGER NOT NULL DEFAULT 1, editable INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, cancellation TEXT,
+      kind TEXT NOT NULL DEFAULT 'agent', parent_task_id TEXT REFERENCES tasks(id),
+      depth INTEGER NOT NULL DEFAULT 1 CHECK(depth >= 1)
+    );
+    CREATE UNIQUE INDEX executor_occupancy ON tasks(executor)
+      WHERE executor IS NOT NULL AND status NOT IN ('done','cancelled');
+    CREATE TABLE definitions (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id),
+      revision INTEGER NOT NULL, description TEXT NOT NULL, reason TEXT NOT NULL,
+      author TEXT NOT NULL, at TEXT NOT NULL, UNIQUE(task_id,revision)
+    );
+    CREATE TABLE acknowledgements (
+      task_id TEXT NOT NULL REFERENCES tasks(id), revision INTEGER NOT NULL,
+      confirmed_for TEXT NOT NULL, author TEXT NOT NULL, at TEXT NOT NULL,
+      PRIMARY KEY(task_id, revision)
+    );
+    CREATE TABLE activities (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+      task_id TEXT NOT NULL REFERENCES tasks(id), revision INTEGER NOT NULL,
+      executor TEXT NOT NULL, author TEXT NOT NULL, text TEXT NOT NULL, at TEXT NOT NULL
+    );
+    CREATE TABLE outcomes (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+      task_id TEXT NOT NULL REFERENCES tasks(id), revision INTEGER NOT NULL,
+      executor TEXT, author TEXT NOT NULL, summary TEXT NOT NULL, refs TEXT NOT NULL,
+      at TEXT NOT NULL, run_id TEXT, retro TEXT, retro_recorded INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE operations (
+      request_id TEXT PRIMARY KEY, tool TEXT NOT NULL, fingerprint TEXT NOT NULL,
+      input TEXT NOT NULL, status TEXT NOT NULL, result TEXT, error TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, binding_context TEXT,
+      resumed_by TEXT
+    );
+    CREATE TABLE task_assignments (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL UNIQUE REFERENCES tasks(id),
+      executor TEXT NOT NULL, author TEXT NOT NULL, at TEXT NOT NULL
+    );
+    CREATE INDEX task_assignments_executor ON task_assignments(executor,seq);
+    CREATE TABLE scripts (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, script_id TEXT NOT NULL UNIQUE,
+      definition TEXT NOT NULL, author TEXT NOT NULL, at TEXT NOT NULL
+    );
+    CREATE TABLE automation_runs (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL UNIQUE,
+      task_id TEXT NOT NULL UNIQUE REFERENCES tasks(id), script_id TEXT NOT NULL,
+      script TEXT NOT NULL, parameters TEXT NOT NULL, state TEXT NOT NULL,
+      revision INTEGER, queued_at TEXT, started_at TEXT, finished_at TEXT,
+      pid INTEGER, process_group INTEGER, exit_code INTEGER, signal TEXT, error TEXT,
+      barrier INTEGER NOT NULL DEFAULT 0, cancel_requested INTEGER NOT NULL DEFAULT 0,
+      log TEXT NOT NULL DEFAULT '', omitted_characters INTEGER NOT NULL DEFAULT 0,
+      reconciled_at TEXT, reconciled_by TEXT, reconciliation_reason TEXT
+    );
+    CREATE TABLE task_dependencies (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL REFERENCES tasks(id), blocker_id TEXT NOT NULL REFERENCES tasks(id),
+      author TEXT NOT NULL, at TEXT NOT NULL, UNIQUE(task_id, blocker_id), CHECK(task_id <> blocker_id)
+    );
+    CREATE TABLE subscriptions (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+      task_id TEXT NOT NULL REFERENCES tasks(id), owner TEXT NOT NULL,
+      actor_session_id TEXT NOT NULL, statuses TEXT NOT NULL,
+      state TEXT NOT NULL CHECK(state IN ('waiting','triggered','cancelled','expired')),
+      created_at TEXT NOT NULL, ended_at TEXT, ended_by TEXT, event TEXT,
+      delivery_status TEXT NOT NULL DEFAULT 'not_requested',
+      attempted_at TEXT, completed_at TEXT, delivery_error TEXT
+    );
+    CREATE UNIQUE INDEX subscriptions_waiting_owner ON subscriptions(task_id,owner) WHERE state='waiting';
+    CREATE TABLE dependency_notices (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+      task_id TEXT NOT NULL REFERENCES tasks(id), blocker_id TEXT NOT NULL REFERENCES tasks(id),
+      blocker_lifecycle INTEGER NOT NULL, owner TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('ready','blocker_cancelled')),
+      event TEXT NOT NULL, created_at TEXT NOT NULL,
+      delivery_status TEXT NOT NULL DEFAULT 'pending',
+      attempted_at TEXT, completed_at TEXT, delivery_error TEXT,
+      UNIQUE(task_id, kind, blocker_id, blocker_lifecycle)
+    );
+    CREATE TABLE child_notices (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+      task_id TEXT NOT NULL REFERENCES tasks(id), parent_task_id TEXT NOT NULL REFERENCES tasks(id),
+      child_lifecycle INTEGER NOT NULL, owner TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('done','blocked','cancelled')),
+      event TEXT NOT NULL, created_at TEXT NOT NULL,
+      delivery_status TEXT NOT NULL DEFAULT 'pending',
+      attempted_at TEXT, completed_at TEXT, delivery_error TEXT,
+      UNIQUE(task_id, status, child_lifecycle)
+    );
+    CREATE TABLE retro_handlings (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+      task_id TEXT NOT NULL REFERENCES tasks(id), outcome_id TEXT NOT NULL REFERENCES outcomes(id),
+      status TEXT NOT NULL CHECK(status IN ('fixed','followup','watching','dismissed')),
+      note TEXT NOT NULL, refs TEXT NOT NULL, author TEXT NOT NULL, at TEXT NOT NULL
+    );
+    PRAGMA user_version=8;
+  `);
+  db.prepare('INSERT INTO tasks(id,title,description,owner,executor,status,acknowledged_revision,refs,metadata,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+    .run(taskId, 'Legacy', 'Old words', 'old-owner', 'old-executor', 'todo', 1, '[]', '{}', at, at);
+  db.prepare('INSERT INTO tasks(id,title,description,owner,executor,status,refs,metadata,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .run(secondId, 'Second', 'Assign later', 'other-owner', null, 'todo', '[]', '{}', at, at);
+  db.prepare('INSERT INTO definitions(task_id,revision,description,reason,author,at) VALUES(?,?,?,?,?,?)')
+    .run(taskId, 1, 'Old words', 'Initial definition', 'old-owner', at);
+  db.prepare('INSERT INTO task_assignments(task_id,executor,author,at) VALUES(?,?,?,?)')
+    .run(taskId, 'old-executor', 'old-owner', at);
+  db.prepare('INSERT INTO subscriptions(id,task_id,owner,actor_session_id,statuses,state,created_at,event,delivery_status) VALUES(?,?,?,?,?,?,?,?,?)')
+    .run(subscriptionId, taskId, 'old-owner', 'old-executor', '["done"]', 'triggered', at,
+      JSON.stringify({ task_id: taskId, status: 'done', actor_session_id: 'old-executor' }), 'pending');
+  db.prepare('INSERT INTO operations(request_id,tool,fingerprint,input,status,result,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)')
+    .run('assign-old', 'task_assign', 'legacy',
+      JSON.stringify({ request_id: 'assign-old', task_id: taskId, executor: 'old-executor' }),
+      'final', JSON.stringify({ operation: { request_id: 'assign-old', task_id: taskId, executor: 'old-executor' } }),
+      null, at, at);
+  db.close();
+
+  store = new TaskStore(directory);
+  assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 9);
+  const execution = store.read({ view: 'execution', task_id: taskId, actor: 'old-executor' });
+  assert.equal(execution.orchestrator, 'old-owner');
+  assert.equal(execution.assignee, 'old-executor');
+  assert.equal(execution.actor_role, 'assignee');
+  const subscription = store.read({ view: 'subscriptions', task_id: taskId }).items[0];
+  assert.equal(subscription.subscriber, 'old-owner');
+  assert.equal(subscription.author, 'old-executor');
+  assert.equal(subscription.event.actor, 'old-executor');
+  assert.equal('actor_session_id' in subscription.event, false);
+  const operation = store.read({ view: 'operation', request_id: 'assign-old' });
+  assert.equal(operation.result.operation.assignee, 'old-executor');
+  assert.equal('executor' in operation.result.operation, false);
+  const rawOperation = store.db.prepare('SELECT * FROM operations WHERE request_id=?').get('assign-old');
+  assert.equal(JSON.parse(rawOperation.input).assignee, 'old-executor');
+  assert.equal('executor' in JSON.parse(rawOperation.input), false);
+  assert.equal('invocation' in rawOperation, true);
+  const second = store.task(secondId);
+  const assign = {
+    actor: 'other-owner', request_id: 'assign-second', task_id: secondId,
+    assignee: 'old-executor', revision: 1, write_context: second.write_context,
+  };
+  store.reserveOperation('task_assign', assign);
+  rejects(() => store.bindAssignment(assign), 'ASSIGNEE_OCCUPIED');
+  assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
 });
