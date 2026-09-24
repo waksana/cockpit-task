@@ -272,7 +272,8 @@ capability, deliver directly or ask the user; never fake delegation.
 Pending-decision planning Tasks are assigned to a new session that discusses them with the
 user and then delivers or delegates; the orchestrator does not claim them itself.
 
-`task_create` has no owner parameter: the calling session becomes `orchestrator`. When that
+`task_create` has no owner parameter: the calling session becomes `orchestrator`, so no
+caller can name a different orchestrator. When that
 session is executing an unfinished Agent Task, the service records that Task as the new
 Task's `parent_task_id` and sets `depth` to the parent's depth plus one; otherwise the Task
 is top-level (`parent_task_id: null`, `depth: 1`). Delegation is capped at 3 levels: creating

@@ -21,7 +21,8 @@ the description and sets `notify_assignee: true`. The service sends the assignee
 Read the full current Task execution view and ACK its exact latest revision before continuing affected work.
 ```
 
-There is no free-text field. The service rejects `notify_assignee` with
+There is no free-text field. If the current definition already holds the change and no real
+definition edit is needed, send no notice: the assignee aligns at its next checkpoint. The service rejects `notify_assignee` with
 `UPDATE_NOTICE_NOT_APPLICABLE`, saving nothing, when the Task is unassigned, finished,
 automation, the description does not change, or the assignee would notify itself. Without the
 parameter `task_edit` stays silent. Never send the card yourself with `cockpit_send_prompt`

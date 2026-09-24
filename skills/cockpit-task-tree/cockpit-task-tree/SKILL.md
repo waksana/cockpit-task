@@ -76,6 +76,8 @@ orchestrator or assignee, directly or through other agents; an
 `notify_assignee`, never a handwritten note. Task is the shared
 agreement and record. Use actual Task/session IDs, stable mutation request IDs and fresh
 returned `write_context`; inspect errors and `definition_check` as well as results.
+The host supplies your identity
+([identity](references/task-writes-and-recovery.md#identity-and-concurrency)).
 Use tool schemas for arguments.
 
 Reuse this Skill while it remains in context; reload for missing/changed guidance or an

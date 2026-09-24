@@ -476,7 +476,7 @@ test('subscription guidance requires necessary orchestrator follow-up without ga
   const executor = prose(roleGuide('assignee'));
   assert.match(executor, /Do not wait for your orchestrator to subscribe or read a notice before continuing authorized work or delivering it/);
   const executorPrompt = prose(readFileSync(join(root, 'roles/task-node.md'), 'utf8'));
-  assert.match(executorPrompt, /Subtasks of your Task notify you when done, blocked or cancelled/);
+  assert.match(executorPrompt, /Subtasks notify you when done, blocked or cancelled/);
   for (const role of ['orchestrator', 'assignee']) {
     const writes = prose(readFileSync(join(root, treeDirectory, 'references/task-writes-and-recovery.md'), 'utf8'));
     assert.match(writes, /Default to no subscription/);
