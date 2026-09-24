@@ -19,7 +19,7 @@ Subtask 进入 done、blocked 或 cancelled 时，服务自动向其 orchestrato
 
 通用引用为 `[Task](task:<uuid>)`；首次指派由 `task_assign` 仅发送一次
 `[Task assigned](task:<uuid>?event=assigned)`。当 assignee 之外的调用者改变已指派未结束 Agent Task 的完整 description、`blocked_by`、重开或取消时，服务自动用 `mode:"immediate"` 向 assignee 发送固定
-`[Task updated](task:<uuid>?event=updated)` 或 `[Task cancelled](task:<uuid>?event=cancelled)`，并要求读取 Task、ACK 最新版本或停止受影响工作。
+`[Task updated](task:<uuid>?event=updated)` 或 `[Task cancelled](task:<uuid>?event=cancelled)`；通知完整正文仅为该链接，处理规则由 `cockpit-task-tree` Skill 统一规定。
 event 只说明这条消息的原因，不是 Task 状态；卡片仍读取当前数据。assignee 只接收 assigned / updated / cancelled 三类 Task 卡。
 
 状态订阅使用独立的 `[Subscribed Task status changed](task:<uuid>?event=status_changed)`，

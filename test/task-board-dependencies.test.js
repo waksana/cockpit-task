@@ -249,13 +249,14 @@ test('assigned dependents receive update notices for blocker edits, readiness an
   assert.equal(edited.error, null, JSON.stringify(edited.error));
   assert.equal(edited.result.notice_ids.length, 1);
   assert.deepEqual(f.sent.map(entry => entry.session), ['dependent-worker']);
-  assert.match(f.sent[0].text, new RegExp(`^\\[Task updated\\]\\(task:${dependent.task_id}\\?event=updated\\)\\n`));
+  assert.equal(f.sent[0].text, `[Task updated](task:${dependent.task_id}?event=updated)`);
 
   f.sent.length = 0;
   const done = await f.done(blocker.task_id);
   assert.equal(done.result.result.notice_ids.length, 1);
   const readyUpdates = f.sent.filter(entry => entry.text.startsWith('[Task updated]'));
   assert.deepEqual(readyUpdates.map(entry => entry.session), ['dependent-worker']);
+  assert.equal(readyUpdates[0].text, `[Task updated](task:${dependent.task_id}?event=updated)`);
   assert.equal(f.sent.some(entry => entry.text.startsWith('[Subtask ready]')), false);
   assert.equal(f.store.read({ view: 'dependency_notices', task_id: dependent.task_id }).items.length, 0);
 
@@ -269,7 +270,7 @@ test('assigned dependents receive update notices for blocker edits, readiness an
   assert.equal(cancelled.error, null, JSON.stringify(cancelled.error));
   const cancelUpdates = f.sent.filter(entry => entry.text.startsWith('[Task updated]'));
   assert.deepEqual(cancelUpdates.map(entry => entry.session), ['dependent-worker-2']);
-  assert.match(cancelUpdates[0].text, new RegExp(`^\\[Task updated\\]\\(task:${dependent2.task_id}\\?event=updated\\)\\n`));
+  assert.equal(cancelUpdates[0].text, `[Task updated](task:${dependent2.task_id}?event=updated)`);
   assert.equal(f.sent.some(entry => entry.text.startsWith('[Subtask blocker cancelled]')), false);
 });
 

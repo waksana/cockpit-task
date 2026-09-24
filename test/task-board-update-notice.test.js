@@ -5,7 +5,6 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { TaskStore } from '../src/task-board/store.js';
 import { TaskService } from '../src/task-board/service.js';
-import { CANCEL_NOTICE_INSTRUCTION, UPDATE_NOTICE_INSTRUCTION } from '../src/task-board/reference.js';
 
 function fixture(t, { sessionExists = async () => true, send } = {}) {
   const root = join(process.cwd(), '.task-board-tests', randomUUID());
@@ -38,7 +37,7 @@ function fixture(t, { sessionExists = async () => true, send } = {}) {
   return f;
 }
 
-test('a description change by the orchestrator automatically sends one fixed immediate update card, and the assignee then ACKs', async t => {
+test('a description change by the orchestrator sends one link-only immediate update card, and the assignee then ACKs', async t => {
   const f = fixture(t);
   const id = await f.assigned();
   const edited = await f.edit('orchestrator', id, { description: 'v2' });
@@ -49,7 +48,7 @@ test('a description change by the orchestrator automatically sends one fixed imm
   assert.equal(edited.notification_error, null);
   assert.deepEqual(f.sent, [{
     session: 'assignee', mode: 'immediate',
-    text: `[Task updated](task:${id}?event=updated)\n${UPDATE_NOTICE_INSTRUCTION}`,
+    text: `[Task updated](task:${id}?event=updated)`,
   }]);
   assert.doesNotMatch(f.sent[0].text, /\b(you|your|As Orchestrator|As Assignee)\b/i);
   const notices = f.store.read({ view: 'assignee_notices', task_id: id }).items;
@@ -108,7 +107,7 @@ test('cancel notifies the assignee only when someone else cancels', async t => {
   assert.equal(cancelled.result.notice_ids.length, 1);
   assert.deepEqual(f.sent, [{
     session: 'cancelled-worker', mode: 'immediate',
-    text: `[Task cancelled](task:${byOrchestrator}?event=cancelled)\n${CANCEL_NOTICE_INSTRUCTION}`,
+    text: `[Task cancelled](task:${byOrchestrator}?event=cancelled)`,
   }]);
   const [notice] = f.store.read({ view: 'assignee_notices', task_id: byOrchestrator }).items;
   assert.equal(notice.kind, 'cancelled');
@@ -139,7 +138,7 @@ test('orchestrator reopen sends an update and leaves ACK pending while assignee 
   assert.equal(reopened.result.acknowledged_revision, 1);
   assert.deepEqual(f.sent, [{
     session: 'reopen-worker', mode: 'immediate',
-    text: `[Task updated](task:${byOrchestrator}?event=updated)\n${UPDATE_NOTICE_INSTRUCTION}`,
+    text: `[Task updated](task:${byOrchestrator}?event=updated)`,
   }]);
   assert.equal((await f.as('reopen-worker', 'task_read', { view: 'execution', task_id: byOrchestrator })).definition_check.tasks[0].needs_ack, true);
 
@@ -166,7 +165,7 @@ test('Web user cancel, reopen and edit send assignee notices without auto-ACKing
   assert.equal(cancel.error, null, JSON.stringify(cancel.error));
   assert.deepEqual(f.sent, [{
     session: 'web-cancel-worker', mode: 'immediate',
-    text: `[Task cancelled](task:${cancelled}?event=cancelled)\n${CANCEL_NOTICE_INSTRUCTION}`,
+    text: `[Task cancelled](task:${cancelled}?event=cancelled)`,
   }]);
 
   const reopened = await f.assigned('web-reopen-worker');
@@ -181,7 +180,7 @@ test('Web user cancel, reopen and edit send assignee notices without auto-ACKing
   assert.equal(webReopen.result.acknowledged_revision, 1);
   assert.deepEqual(f.sent, [{
     session: 'web-reopen-worker', mode: 'immediate',
-    text: `[Task updated](task:${reopened}?event=updated)\n${UPDATE_NOTICE_INSTRUCTION}`,
+    text: `[Task updated](task:${reopened}?event=updated)`,
   }]);
 
   const edited = await f.assigned('web-edit-worker');
@@ -190,7 +189,7 @@ test('Web user cancel, reopen and edit send assignee notices without auto-ACKing
   assert.equal(webEdit.result.acknowledged_revision, 1);
   assert.deepEqual(f.sent.at(-1), {
     session: 'web-edit-worker', mode: 'immediate',
-    text: `[Task updated](task:${edited}?event=updated)\n${UPDATE_NOTICE_INSTRUCTION}`,
+    text: `[Task updated](task:${edited}?event=updated)`,
   });
 });
 
@@ -229,7 +228,7 @@ test('recoverNotifications does not expire a live assignee notice beyond its sta
   assert.equal(edited.notifications[0].notification.status, 'accepted');
   assert.deepEqual(f.sent, [{
     session: 'slow-worker', mode: 'immediate',
-    text: `[Task updated](task:${id}?event=updated)\n${UPDATE_NOTICE_INSTRUCTION}`,
+    text: `[Task updated](task:${id}?event=updated)`,
   }]);
 });
 

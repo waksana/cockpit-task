@@ -347,7 +347,7 @@ recipients produce `not_sent` evidence; no replacement is created.
 A compare-and-set claim persists `unknown` before the non-idempotent host send.
 The subscription message is `[Subscribed Task status changed](task:<uuid>?event=status_changed)`
 (or, for an undispatched dependency notice, the dependent's `event=ready` / `event=blocker_cancelled` card;
-for an assignee notice, the fixed `[Task updated]` or `[Task cancelled]` card and instruction).
+for an assignee notice, the fixed `[Task updated]` or `[Task cancelled]` link only).
 Assignee notices call host `prompt` with `mode:"immediate"`; the other notices use the
 default queued prompt. Accepted/queued responses update evidence; ambiguous or interrupted sends remain
 unknown and are never automatically retried. Busy orchestrator enqueue is normal and

@@ -192,8 +192,8 @@ activity 不自动改状态，outcome 不自动 done。完成最新已确认约�
 | --- | --- |
 | `[Task](task:<uuid>)` | 普通引用 |
 | `[Task assigned](task:<uuid>?event=assigned)` | `task_assign` 的完整首次派单；orchestrator 不重复发送；旧 assigned-to-you 标签仅兼容识别 |
-| `[Task updated](task:<uuid>?event=updated)` | 服务自动发送给 assignee 的要求/依赖/重开更新，附读取/ACK 最新版要求 |
-| `[Task cancelled](task:<uuid>?event=cancelled)` | 服务自动发送给 assignee 的取消通知，附读取取消理由并停止受影响工作要求 |
+| `[Task updated](task:<uuid>?event=updated)` | 服务自动发送给 assignee 的要求/依赖/重开更新；完整正文仅为该链接，处理规则由 Skill 规定 |
+| `[Task cancelled](task:<uuid>?event=cancelled)` | 服务自动发送给 assignee 的取消通知；完整正文仅为该链接，处理规则由 Skill 规定 |
 | `[Subscribed Task status changed](task:<uuid>?event=status_changed)` | 系统按显式一次性订阅通知 subscriber，不是 assignee 的 ACK 通知 |
 | `[Subtask ready](task:<uuid>?event=ready)` | `blocked_by` 全部 done 后系统通知依赖方 orchestrator；不代表已指派或启动 |
 | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` | 待派发依赖方的 blocker 取消后系统通知 orchestrator 重新评估 |
