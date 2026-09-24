@@ -597,7 +597,6 @@ with `mode:"immediate"` and exactly:
 
 ```text
 [Task updated](task:<uuid>?event=updated)
-Read the full current Task execution view and ACK its exact latest revision before continuing affected work.
 ```
 
 Let A read full `execution`, ACK the exact latest revision, synchronize and stop.

@@ -128,8 +128,8 @@ assignee 在开工、恢复、重要阶段之间、重要外部操作前和交�
 | --- | --- |
 | 普通引用 | `[Task](task:<uuid>)` |
 | 首次派单，由 `task_assign` 发送一次 | `[Task assigned](task:<uuid>?event=assigned)` |
-| assignee 之外的调用者修改已指派未结束 Agent Task 的 description / `blocked_by`、重开或依赖变化 | `[Task updated](task:<uuid>?event=updated)`，附读取/ACK 最新版要求 |
-| assignee 之外的调用者取消已指派未结束 Agent Task | `[Task cancelled](task:<uuid>?event=cancelled)`，附读取取消理由并停止受影响工作要求 |
+| assignee 之外的调用者修改已指派未结束 Agent Task 的 description / `blocked_by`、重开或依赖变化 | `[Task updated](task:<uuid>?event=updated)`，完整正文仅为该链接 |
+| assignee 之外的调用者取消已指派未结束 Agent Task | `[Task cancelled](task:<uuid>?event=cancelled)`，完整正文仅为该链接 |
 | 显式一次性状态订阅，由系统通知 subscriber | `[Subscribed Task status changed](task:<uuid>?event=status_changed)` |
 | 依赖方的全部 blocker 已 done，由系统通知 orchestrator | `[Subtask ready](task:<uuid>?event=ready)` |
 | 待派发依赖方的 blocker 被取消，由系统通知 orchestrator | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` |

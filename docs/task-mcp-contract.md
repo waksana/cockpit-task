@@ -59,11 +59,11 @@ cancelled / automation 不恢复执行。
 
 ```text
 [Task updated](task:<uuid>?event=updated)
-Read the full current Task execution view and ACK its exact latest revision before continuing affected work.
 ```
 
 当 assignee 之外的调用者取消已指派、未结束 Agent Task 时，服务记录
-`assignee_notices(kind:"cancelled")` 并发送固定取消卡，要求读取取消理由并停止受影响工作。
+`assignee_notices(kind:"cancelled")` 并发送固定 `[Task cancelled](task:<uuid>?event=cancelled)`。
+两类通知的完整正文都仅为对应链接；读取/ACK 或停止工作的处理规则由 Skill 统一规定。
 调用方没有显式通知参数、自由文本载荷或适用性开关；不适用的情况只保存普通编辑
 或按权限/状态规则拒绝原操作。
 
@@ -534,7 +534,6 @@ Task 未结束且正文实际改变时，同时确认新 revision；不改变 st
 
 ```text
 [Task updated](task:<uuid>?event=updated)
-Read the full current Task execution view and ACK its exact latest revision before continuing affected work.
 ```
 
 投递使用宿主 prompt `mode:"immediate"`。缺少 assignee session 记录为

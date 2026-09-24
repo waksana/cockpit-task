@@ -537,7 +537,7 @@ test('automation blocker completion updates an assigned Agent dependent despite 
     f.sent.length = 0;
     await f.start(blocker);
     assert.equal((await f.finished(blocker)).status, 'done');
-    await until(() => f.sent.some(entry => entry.id === 'dependent-worker' && entry.text.startsWith(`[Task updated](task:${dependent}?event=updated)\n`)));
+    await until(() => f.sent.some(entry => entry.id === 'dependent-worker' && entry.text === `[Task updated](task:${dependent}?event=updated)`));
     assert.equal(f.sent.some(entry => entry.id === 'orchestrator' && entry.text === `[Subtask ready](task:${dependent}?event=ready)`), false);
     const [notice] = f.store.read({ view: 'assignee_notices', task_id: dependent }).items;
     assert.equal(notice.kind, 'updated');

@@ -4,7 +4,7 @@ import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { TASK_EVENTS, UPDATE_NOTICE_INSTRUCTION, CANCEL_NOTICE_INSTRUCTION } from '../src/task-board/reference.js';
+import { TASK_EVENTS } from '../src/task-board/reference.js';
 
 // Enforce a small YAML-safe release format, not a replacement YAML parser:
 // kebab-case names and JSON-quoted descriptions (valid YAML double-quoted scalars).
@@ -270,8 +270,8 @@ test('automation reference keeps trusted-script boundaries', () => {
   ]) assert.match(automation, requirement);
 });
 
-test('fixed notice labels and instructions contain no pronouns or role prefixes', () => {
-  for (const text of [UPDATE_NOTICE_INSTRUCTION, CANCEL_NOTICE_INSTRUCTION, ...Object.values(TASK_EVENTS)]) {
+test('fixed notice labels contain no pronouns or role prefixes', () => {
+  for (const text of Object.values(TASK_EVENTS)) {
     assert.doesNotMatch(text, /\b(?:you|your)\b/i);
     assert.doesNotMatch(text, /\b(?:As Owner|As Executor|Owner:|Executor:)\b/i);
   }

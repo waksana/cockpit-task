@@ -312,7 +312,7 @@ not a separate dashboard. Message reason is fixed; title, state, definition and
 history are fetched from Task. Native session observations are labelled separately,
 read on demand and never imply business progress or capability readiness.
 
-When someone other than the assignee changes an assigned unfinished Agent Task's description or `blocked_by`, reopens it, or when one of its blockers resolves/cancels, the service records an `assignee_notices` row and sends exactly one fixed `[Task updated]` card plus the read/ACK instruction with `mode:"immediate"`. When someone else cancels it, the service sends `[Task cancelled]` plus the stop-work instruction. These notices interject into a running turn without queue handling or interruption. Acceptance is not consumption or ACK; uncertain delivery does not authorize retries or a handwritten duplicate.
+When someone other than the assignee changes an assigned unfinished Agent Task's description or `blocked_by`, reopens it, or when one of its blockers resolves/cancels, the service records an `assignee_notices` row and sends exactly one fixed `[Task updated]` link with `mode:"immediate"`. When someone else cancels it, the service sends exactly one `[Task cancelled]` link. The complete message body is the link; the Skill defines how the recipient handles each event. These notices interject into a running turn without queue handling or interruption. Acceptance is not consumption or ACK; uncertain delivery does not authorize retries or a handwritten duplicate.
 
 ### One-shot status subscriptions
 
