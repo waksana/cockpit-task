@@ -848,7 +848,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(persistedActivity.json().result.items[0].text, latest.activity.text);
     assert.ok(reports.every(({ error }) => error.code === 'MODULE_VERSION_MISMATCH'), reports.map(({ error }) => String(error)).join('\n'));
     assert.deepEqual(providerErrors, []);
-    t.diagnostic('Verified packaged Task, native role/Skill assembly, Owner MCP registration and current-evidence reads on status notices without ACK or resubscription, Executor read/ACK/report, service-ready recovery without inbound requests, and no accepted/unknown resend across a second cold startup. Synthetic provider proves wiring, not autonomous model judgment.');
+    t.diagnostic('Verified packaged Task, native node role/Skill assembly, MCP registration, Owner-responsibility current-evidence reads on status notices without ACK or resubscription, Executor read/ACK/report, service-ready recovery without inbound requests, and no accepted/unknown resend across a second cold startup. Synthetic provider proves wiring, not autonomous model judgment.');
   } catch (error) {
     failed = true;
     t.diagnostic(`Integration failed while ${stage}.`);

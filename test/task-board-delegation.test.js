@@ -13,17 +13,19 @@ function fixture(t) {
   mkdirSync(root, { recursive: true });
   let store = new TaskStore(root);
   const sent = [];
+  const busy = new Set();
+  const inspected = [];
   const host = {
     ownerExists: async () => true,
     send: async (session, text) => { sent.push({ session, text }); return { ok: true }; },
-    inspect: async () => ({ ready: true, idle: true, executor: true }),
+    inspect: async session => { inspected.push(session); return { ready: true, idle: !busy.has(session), executor: true }; },
   };
   let service = new TaskService(store, host, { report: () => {} });
   t.after(() => { service.close(); rmSync(root, { recursive: true, force: true }); });
   const as = (actor, name, input) => f.service.execute(name, { actor_session_id: actor, request_id: randomUUID(), ...input });
   const context = id => ({ task_id: id, write_context: f.store.task(id).write_context, revision: f.store.task(id).revision });
   const f = {
-    root, sent, as, context,
+    root, sent, busy, inspected, as, context,
     get store() { return store; }, get service() { return service; },
     restart() {
       service.close();
@@ -150,6 +152,27 @@ test('assignment rejects self-assignment and delegation cycles without binding',
   assert.equal(f.store.task(root).executor, 'lead');
 });
 
+test('role-confusion rejections are not masked by a busy target and save no receipt', async t => {
+  const f = fixture(t);
+  // A root node assigning to itself is always busy running that very call.
+  f.busy.add('solo');
+  const own = await f.create('solo');
+  const self = await f.assign('solo', own.result.task_id, 'solo');
+  assert.equal(self.error.code, 'SELF_ASSIGNMENT');
+  assert.deepEqual(f.inspected, [], 'Rejected before inspecting the target');
+
+  await f.start('user-owner', 'lead');
+  const child = await f.create('lead');
+  f.busy.add('user-owner');
+  f.inspected.length = 0;
+  const cycle = await f.assign('lead', child.result.task_id, 'user-owner');
+  assert.equal(cycle.error.code, 'DELEGATION_CYCLE');
+  assert.deepEqual(f.inspected, []);
+  assert.equal(f.store.task(child.result.task_id).executor, null);
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM operations WHERE tool='task_assign' AND json_extract(input,'$.executor') IN ('solo','user-owner')").get().n, 0,
+    'Like TASK_NOT_READY, these rejections reserve no operation');
+});
+
 test('an executing node creates Tasks only as their Owner, and nobody creates Tasks for it', async t => {
   const f = fixture(t);
   await f.start('user-owner', 'lead');
@@ -208,6 +231,29 @@ test('child done, blocked and cancelled transitions notify the parent Executor o
   assert.equal(f.cards('lead').at(-1), `[As Owner: child Task cancelled](task:${other}?event=child_cancelled)`);
   assert.equal(f.childNotices(other).length, 1);
   assert.equal(f.cards('user-owner').length, 0, 'Top-level Tasks never produce child notices');
+});
+
+test('blocked_by between sibling child Tasks gates dispatch alongside child notices', async t => {
+  const f = fixture(t);
+  const root = await f.start('user-owner', 'lead');
+  const first = await f.start('lead', 'worker');
+  const second = await f.create('lead', { blocked_by: [first] });
+  assert.equal(second.error, null, JSON.stringify(second.error));
+  const id = second.result.task_id;
+  assert.equal(f.store.task(id).parent_task_id, root);
+  assert.equal(f.store.task(id).ready, false);
+  assert.equal((await f.assign('lead', id, 'helper')).error.code, 'TASK_NOT_READY');
+  const onParent = await f.create('lead', { blocked_by: [root] });
+  assert.equal(onParent.error.code, 'BLOCKER_OWNER_MISMATCH', 'The parent belongs to another Owner, so a child cannot wait on it');
+
+  assert.equal((await f.report('worker', first, { status: 'done', outcome: { summary: 'First part' }, retro: null })).error, null);
+  assert.deepEqual(f.cards('lead').sort(), [
+    `[As Owner: Task ready](task:${id}?event=ready)`,
+    `[As Owner: child Task done](task:${first}?event=child_done)`,
+  ], 'The finished child and the now-ready sibling each yield one card to the parent Executor');
+  assert.equal(f.cards('user-owner').length, 0);
+  assert.equal((await f.assign('lead', id, 'helper')).error, null);
+  assert.equal(f.store.task(id).executor, 'helper');
 });
 
 test('child notices yield to a same-transition subscription and stop once the parent is finished', async t => {
