@@ -182,11 +182,11 @@ test('HTTP selective reads preserve legacy defaults, errors, revision checks and
   } finally { f.close(); }
 });
 
-test('module publishes one Task node role with every tool, the tree Skill and the shared coding Skill', () => {
+test('module publishes one Node role with every tool, the tree Skill and the shared coding Skill', () => {
   const manifest = JSON.parse(readFileSync(new URL('../cockpit.module.json', import.meta.url), 'utf8'));
   assert.equal(manifest.name, 'Task');
   assert.equal(manifest.id, 'cockpit-task');
-  assert.deepEqual(manifest.roles.map(({ id, name }) => ({ id, name })), [{ id: 'node', name: 'Task node' }]);
+  assert.deepEqual(manifest.roles.map(({ id, name }) => ({ id, name })), [{ id: 'node', name: 'Node' }]);
   const [node] = manifest.roles;
   assert.deepEqual(Object.keys(node.mcpServers), ['cockpit-task']);
   assert.deepEqual([...node.mcpServers['cockpit-task'].tools].sort(), [...TOOL_NAMES].sort());

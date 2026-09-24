@@ -119,7 +119,7 @@ npm run package:module
 `cockpit.module.json` 是模块入口。归档输出到 `dist/cockpit-task-<version>.tgz`，
 供支持所需接口的 Cockpit 装载；Task 不提供独立服务启动命令。
 
-模块 ID、MCP key 和包名均为 `cockpit-task`；唯一角色为 `node`（Task node），合并 Skill 为
+模块 ID、MCP key 和包名均为 `cockpit-task`；唯一角色为 `node`（Node），合并 Skill 为
 [cockpit-task-tree](skills/cockpit-task-tree/cockpit-task-tree/SKILL.md)，
 按执行、委派、读取、写入、链接、重要更新和自动化分类组织参考。
 节点同时通过现有装载机制发现 `github-coding` 工作 Skill，

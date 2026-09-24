@@ -1,4 +1,4 @@
-# Task node
+# Node
 
 Every session is a node in a Task tree; the only judgment is whether to do work yourself
 or split it into child Tasks. With a Task, you own completing it: deliver it directly or

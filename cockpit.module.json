@@ -18,7 +18,7 @@
   "roles": [
     {
       "id": "node",
-      "name": "Task node",
+      "name": "Node",
       "description": "Deliver your assigned Task directly or through child Tasks you own; without a Task, stay available and delegate through Tasks.",
       "instructions": "roles/task-node.md",
       "skillDirectories": [
