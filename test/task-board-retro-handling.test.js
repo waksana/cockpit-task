@@ -87,14 +87,14 @@ test('the Owner records fixed, followup, watching and dismissed handling on the 
   assert.equal(outcomes[0].retro.handling.status, 'dismissed');
 });
 
-test('only the Owner may handle the latest recorded retro that has findings', async t => {
+test('only the Owner may handle a recorded retro that has findings', async t => {
   const f = fixture(t);
   const id = await f.start('owner', 'worker');
   const outcomeId = await f.finish('worker', id, 'Finding');
   const code = async (result, expected) => assert.equal((await result).error?.code, expected);
   await code(f.handle('worker', id, outcomeId, { status: 'fixed', note: 'I fixed my own finding' }), 'OWNER_REQUIRED');
   await code(f.handle('someone', id, outcomeId, { status: 'fixed', note: 'x' }), 'OWNER_REQUIRED');
-  await code(f.handle('owner', id, randomUUID(), { status: 'fixed', note: 'x' }), 'RETRO_NOT_CURRENT');
+  await code(f.handle('owner', id, randomUUID(), { status: 'fixed', note: 'x' }), 'RETRO_NOT_FOUND');
   await code(f.handle('owner', id, outcomeId, { status: 'followup', note: 'x' }), 'INVALID_INPUT');
   await code(f.handle('owner', id, outcomeId, { status: 'done', note: 'x' }), 'INVALID_INPUT');
   await code(f.handle('owner', id, outcomeId, { status: 'fixed', note: ' ' }), 'INVALID_INPUT');
@@ -106,7 +106,7 @@ test('only the Owner may handle the latest recorded retro that has findings', as
   await code(f.handle('owner', empty, nullOutcome, { status: 'dismissed', note: 'x' }), 'RETRO_NO_FINDINGS');
 
   const pending = await f.as('owner', 'task_create', { owner: 'owner', title: 'Not done', description: 'Synthetic' });
-  await code(f.handle('owner', pending.result.task_id, randomUUID(), { status: 'fixed', note: 'x' }), 'RETRO_NOT_CURRENT');
+  await code(f.handle('owner', pending.result.task_id, randomUUID(), { status: 'fixed', note: 'x' }), 'RETRO_NOT_FOUND');
 });
 
 test('reopened delivery needs its own handling while the old handling stays in history', async t => {
@@ -118,11 +118,14 @@ test('reopened delivery needs its own handling while the old handling stays in h
   assert.equal(reopened.error, null, JSON.stringify(reopened.error));
   const second = await f.finish('worker', id, 'Second finding');
   assert.deepEqual(f.store.read({ view: 'overview', task_id: id }).retro.handling, { status: 'unhandled' });
-  assert.equal((await f.handle('owner', id, first, { status: 'dismissed', note: 'Old' })).error.code, 'RETRO_NOT_CURRENT');
   assert.equal((await f.handle('owner', id, second, { status: 'watching', note: 'Watch' })).error, null);
-  const [latest, previous] = f.store.read({ view: 'outcomes', task_id: id }).items;
+  let [latest, previous] = f.store.read({ view: 'outcomes', task_id: id }).items;
   assert.equal(latest.retro.handling.status, 'watching');
   assert.equal(previous.retro.handling.status, 'fixed');
+  assert.equal((await f.handle('owner', id, first, { status: 'dismissed', note: 'Old finding superseded' })).error, null, 'An older retro stays handleable by outcome_id');
+  [latest, previous] = f.store.read({ view: 'outcomes', task_id: id }).items;
+  assert.equal(latest.retro.handling.status, 'watching');
+  assert.equal(previous.retro.handling.status, 'dismissed');
 });
 
 test('list filters find unhandled and watching retros across statuses without automation', async t => {

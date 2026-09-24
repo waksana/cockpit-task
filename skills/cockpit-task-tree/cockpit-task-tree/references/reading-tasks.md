@@ -151,8 +151,8 @@ references. Null text has no `handling`. The `retro_handlings` history view page
 handling of the Task, newest first, each with its `outcome_id`.
 Without `include`, overview/list return the same status and attribution without `text`. A later
 description edit preserves the recorded revision and sets `current:false`.
-Recorded/current is not proof of thought, quality or delivery. Owner may read
-text on demand, with no required review or new notification; retro does not
+Recorded/current is not proof of thought, quality or delivery. The service adds
+no notification or gate; the Owner handles findings per delegating.md. Retro does not
 replace outcome/blockers or authorize improvements or scope expansion.
 
 For automation, `definition` / `execution` also include immutable `automation.script`

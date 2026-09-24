@@ -862,10 +862,8 @@ export class TaskStore {
     if (row.owner !== input.actor_session_id) {
       fail('OWNER_REQUIRED', 'Only the Task Owner, the node that created it, handles its retro; an Executor never handles its own retro. Actor attribution is not authentication');
     }
-    const outcome = this.db.prepare('SELECT * FROM outcomes WHERE task_id=? AND retro_recorded=1 ORDER BY seq DESC LIMIT 1').get(row.id);
-    if (!outcome || outcome.id !== input.outcome_id.toLowerCase()) {
-      fail('RETRO_NOT_CURRENT', 'outcome_id is not this Task\'s latest recorded retro; read the Task retro and handle its current outcome_id');
-    }
+    const outcome = this.db.prepare('SELECT * FROM outcomes WHERE task_id=? AND id=? AND retro_recorded=1').get(row.id, input.outcome_id.toLowerCase());
+    if (!outcome) fail('RETRO_NOT_FOUND', 'outcome_id is not a recorded retro of this Task; read the Task retro or outcomes and use its outcome_id');
     if (outcome.retro === null) fail('RETRO_NO_FINDINGS', 'This retro was submitted as null (no findings) and needs no handling');
     const refs = JSON.stringify(input.references || []);
     const previous = this.db.prepare('SELECT * FROM retro_handlings WHERE outcome_id=? ORDER BY seq DESC LIMIT 1').get(outcome.id);

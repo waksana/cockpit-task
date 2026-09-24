@@ -667,9 +667,9 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 
 ### task_retro_handle
 
-完整输入：`actor_session_id, request_id, task_id, outcome_id, status, note, references?`。不接受 `write_context` 或 revision：处理对象由 `outcome_id` 精确指定，即 Task 最新已记录 retro 的 outcome_id。`status` 为 `fixed`（已修，可引用 PR/commit）、`followup`（已建后续 Task 或 Issue，`references` 必填；终态，后续完成后不回头更新、不再通知）、`watching`（待观察）或 `dismissed`（不处理，note 写理由）；note 必填、非空、最多 2,000 字符。
+完整输入：`actor_session_id, request_id, task_id, outcome_id, status, note, references?`。不接受 `write_context` 或 revision：处理对象由 `outcome_id` 精确指定，通常是 Task 最新已记录 retro 的 outcome_id；reopen 前的旧 retro 也可按其 outcome_id 处理。`status` 为 `fixed`（已修，可引用 PR/commit）、`followup`（已建后续 Task 或 Issue，`references` 必填；终态，后续完成后不回头更新、不再通知）、`watching`（待观察）或 `dismissed`（不处理，note 写理由）；note 必填、非空、最多 2,000 字符。
 
-只有 actor 等于 Task.owner（创建它的节点）才能写入，否则 `OWNER_REQUIRED`；Executor 不处理自己的 retro，actor 仍只是归因而非认证。automation 返回 `AUTOMATION_MANAGED`；`outcome_id` 不是最新已记录 retro（包括 reopen 后再次 done 产生新 retro 时的旧 retro、尚无 retro）返回 `RETRO_NOT_CURRENT`；retro 为显式 null 返回 `RETRO_NO_FINDINGS`。每次改写追加一条历史，与最新记录完全相同则 `unchanged`。返回 `result: {status,task_id,outcome_id,handling}`。不发送消息、不改变 Task 状态、定义、lifecycle 或 write_context，也不授权修复或扩大范围。
+只有 actor 等于 Task.owner（创建它的节点）才能写入，否则 `OWNER_REQUIRED`；Executor 不处理自己的 retro，actor 仍只是归因而非认证。automation 返回 `AUTOMATION_MANAGED`；`outcome_id` 不是该 Task 已记录的 retro（含尚无 retro）返回 `RETRO_NOT_FOUND`；retro 为显式 null 返回 `RETRO_NO_FINDINGS`。每次改写追加一条历史，与最新记录完全相同则 `unchanged`。返回 `result: {status,task_id,outcome_id,handling}`。不发送消息、不改变 Task 状态、定义、lifecycle 或 write_context，也不授权修复或扩大范围。
 
 读取时，有发现的已记录 retro 附 `handling`：尚未处理为 `{status:'unhandled'}`，否则为最新记录；execution/definition、overview 的 `include=["retro"]` 与 outcomes 历史带 `note,references`，未选 include 的 overview 与 list 只带 `id,status,author,at`。null retro 与 automation 不带 `handling`。
 
@@ -743,7 +743,7 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 | `NOTIFICATION_UNCONFIRMED` / `NOTIFICATION_STORAGE_UNCONFIRMED` | 通知效果或其持久确认不明，检查现有证据，不盲重发 |
 | `OWNER_NOT_FOUND` / `OWNER_UNAVAILABLE` | Owner 不存在或存在性读取失败，未发送，不自动新建替代者 |
 | `OWNER_REQUIRED` | 只有 Task Owner 可处理其 retro；Executor 不处理自己的 retro |
-| `RETRO_NOT_CURRENT` / `RETRO_NO_FINDINGS` | 指定的不是最新已记录 retro，或该 retro 为显式 null；读取 Task retro 后处理当前 outcome_id |
+| `RETRO_NOT_FOUND` / `RETRO_NO_FINDINGS` | 指定的不是该 Task 已记录的 retro，或该 retro 为显式 null；读取 Task retro 或 outcomes 后使用其 outcome_id |
 
 操作步骤维护还可能返回 `OPERATION_NOT_PENDING` / `OPERATION_FINALIZED`；存储新版本不兼容为 `SCHEMA_TOO_NEW`。已进入业务处理的本地错误通常附 HTTP 意义的 `status`（冲突默认 409）；MCP 的失败以 `isError` 和结构化 `error` 表达，不依赖调用者从文本推测。未列出的宿主错误保留其真实步骤语义。
 
@@ -793,7 +793,7 @@ Executor:
 
 模块 HTTP MCP 与普通 HTTP API 挂载于宿主，共用业务服务和独立
 `task-board.sqlite`，不启动额外 daemon。宿主按角色装配配置，
-不为十六个业务工具另建注册表。
+不为十七个业务工具另建注册表。
 
 官方 stateful Streamable HTTP transport 让后续 POST 的取消通知关联原调用；
 取消在下一次 Task 到宿主调用前检查，不回滚已完成动作，也不保证中断已提交

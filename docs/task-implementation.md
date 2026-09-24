@@ -62,8 +62,8 @@ Schema version 8 (source only, not yet packaged) adds append-only
 with status fixed/followup/watching/dismissed, indexed by outcome and Task. The v7→v8
 migration only creates the table; existing retros read as unhandled and nothing is
 backfilled. `task_retro_handle` runs in the local mutation transaction: actor must equal
-`owner` (`OWNER_REQUIRED`), `outcome_id` must be the latest `retro_recorded=1` outcome
-(`RETRO_NOT_CURRENT`) with non-null text (`RETRO_NO_FINDINGS`); an identical latest entry
+`owner` (`OWNER_REQUIRED`), `outcome_id` must be a `retro_recorded=1` outcome of that Task
+(`RETRO_NOT_FOUND`) with non-null text (`RETRO_NO_FINDINGS`); an identical latest entry
 returns `unchanged`. It never touches the Task row, lifecycle, write context or outbox.
 The list `retro` filter uses correlated subqueries on the latest recorded retro and its
 latest handling, and binds the filter into the cursor scope.
@@ -165,7 +165,8 @@ retry modified input with the same request ID. Exact replay of a valid new
 request retains its original saved result without duplicate effects.
 Retro shares that outcome's revision, executor, author, reported source, time and ID.
 The service guarantees submission/persistence, not reflection or content quality.
-No new notifications, review gates or dispatch follow from retro; automation
+No new notifications, service gates or dispatch follow from retro (Owner
+handling via `task_retro_handle` is Skill guidance, not a service gate); automation
 keeps its service outcome path with retro not applicable.
 
 Terminal Tasks reject execution reports and ACK. Their definition/history remain

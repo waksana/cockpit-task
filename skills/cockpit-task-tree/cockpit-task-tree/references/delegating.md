@@ -165,8 +165,8 @@ only status and attribution, not its text. `recorded` with null is an explicit
 no-findings submission; `not_recorded` is missing history, and `not_applicable`
 is automation, not a failed Agent reflection. The service guarantees submission,
 not quality or thought. Retro does not replace outcome/blockers or authorize
-improvements, scope expansion or dispatch. Reading it adds no mandatory Owner review,
-new notification, subscription or service completion gate.
+improvements, scope expansion or dispatch. The service adds no notification,
+subscription or completion gate; handling it is Skill work, below.
 
 ## Handle retros of Tasks you created
 

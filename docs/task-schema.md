@@ -198,7 +198,7 @@ Executor 先完成交付，再于 done 前回顾实际工作，只记录有证�
 具体慢点/重复卡点，或 Skill/MCP 发现、契约及能力验证缺口。观察、假设与外部等待
 要分开，不编造耗时，不要求固定多段模板或凑内容；无有用发现显式提交 null。
 普通报告省略 retro，仅 done 接受；缺字段不等于 null，应拒绝。
-复盘不代替 outcome/blockers、不授权改进或扩大范围，无新增派单、通知或 Owner 强制审阅。
+复盘不代替 outcome/blockers、不授权改进或扩大范围，服务不新增派单、通知或完成门槛；Owner 按 Skill 处理有发现的 retro（见下文复盘处理）。
 服务保证显式提交和持久化，不保证实际思考或文本质量。脚本 automation 不产生 Agent 复盘。
 
 schema v4 在 outcomes 增加 `retro TEXT`（可空）和

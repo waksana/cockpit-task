@@ -69,7 +69,8 @@ Use isolated synthetic data and the existing tests. Check:
   Rendering distinguishes recorded text, explicit no findings, missing legacy
   history and automation, without mixing retro into the delivery outcome.
 - Existing status subscriptions behave unchanged. No new notices, dispatch,
-  Owner mandatory review or improvement authorization comes from recording retro.
+  service gate or improvement authorization comes from recording retro; Owner
+  handling is Skill guidance recorded through `task_retro_handle`.
 
 Separately assess model behavior: delivery happens before reflection; findings
 identify useful actionable observed automation candidates, concrete slow/repeated
@@ -1137,11 +1138,12 @@ open schema v5; package rollback is not database rollback.
 | `task_cancel`, `task_reopen` | S3 cancellation; rework acceptance covers guarded original-Executor reopen |
 | `task_subscribe`, `task_unsubscribe` | S1-S6 technical behavior; N1-N3 necessity judgment; child notices require no subscription |
 | `task_script_read`, `task_script_register`, `task_automation_start`, `task_automation_reconcile` | Automation acceptance/regressions; service-managed Tasks, logs and barriers |
-| `task_read` | All cases; verify each view below |
+| `task_retro_handle` | Owner-only handling, `RETRO_NOT_FOUND` / `RETRO_NO_FINDINGS`, `unchanged` rewrites, replay and reopen history |
+| `task_read` | All cases; verify each view below, including list `retro=unhandled\|watching` |
 
 Exercise `list`, `overview`, `execution`, `definition`, `changelog`, `activity`,
-`outcomes`, `subscriptions`, `dependency_notices`, `child_notices`, `automation_log`
-and `operation` for concrete questions. This is suite coverage, not a requirement
+`outcomes`, `retro_handlings`, `subscriptions`, `dependency_notices`, `child_notices`,
+`automation_log` and `operation` for concrete questions. This is suite coverage, not a requirement
 to read all views for every Task.
 
 ### Independent observer

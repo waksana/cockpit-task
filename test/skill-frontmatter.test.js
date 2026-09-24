@@ -665,7 +665,7 @@ test('completion retro guidance separates evidence-based reflection from deliver
   ]) assert.match(executor, requirement);
   const owner = prose(roleGuide('owner'));
   assert.match(owner, /Read it on demand/);
-  assert.match(owner, /adds no mandatory Owner review,\s+new notification, subscription or service completion gate/);
+  assert.match(owner, /The service adds no notification,\s+subscription or completion gate; handling it is Skill work/);
   for (const requirement of [
     /the node that created a Task,\s+its Owner, handles that Task's retro with findings/,
     /`task_retro_handle`/,

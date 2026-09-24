@@ -163,7 +163,7 @@ export const schemas = {
   task_unsubscribe: z.strictObject({ ...mutation, task_id: id, subscription_id: id }),
   task_retro_handle: z.strictObject({
     ...mutation, task_id: id,
-    outcome_id: id.describe('outcome_id of the Task\'s latest recorded retro with findings'),
+    outcome_id: id.describe('outcome_id of a recorded retro with findings on this Task (normally the latest)'),
     status: z.enum(RETRO_HANDLING_STATUSES),
     note: text(LIMITS.retroNote).describe('What was fixed, which follow-up was created, what to watch for, or why it is dismissed'),
     references: references.optional(),
