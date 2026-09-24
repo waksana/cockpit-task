@@ -45,7 +45,8 @@
             "task_unsubscribe",
             "task_ack",
             "task_reopen",
-            "task_report"
+            "task_report",
+            "task_retro_handle"
           ]
         }
       }

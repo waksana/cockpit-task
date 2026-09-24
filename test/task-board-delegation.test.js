@@ -104,7 +104,7 @@ test('a blocked parent still owns its children, and lineage survives the parent 
   assert.equal(f.store.task(child.result.task_id).parent_task_id, root);
 });
 
-test('schema v6 databases migrate forward to v7 as top-level Tasks without inventing lineage', t => {
+test('schema v6 databases migrate forward to the current schema as top-level Tasks without inventing lineage', t => {
   const root = join(process.cwd(), '.task-board-tests', randomUUID());
   mkdirSync(root, { recursive: true });
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -118,7 +118,7 @@ test('schema v6 databases migrate forward to v7 as top-level Tasks without inven
   legacy.close();
   store = new TaskStore(root);
   try {
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 7);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 8);
     assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
     assert.equal(store.db.prepare('PRAGMA foreign_key_check').all().length, 0);
     assert.deepEqual(store.db.prepare('SELECT * FROM operations').all(), receipts);

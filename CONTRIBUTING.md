@@ -26,6 +26,10 @@ the package back is not a database rollback. Never overwrite live data with a
 historical backup. Validate migration on an isolated consistent copy before
 separately authorized deployment.
 
+Schema v8 (retro handling, #80) is source not yet in any package: the next
+package needs a fresh version, and v8 is roll-forward only, so installed 0.1.13
+refuses v8 data.
+
 Version 0.1.12, released as v0.1.12, packages the native Task dependency work and
 github-coding Skill updates merged after 0.1.11 (#59, #61, #63, #65). Native Task
 dependencies add schema v6 (`task_dependencies`, `dependency_notices`) through a

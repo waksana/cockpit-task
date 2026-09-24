@@ -665,10 +665,23 @@ test('completion retro guidance separates evidence-based reflection from deliver
   ]) assert.match(executor, requirement);
   const owner = prose(roleGuide('owner'));
   assert.match(owner, /Read it on demand/);
-  assert.match(owner, /No mandatory Owner review, new notification, subscription or completion gate/);
+  assert.match(owner, /adds no mandatory Owner review,\s+new notification, subscription or service completion gate/);
+  for (const requirement of [
+    /the node that created a Task,\s+its Owner, handles that Task's retro with findings/,
+    /`task_retro_handle`/,
+    /Terminal: do not revisit this retro when the follow-up finishes/,
+    /Only the Owner handles; an Executor never handles its own retro/,
+    /A reopened delivery's new retro needs its own handling/,
+    /handle every child retro with findings before\s+your own done/,
+    /Handling is a\s+record, not authorization/,
+    /go into your own retro for your Owner to handle in turn/,
+    /Without a Task \(the root\), do not digest retros routinely\. When the user asks/,
+  ]) assert.match(owner, requirement);
+  assert.match(executor, /Before your done, handle each child retro with findings/);
   const role = prose(readFileSync(join(root, 'roles/task-node.md'), 'utf8'));
   assert.match(role, /After delivery, do a lightweight evidence-based retro before done/);
   assert.match(role, /explicit `retro` text or `null` together with `status=done`/);
+  assert.match(role, /Handle child Tasks' retros with `task_retro_handle` before your\s+done; root only on request/);
 
   for (const roleName of ['owner', 'executor']) {
     const source = readFileSync(join(root, treeDirectory, 'references/task-writes-and-recovery.md'), 'utf8');

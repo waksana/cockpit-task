@@ -44,6 +44,8 @@ child you delegated, accept your own work or fake delegation without ready deleg
 ([delegating child Tasks](task-writes-and-recovery.md#delegating-child-tasks)).
 The service wakes you with one `child_done`, `child_blocked` or `child_cancelled` card per
 such child transition; read that child's outcome or blocker and integrate, without polling.
+Before your done, handle each child retro with findings
+([delegating](delegating.md#handle-retros-of-tasks-you-created)).
 
 ## Coding work
 

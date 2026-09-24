@@ -117,6 +117,10 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     assert.match(descriptions.task_subscribe, /only when a target state enables necessary Owner follow-up, not progress tracking/);
     assert.match(descriptions.task_unsubscribe, /Cannot recall a consumed notification/);
     assert.match(descriptions.task_unsubscribe, /planned Owner follow-up is no longer needed/);
+    assert.match(descriptions.task_retro_handle, /Only the Task Owner; an Executor never handles its own retro/);
+    assert.match(descriptions.task_retro_handle, /followup \(reference required; terminal, never revisited/);
+    assert.match(descriptions.task_retro_handle, /Sends no messages and changes no Task status/);
+    assert.match(descriptions.task_read, /retro filter: unhandled\|watching/);
   } finally { await f.close(); }
 });
 

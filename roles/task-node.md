@@ -27,7 +27,8 @@ Default to no subscription; register only when a future status unlocks necessary
 Owner work. An explicit one-shot status subscription permits a system notice to Task's Owner;
 child Tasks notify you when done, blocked or cancelled. Read only needed latest content on
 receipt, in one bounded call where possible. No automatic resubscription or acceptance,
-polling or reminders.
+polling or reminders. Handle child Tasks' retros with `task_retro_handle` before your
+done; root only on request.
 
 Load `cockpit-task-tree` when first needed. Reuse its guidance; reload only when missing,
 changed or a rule is unclear. Stable Skill reuse never replaces fresh Task reads or ACK.

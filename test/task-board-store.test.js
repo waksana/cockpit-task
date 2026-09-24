@@ -694,6 +694,7 @@ test('text and explicit null retro survive restart, exact replay and later defin
     const expected = {
       status: 'recorded', text, revision: 1, executor: 'executor', author: 'executor', source: 'reported',
       outcome_id: done.outcome.id, current: true, has_findings: text !== null,
+      ...(text !== null ? { handling: { status: 'unhandled' } } : {}),
     };
     const retro = f.store.task(task.task_id).retro;
     assert.ok(Number.isFinite(Date.parse(retro.at)));
@@ -793,7 +794,7 @@ test('v3 migration preserves historical rows and receipts without inventing a nu
   const tasks = f.store.db.prepare('SELECT * FROM tasks').all();
   const receipts = f.store.db.prepare('SELECT * FROM operations').all();
   f.restart();
-  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 7);
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 8);
   assert.deepEqual(f.store.db.prepare('SELECT * FROM tasks').all(), tasks);
   assert.deepEqual(f.store.db.prepare('SELECT * FROM operations').all(), receipts);
   assert.deepEqual(f.store.task(task.task_id).retro, { status: 'not_recorded' });

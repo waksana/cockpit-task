@@ -8,6 +8,8 @@ explanation. Familiar reads do not require reloading it. These are the implement
 
 For an overview of your work, use `view=list` with `owner` set to your session ID.
 For one Task's direct children, use `view=list` with `parent_task_id` and `status=all`.
+Add `retro="unhandled"` for Tasks whose latest retro has findings but no handling, or
+`retro="watching"`; with a retro filter, `status` defaults to `all`.
 For one Task, use `view=overview` with its `task_id` and select only needed groups
 with `include`. Context alone is `include=["context"]`.
 Include your own `actor_session_id` on reads. This is reported attribution and
@@ -27,7 +29,7 @@ Without `include`, the single-Task overview retains its existing compact shape:
 | `activity` | Latest activity or null, including its ID, revision, Executor, author, time and reported source |
 | `activity.text`, `activity.truncated` | Up to 320 characters of that actual activity, not a generated summary; expand activity if truncated and relevant |
 | `outcome` | `{available:false}` or latest outcome ID, revision, time, `available:true` and `current` |
-| `retro` | Completion reflection status and attribution, without text; independent of outcome availability |
+| `retro` | Completion reflection status and attribution, without text; independent of outcome availability. With findings, `handling` gives the Owner's latest status and attribution, or `unhandled` |
 | `created_at`, `updated_at` | Task record timestamps, not proof of live session activity |
 | `write_context` | Opaque concurrency context for later writes, not business progress |
 | `cancellation` | Reason, author and time when cancelled; single overview only |
@@ -125,6 +127,7 @@ Selecting `definition` or any other overview groups cannot replace that requirem
 | Records for an explicit one-shot status subscription | `subscriptions` with `task_id` |
 | Ready/blocker-cancelled notices sent for a dependent Task | `dependency_notices` with the dependent's `task_id` |
 | Done/blocked/cancelled notices sent for a child Task | `child_notices` with the child's `task_id` |
+| Every Owner decision on a Task's retros | `retro_handlings` with `task_id` |
 
 `definition` and `execution` currently return the same complete Task projection:
 identity, responsibility, status, revisions, timestamps, write context, description,
@@ -141,6 +144,11 @@ includes its own retro, without changing the saved outcome content:
 - `{status:"not_applicable"}` is the script-automation path, with no Agent retro.
 
 `has_findings` distinguishes non-null text from explicit no findings, not quality.
+A recorded retro with findings also carries `handling`: `{status:"unhandled"}`, or the
+Owner's latest `{id,status,author,at,note,references}` for that `outcome_id`, where
+status is `fixed`, `followup`, `watching` or `dismissed`; overview/list omit note and
+references. Null text has no `handling`. The `retro_handlings` history view pages every
+handling of the Task, newest first, each with its `outcome_id`.
 Without `include`, overview/list return the same status and attribution without `text`. A later
 description edit preserves the recorded revision and sets `current:false`.
 Recorded/current is not proof of thought, quality or delivery. Owner may read

@@ -50,7 +50,7 @@ Source support is not a release or deployment claim.
 
 Every session is a Task tree node and receives the single `node` role (Node)
 through the host's role management. The host assembles its System Prompt, Skills and
-all sixteen HTTP MCP tools, persists the selection and reassembles it on cold resume.
+all seventeen HTTP MCP tools, persists the selection and reassembles it on cold resume.
 The former `owner` and `executor` roles are removed without aliases. Before a host
 cold-starts with 0.1.13, operators must back up and migrate each saved host role
 selection in `$COCKPIT_HOME/session-roles/<sessionId>.json`, replacing
@@ -190,8 +190,9 @@ Task auto-ACKs the new revision. Terminal definitions can be edited without reop
 | `task_cancel` | Cancel Agent without stopping its session; request automation termination, never rollback |
 | `task_subscribe` | Optional one-shot Owner wait for explicit target statuses |
 | `task_unsubscribe` | Cancel a still-waiting subscription |
+| `task_retro_handle` | Owner records how the latest retro with findings was handled: fixed, followup (terminal), watching or dismissed |
 
-Owner receives read/create/session_create/session_prepare/assign/edit/cancel/subscribe/unsubscribe
+Owner receives read/create/session_create/session_prepare/assign/edit/cancel/subscribe/unsubscribe/retro_handle
 plus script_read/script_register/automation_start/automation_reconcile;
 Executor receives read/edit/ack/report/reopen/cancel (all `task_` prefixed). Both roles
 take the union. Having a tool permits cross-Task operations: responsibility

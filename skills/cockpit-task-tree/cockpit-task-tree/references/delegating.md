@@ -165,8 +165,37 @@ only status and attribution, not its text. `recorded` with null is an explicit
 no-findings submission; `not_recorded` is missing history, and `not_applicable`
 is automation, not a failed Agent reflection. The service guarantees submission,
 not quality or thought. Retro does not replace outcome/blockers or authorize
-improvements, scope expansion or dispatch. No mandatory Owner review, new
-notification, subscription or completion gate is added.
+improvements, scope expansion or dispatch. Reading it adds no mandatory Owner review,
+new notification, subscription or service completion gate.
+
+## Handle retros of Tasks you created
+
+Repeated findings show across Tasks, not in one retro, so the node that created a Task,
+its Owner, handles that Task's retro with findings. Record each decision with
+`task_retro_handle`: `task_id`, the retro's `outcome_id`, `status`, a `note` and
+optional `references`.
+
+| `status` | Meaning |
+| --- | --- |
+| `fixed` | Already fixed; reference the PR or commit where one exists |
+| `followup` | A follow-up Task or Issue holds the work; reference required. Terminal: do not revisit this retro when the follow-up finishes |
+| `watching` | Seen, no action yet; decide if the finding recurs |
+| `dismissed` | Not worth acting on; the note says why |
+
+Only the Owner handles; an Executor never handles its own retro, and null retro needs
+nothing. A reopened delivery's new retro needs its own handling; rewriting appends
+history (`view=retro_handlings`). Handling sends no message and changes no Task status.
+
+While executing a Task with child Tasks, handle every child retro with findings before
+your own done: list `parent_task_id=<your Task>` with `retro="unhandled"`, read each
+retro, group repeated findings and check whether each is already fixed. Handling is a
+record, not authorization: fixes and follow-ups stay within your Task's scope or the
+user's decision. Findings the subtree cannot handle, needing broader authority or
+beyond its Tasks, go into your own retro for your Owner to handle in turn.
+
+Without a Task (the root), do not digest retros routinely. When the user asks, list
+your Tasks with `retro="unhandled"` (or `"watching"`), read text as needed, discuss
+with the user and record each decision.
 
 ## Preserve state
 

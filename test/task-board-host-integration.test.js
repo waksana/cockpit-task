@@ -8,7 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const hostWorktree = process.env.TASK_BOARD_HOST_WORKTREE;
-const ownerTools = ['task_read', 'task_create', 'task_script_register', 'task_script_read', 'task_automation_start', 'task_automation_reconcile', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe'];
+const ownerTools = ['task_read', 'task_create', 'task_script_register', 'task_script_read', 'task_automation_start', 'task_automation_reconcile', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe', 'task_retro_handle'];
 const executorTools = ['task_read', 'task_edit', 'task_ack', 'task_reopen', 'task_report', 'task_cancel'];
 const allTools = [...new Set([...ownerTools, ...executorTools])].sort();
 
