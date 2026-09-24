@@ -1,7 +1,7 @@
 # Task
 
 Task is a Cockpit module for independent work records shared by Owner and Executor.
-Its module ID and HTTP MCP key are `cockpit-task`, source preparation version `0.1.12`.
+Its module ID and HTTP MCP key are `cockpit-task`, version `0.1.12` (released as v0.1.12).
 It runs in Cockpit, not a standalone daemon or dashboard.
 
 This preparation packages the native Task dependency work and github-coding Skill

@@ -18,7 +18,7 @@ Synchronize `package.json`, `cockpit.module.json`, both root version entries in
 `package-lock.json`, the embedded MCP server version, tests and current-source
 documentation. Preserve historical release facts. If fresh main already prepares
 the appropriate undelivered version, reuse it rather than repeating its bump:
-the current 0.1.12 preparation packages the native Task dependency work and
+0.1.12, released as v0.1.12, packages the native Task dependency work and
 github-coding Skill updates merged after 0.1.11 (#59, #61, #63, #65). Native Task
 dependencies add
 schema v6 (`task_dependencies`, `dependency_notices`) through a non-destructive,
@@ -55,3 +55,5 @@ Verify the final merged
 CI artifact before authorized installation. Never delete installed directories
 or force installer bypasses to reuse a version. Merge does not authorize tags,
 Releases, deployment or restart; those require separate authorization.
+
+After a joint deployment with the host, tag and release the accepted commit per Cockpit's [release after a joint deployment](https://github.com/waksana/cockpit/blob/main/docs/releasing.md#release-after-acceptance) policy.
