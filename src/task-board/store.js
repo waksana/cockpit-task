@@ -764,7 +764,9 @@ export class TaskStore {
   transitionChild(row, status, input, at, triggered = []) {
     // A Subtask's done/blocked/cancelled transition wakes its orchestrator (the parent's assignee) while the parent is unfinished.
     if (!row.parent_task_id || status === row.status || !['done', 'blocked', 'cancelled'].includes(status)) return [];
-    if (triggered.length) return [];
+    // A subscription card to the same orchestrator already covers this transition; anyone else's does not.
+    const covered = triggered.some(id => this.db.prepare('SELECT subscriber FROM subscriptions WHERE id=?').get(id)?.subscriber === row.orchestrator);
+    if (covered) return [];
     const parent = this.row(row.parent_task_id);
     if (terminal(parent.status) || parent.assignee !== row.orchestrator) return [];
     const child = this.row(row.id);

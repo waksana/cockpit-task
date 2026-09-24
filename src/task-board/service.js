@@ -14,6 +14,8 @@ export class TaskService {
     this.closed = false;
     this.sessionOperations = new Set();
     this.automation = new AutomationRunner(this);
+    // Only assignee notices left pending by an earlier process expire; live requests keep theirs.
+    this.expiredNoticeBoundary = store.pendingNotificationBoundary('assignee_notices');
   }
 
   // actor is the calling session: the host-injected MCP invocation, or 'user' for the module HTTP API.
@@ -200,7 +202,9 @@ export class TaskService {
     // Fixed high-water marks bound this startup pass. New transitions deliver themselves.
     // Immediate assignee notices are only meaningful during their request; one left pending by
     // a restart is recorded as not sent rather than interrupting the assignee later.
-    for (let seq = 0, through = this.store.pendingNotificationBoundary('assignee_notices'); through;) {
+    const expireThrough = this.expiredNoticeBoundary;
+    this.expiredNoticeBoundary = 0;
+    for (let seq = 0, through = expireThrough; through;) {
       const batch = this.store.pendingNotifications(seq, through, 20, 'assignee_notices');
       if (!batch.length) break;
       for (const entry of batch) {
