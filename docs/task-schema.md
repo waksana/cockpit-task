@@ -156,8 +156,8 @@ blocker 重开后再次 done 属于新生命周期，可再次通知。
 
 ### 层级委派与 schema v7
 
-schema v7（`experiment/hierarchical-delegation`，#66）仅在缺失时新增 `tasks.parent_task_id`
-与 `tasks.depth` 列及 `child_notices` 表，既有 Task 均为顶层；只能向前滚动，已安装的 `0.1.12` 不能打开 v7。
+schema v7（0.1.13，经 #75 合入 #71/#72/#74）仅在缺失时新增 `tasks.parent_task_id`
+与 `tasks.depth` 列及 `child_notices` 表，既有 Task 均为顶层；只能向前滚动，已安装的 `0.1.12` 不能打开 v7，切回旧包不等于数据库回退。
 角色按 Task 区分：session 对自己的指派是 Executor，对为其创建的子 Task 是 Owner。
 子 Task 必须比父 Task 更具体，不得原样下传，且在父 Task 已授权范围内；父 Task 完成前整合子结果。
 子 Task 真实转入 done/blocked/cancelled 时，同事务为父 Task 的 Executor（即子 Task Owner）写入一条

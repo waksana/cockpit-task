@@ -8,7 +8,7 @@ See the [MCP contract](task-mcp-contract.md) for input/result shapes, the
 ## Module and data
 
 The module ID and MCP server key are `cockpit-task`, display name Task, version
-`0.1.12` (released as v0.1.12). Its manifest is [cockpit.module.json](../cockpit.module.json).
+`0.1.13` (source preparation; no deployment implied). Its manifest is [cockpit.module.json](../cockpit.module.json).
 `src/task-board/`, `web/task-board/` and the database filename `task-board.sqlite`
 are current internal paths. Task runs inside Cockpit, not a standalone service.
 
@@ -28,12 +28,12 @@ per pair, no self-edge, indexed by blocker, and `dependency_notices` with
 `blocker_cancelled`, plus the same pending/unknown/accepted delivery columns as
 subscriptions. The v5→v6 migration only creates these tables; installed 0.1.12
 opens schema v6, but installed 0.1.11 cannot. Schema v6 is roll-forward only.
-On `experiment/hierarchical-delegation` (#66), schema v7 adds `child_notices`
+Version 0.1.13 (merged via #75, closing #66) schema v7 adds `child_notices`
 (`UNIQUE(task_id, status, child_lifecycle)`, status done/blocked/cancelled, the same
 delivery columns) plus nullable
 `tasks.parent_task_id REFERENCES tasks(id)` and `tasks.depth INTEGER NOT NULL DEFAULT 1`
 (`CHECK(depth>=1)`, indexed by parent). The v6→v7 migration only adds absent columns
-and the table, so existing Tasks become top-level; installed 0.1.12 cannot open v7. `task_create`
+and the table, so existing Tasks become top-level; installed 0.1.12 cannot open v7, and package rollback is not database rollback. `task_create`
 looks up the Owner's unfinished Agent Task where it is Executor in the same write
 transaction; that Task becomes the parent and `depth` is its depth plus one, rejected
 with `DELEGATION_DEPTH_EXCEEDED` beyond 3 levels before any row is saved. Lineage is

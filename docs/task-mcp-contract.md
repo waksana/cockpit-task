@@ -9,8 +9,8 @@
 
 Task 提供十六个工具，模块 ID 与 MCP key 为 `cockpit-task`。
 登记、创建/准备执行 session 和首次指派是独立操作；状态订阅是可选的一次性等待，
-不是默认最终通知、监工或依赖调度。模块只维护 Owner / Executor 两份角色技能，
-另随包提供独立的 `github-coding` 工作 Skill，不改变 Task 工具或引入业务类型。
+不是默认最终通知、监工或依赖调度。模块维护单一 `node` 角色与合并的
+`cockpit-task-tree` Skill，另随包提供独立的 `github-coding` 工作 Skill，不改变 Task 工具或引入业务类型。
 
 | 工具 | 作为 Owner | 作为 Executor | 职责 |
 | --- | --- | --- | --- |

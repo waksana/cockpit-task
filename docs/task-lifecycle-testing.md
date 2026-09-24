@@ -1116,12 +1116,13 @@ Version 0.1.10 added Owner request follow-through (#45),
 immediate important-update notices (#47) and Agent reopen (#49). Version 0.1.11
 prepared Owner sequential subscription follow-up (#53) and Executor session
 titles (#55), without changing those historical observations or adding a schema
-migration. Current source/package 0.1.12 adds native Task dependencies and schema
-v6; the v5→v6 migration only creates dependency tables and is roll-forward only,
-so installed 0.1.11 cannot open v6. The hierarchical-delegation experiment branch
-adds roll-forward-only schema v7 lineage columns that installed 0.1.12 cannot open. Schema v5 migrates forward without assignment
-backfill; all pre-upgrade assigned Tasks remain readable but cannot reopen. Old
-0.1.9 cannot open schema v5; package rollback is not database rollback.
+migration. Version 0.1.12 added native Task dependencies and schema v6; the v5→v6
+migration only creates dependency tables and is roll-forward only, so installed
+0.1.11 cannot open v6. Current source/package 0.1.13 adds schema v7 lineage columns
+and child notices through a roll-forward-only migration that installed 0.1.12
+cannot open. Schema v5 migrates forward without assignment backfill; all
+pre-upgrade assigned Tasks remain readable but cannot reopen. Old 0.1.9 cannot
+open schema v5; package rollback is not database rollback.
 
 ## Coverage and grading
 

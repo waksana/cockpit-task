@@ -37,7 +37,7 @@ export function createMcpRoutes({ execute, schemas, signal, report }) {
   let stopped = false;
 
   async function connection() {
-    const server = new Server({ name: 'cockpit-task', version: '0.1.12' }, { capabilities: { tools: {} } });
+    const server = new Server({ name: 'cockpit-task', version: '0.1.13' }, { capabilities: { tools: {} } });
     const lifetime = new AbortController();
     const pending = new Map();
     const state = {
