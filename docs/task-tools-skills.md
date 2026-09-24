@@ -18,9 +18,12 @@ Task 提供一个树节点角色 `node` 与一个合并 Skill
 
 每个 session 都是 Task 树中的节点：有被指派的 Task 就负责完成它（亲自做或编排子 Task），
 没有就作为根节点委派交付。Owner/Executor 是针对某个 Task 的事实（`owner`/`executor`
-字段与读取返回的 `actor_role`），不是 session 的角色；旧的 `owner`/`executor` 角色已删除，
-无别名，旧 session 需由根节点改为 `node`。Task 不提供给已有 session 追加角色的工具，
-指派也不补能力。自报 actor 只是归因；服务拒绝自我指派（`SELF_ASSIGNMENT`）、
+字段与读取返回的 `actor_role`），不是 session 的角色；0.1.13 删除旧的 `owner`/`executor`
+角色且不提供别名。宿主冷启动到 0.1.13 前，操作者须备份并迁移每个 session 的
+`$COCKPIT_HOME/session-roles/<sessionId>.json`，把 `cockpit-task/owner` 和
+`cockpit-task/executor` 替换为去重后的 `cockpit-task/node`，保留其他角色；仅追加 `node`
+仍会因保存了未声明角色而加载失败，回滚到 0.1.12 时应同时恢复该备份。Task 不提供给已有
+session 修改宿主角色的工具，指派也不补能力。自报 actor 只是归因；服务拒绝自我指派（`SELF_ASSIGNMENT`）、
 沿祖先链的回环指派（`DELEGATION_CYCLE`）及执行中节点替他人建 Task 或他人替其建
 （`DELEGATION_OWNER_MISMATCH`）。
 

@@ -123,13 +123,21 @@ npm run package:module
 [cockpit-task-tree](skills/cockpit-task-tree/cockpit-task-tree/SKILL.md)，
 按执行、委派、读取、写入、链接、重要更新和自动化分类组织参考。
 节点同时通过现有装载机制发现 `github-coding` 工作 Skill，
-选择角色不等于每次都加载正文。准备包版本为 `0.1.12`；不同内容使用新版本，
+选择角色不等于每次都加载正文。准备包版本为 `0.1.13`；不同内容使用新版本，
 不覆盖同版本的既有安装。源码合并、CI 归档均不会自动升级线上。
 持久化仅使用宿主提供的模块目录，不自动导入其他数据库或修改既有安装。
-本次准备打包 `0.1.11` 之后已合并的原生 Task 依赖和 `github-coding` Skill 更新（#59、#61、#63、#65）。
+本次准备打包 #71/#72/#74（经 #75 合入）的按 Task 层级委派与 tree-node 模型：新增
+schema v7（`tasks.parent_task_id`、`tasks.depth`，最多 3 层，超出返回
+`DELEGATION_DEPTH_EXCEEDED`；新表 `child_notices`），以唯一 `node` 角色和合并 Skill
+`cockpit-task-tree` 取代 Owner/Executor 角色。schema v7 只能向前滚动：已安装的
+`0.1.12` 不能打开 v7；切回旧包不等于数据库回退。0.1.13 删除 `owner`/`executor`
+角色且不提供别名；宿主冷启动到 0.1.13 前，操作者须备份并迁移每个 session 的
+`$COCKPIT_HOME/session-roles/<sessionId>.json`，把 `cockpit-task/owner` 和
+`cockpit-task/executor` 替换为去重后的 `cockpit-task/node`，保留其他角色；回滚到 0.1.12
+时应同时恢复该备份。
+`0.1.12` 打包 `0.1.11` 之后已合并的原生 Task 依赖和 `github-coding` Skill 更新（#59、#61、#63、#65）。
 Task 依赖新增 schema v6（`task_dependencies`、`dependency_notices`），v5→v6
 迁移只新建表。schema v6 只能向前滚动：已安装的 `0.1.11` 不能打开 v6；
 切回旧包不等于数据库回退，不得用历史备份覆盖实时数据。部署前应在隔离的一致副本上验证迁移。
-长期分支 `experiment/hierarchical-delegation`（#66）引入按 Task 区分的层级委派：session 对自己被指派的 Task 是 Executor，对其创建的子 Task 是 Owner；新增 schema v7（`tasks.parent_task_id`、`tasks.depth`，最多 3 层，超出返回 `DELEGATION_DEPTH_EXCEEDED`；新表 `child_notices`），以唯一 `node` 角色和合并 Skill `cockpit-task-tree` 取代 Owner/Executor 角色，只能向前滚动，已安装的 `0.1.12` 不能打开 v7。该分支不升级版本、不部署。
 `0.1.11` 在 `0.1.10` 基础上包含 Owner 顺序订阅跟进（#53）和 Executor 会话标题（#55），
 不新增 schema 迁移。升级为 schema v5 时不回填历史指派；升级前已派单 Task 保持可读但均不可重开。

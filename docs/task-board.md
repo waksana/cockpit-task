@@ -1,23 +1,24 @@
 # Task
 
 Task is a Cockpit module for independent work records shared by Owner and Executor.
-Its module ID and HTTP MCP key are `cockpit-task`, version `0.1.12` (released as v0.1.12).
+Its module ID and HTTP MCP key are `cockpit-task`, version `0.1.13` (source preparation; no deployment implied).
 It runs in Cockpit, not a standalone daemon or dashboard.
 
-This preparation packages the native Task dependency work and github-coding Skill
-updates merged after 0.1.11 (#59, #61, #63, #65). Task dependencies add schema v6
-(`task_dependencies`, `dependency_notices`) through a v5→v6 migration that only
-creates new tables. Schema v6 is roll-forward only: installed 0.1.11 cannot open
-v6 data, and switching back to an older package is not a database rollback.
+This preparation packages per-Task hierarchical delegation and the tree-node model
+merged through #75 (#71, #72, #74). Schema v7 adds nullable
+`tasks.parent_task_id`, `tasks.depth` default 1 and `child_notices` through a
+forward migration that only adds columns and a table; existing Tasks stay top-level.
+It replaces the Owner/Executor roles with one `node` role and one merged
+`cockpit-task-tree` Skill. Schema v7 is roll-forward only: installed 0.1.12 cannot
+open v7 data, and switching back to an older package is not a database rollback.
 Validate migration on an isolated consistent copy before authorized deployment;
 never overwrite live data with a historical backup.
-The long-lived `experiment/hierarchical-delegation` branch (#66) adds per-Task
-hierarchical delegation and schema v7 (nullable `tasks.parent_task_id`, `tasks.depth`
-and a new `child_notices` table) through a forward migration that only adds columns
-and a table; existing Tasks stay top-level. It replaces the Owner/Executor roles with
-one `node` role and one merged `cockpit-task-tree` Skill. Schema v7 is
-roll-forward only: installed 0.1.12 cannot open v7 data. The branch has no version
-bump or deployment and must stay cleanly mergeable into main.
+
+Version 0.1.12, released as v0.1.12, packaged the native Task dependency work and
+github-coding Skill updates merged after 0.1.11 (#59, #61, #63, #65). Task
+dependencies added schema v6 (`task_dependencies`, `dependency_notices`) through a
+v5→v6 migration that only creates new tables. Schema v6 is roll-forward only:
+installed 0.1.11 cannot open v6 data.
 
 Version 0.1.11 added Owner sequential subscription follow-up (#53) and Executor
 session titles (#55) to 0.1.10 without a schema migration. Version 0.1.10
@@ -50,9 +51,13 @@ Source support is not a release or deployment claim.
 Every session is a Task tree node and receives the single `node` role (Task node)
 through the host's role management. The host assembles its System Prompt, Skills and
 all sixteen HTTP MCP tools, persists the selection and reassembles it on cold resume.
-The former `owner` and `executor` roles are removed without aliases; the root node
-gives older sessions `node`. Host role changes for existing sessions are
-separate from Task operations: Task does not expose that mutation or automatically
+The former `owner` and `executor` roles are removed without aliases. Before a host
+cold-starts with 0.1.13, operators must back up and migrate each saved host role
+selection in `$COCKPIT_HOME/session-roles/<sessionId>.json`, replacing
+`cockpit-task/owner` and `cockpit-task/executor` with a deduplicated
+`cockpit-task/node` while keeping other roles. Appending `node` is insufficient
+because the host refuses saved undeclared roles; restore the backup together with
+any rollback to 0.1.12. Task does not expose this host mutation or automatically
 add capabilities during assignment.
 
 Owner and Executor are per-Task facts, not session roles:
@@ -396,7 +401,7 @@ npm test
 npm run package:module
 ```
 
-`dist/cockpit-task-0.1.12.tgz` contains runtime dependencies, backend/frontend assets,
+`dist/cockpit-task-0.1.13.tgz` contains runtime dependencies, backend/frontend assets,
 the node role prompt, the tree Skill and the shared coding Skill. Its `.sha256` sidecar identifies the
 archive. [Task CI](https://github.com/waksana/cockpit-task/blob/main/.github/workflows/task-board-ci.yml) retains these as the
 `cockpit-task-module` artifact; an artifact is not an installation or deployment.
@@ -405,7 +410,7 @@ Installation is an explicit operator action on a compatible host. From the host
 checkout, stage the local artifact using the host's module installer:
 
 ```sh
-pnpm module install /absolute/path/to/cockpit-task-0.1.12.tgz --trust-local-code
+pnpm module install /absolute/path/to/cockpit-task-0.1.13.tgz --trust-local-code
 ```
 
 This command deliberately omits automatic enablement. Follow that host's documented

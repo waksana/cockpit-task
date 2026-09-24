@@ -46,7 +46,7 @@ SQLite **之前**检查模块身份、service-ready v1 及公共宿主桥接；�
 
 ## 2. 角色是能力装配单元
 
-模块声明 `owner` / `executor` 的名称、说明、System Prompt、独立 Skill 发现目录、
+模块声明唯一的 `node` 角色及其名称、说明、System Prompt、Skill 发现目录、
 HTTP MCP 配置和工具选择。Web 与 MCP 创建共用宿主角色选择流程：
 
 ```text
@@ -74,7 +74,10 @@ HTTP MCP 配置和工具选择。Web 与 MCP 创建共用宿主角色选择流�
 | --- | --- | --- |
 | node（Task node） | `cockpit-task-tree`、`github-coding` | 全部十六个：read、create、session_create、session_prepare、assign、edit、cancel、subscribe、unsubscribe、script_read、script_register、automation_start、automation_reconcile、ack、report、reopen |
 
-原 `owner`、`executor` 角色已删除且无别名；只持有旧角色的 session 由根节点改为 `node`。
+原 `owner`、`executor` 角色已删除且无别名；宿主冷启动到 0.1.13 前，操作者须备份并迁移
+`$COCKPIT_HOME/session-roles/<sessionId>.json`，把 `cockpit-task/owner` 和
+`cockpit-task/executor` 替换为去重后的 `cockpit-task/node`，保留其他角色；仅追加 `node`
+仍会因保存了未声明角色而加载失败，回滚到 0.1.12 时应同时恢复该备份。
 `node` 声明 `skills/cockpit-task-tree` 与 `skills/github-coding` 发现根；
 不复制到其他目录，不新增装载接口。工作 Skill 仅在编码工作需要时读取，非编码不触发；
 Skill 可发现不等于正文已读，子 Task 的 Executor 不继承 Owner 的加载上下文。
