@@ -14,7 +14,7 @@ Task 提供一个树节点角色 `node` 与一个合并 Skill
 
 | 角色 | 常驻指令 | 注入的 Task 工具 |
 | --- | --- | --- |
-| Node | [task-node.md](../roles/task-node.md) | 全部十六个：`task_read`、`task_create`、`task_session_create`、`task_session_prepare`、`task_assign`、`task_edit`、`task_cancel`、`task_subscribe`、`task_unsubscribe`、`task_script_read`、`task_script_register`、`task_automation_start`、`task_automation_reconcile`、`task_ack`、`task_report`、`task_reopen` |
+| Node | [task-node.md](../roles/task-node.md) | 全部十七个：`task_read`、`task_create`、`task_session_create`、`task_session_prepare`、`task_assign`、`task_edit`、`task_cancel`、`task_subscribe`、`task_unsubscribe`、`task_script_read`、`task_script_register`、`task_automation_start`、`task_automation_reconcile`、`task_ack`、`task_report`、`task_reopen`、`task_retro_handle` |
 
 每个 session 都是 Task 树中的节点：有被指派的 Task 就负责完成它（亲自做或编排子 Task），
 没有就作为根节点委派交付。Owner/Executor 是针对某个 Task 的事实（`owner`/`executor`
@@ -180,7 +180,8 @@ activity 不自动改状态，outcome 不自动 done。完成最新已确认约�
 先完成交付，再简短复盘，仅写有实际证据、可行动的自动化候选、具体慢点/重复卡点，
 或 Skill/MCP 发现、契约、能力验证缺口。区分观察、假设及外部等待，不编造耗时；
 无有用发现传 null，不要求多段模板或凑字数。复盘最多 2,000 字符，不代替成果和阻塞，
-不授权改进或扩大范围；Owner 按需读取，不新增通知、派单或强制审阅。
+不授权改进或扩大范围；服务不新增通知、派单或完成门槛；
+Owner 按 delegating.md 用 `task_retro_handle` 处理有发现的 retro（有子 Task 的 Executor 在 done 前，根节点仅在用户问起时）。
 服务保证提交和持久化，不保证思考或质量；automation 无 Agent 复盘。
 仅工作本身需要时使用 in_review，不等待默认 Owner 审批。
 

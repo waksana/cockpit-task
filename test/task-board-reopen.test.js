@@ -166,7 +166,7 @@ test('schema v4 upgrade preserves history and denies every previously assigned T
   const history = f.store.read({ view: 'outcomes', task_id: prior.task_id });
   f.store.db.exec('DROP TABLE task_assignments; PRAGMA user_version=4');
   f.restart();
-  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 7);
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 8);
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM task_assignments').get().n, 0);
   assert.deepEqual(f.store.read({ view: 'outcomes', task_id: prior.task_id }), history);
   rejects(() => f.reopen(prior), 'REOPEN_NOT_ELIGIBLE');

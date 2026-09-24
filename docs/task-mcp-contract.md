@@ -7,7 +7,7 @@
 
 ## 1. 工具集合与角色
 
-Task 提供十六个工具，模块 ID 与 MCP key 为 `cockpit-task`。
+Task 提供十七个工具，模块 ID 与 MCP key 为 `cockpit-task`。
 登记、创建/准备执行 session 和首次指派是独立操作；状态订阅是可选的一次性等待，
 不是默认最终通知、监工或依赖调度。模块维护单一 `node` 角色与合并的
 `cockpit-task-tree` Skill，另随包提供独立的 `github-coding` 工作 Skill，不改变 Task 工具或引入业务类型。
@@ -30,8 +30,9 @@ Task 提供十六个工具，模块 ID 与 MCP key 为 `cockpit-task`。
 | `task_cancel` | 是 | 是 | Agent 不停止 session；automation 请求终止进程组，不回滚；仅匹配订阅时通知 |
 | `task_subscribe` | 是 | 否 | 显式登记未来状态的一次性 Owner 通知，当前已匹配则失败 |
 | `task_unsubscribe` | 是 | 否 | 取消仍在等待的订阅，不撤回已触发或发送的通知 |
+| `task_retro_handle` | 是 | 否 | Owner 记录所建 Task 有发现的已记录 retro（通常为最新）的处理结果（fixed / followup / watching / dismissed），不发消息、不改状态 |
 
-唯一的 `node` 角色注入全部十六个工具；表中两列表示节点相对某个 Task 的关系（读取以
+唯一的 `node` 角色注入全部十七个工具；表中两列表示节点相对某个 Task 的关系（读取以
 `actor_role` 返回）通常使用的工具，不是逐 Task 权限表。具有工具即可操作其他 Task，
 owner / executor 用于责任、筛选和追溯，不作为 ACL。版本、状态、逐版 ACK、
 幂等、固定绑定与单 session 单项未结束执行等数据检查仍适用于所有调用者。
@@ -105,13 +106,14 @@ Executor 开始、恢复及执行要求同步仍读完整 `execution`，不能�
 
 | `view` | 其他输入 | 返回内容 |
 | --- | --- | --- |
-| `list` | `owner?`、`executor?`、`parent_task_id?`、`status?`、`query?`、`limit?`、`cursor?` | 按显式筛选的轻量任务摘要页；不含完整说明、资料和历史 |
+| `list` | `owner?`、`executor?`、`parent_task_id?`、`retro?`、`status?`、`query?`、`limit?`、`cursor?` | 按显式筛选的轻量任务摘要页；不含完整说明、资料和历史 |
 | `overview` | `task_id`、`include?` | 省略 include 保持原摘要；提供时只返回当前上下文和所选完整内容组，见下文 |
 | `execution` | `task_id` | Executor 默认视图：标题、归属、状态、完整当前 description、revision / ack、当前 references / metadata、write_context；不夹带活动、修订或成果历史 |
 | `definition` | `task_id` | 双方按需读取完整当前 description、revision、资料和 write_context；Owner 修订前使用 |
 | `changelog` | `task_id`、`limit?`、`cursor?`，或 `task_id,revision` | 默认修订摘要页；指定 revision 返回该版完整 description，不得同时传 limit/cursor |
 | `activity` | `task_id`、`limit?`、`cursor?` | Executor 活动页，每条保留其 revision 和作者 |
 | `outcomes` | `task_id`、`limit?`、`cursor?` | 保留的成果页，区分对应定义版本和执行归属 |
+| `retro_handlings` | `task_id`、`limit?`、`cursor?` | 该 Task 全部 retro 处理记录（新到旧），每条带 `outcome_id`、status、note、references、author、at |
 | `subscriptions` | `task_id`、`limit?`、`cursor?` | 有界订阅历史、匹配状态及投递事实，不扫描 Owner 聊天 |
 | `dependency_notices` | 依赖方 `task_id`、`limit?`、`cursor?` | 该 Task 的 ready / blocker_cancelled 通知及投递事实，分页同 subscriptions |
 | `child_notices` | 子 `task_id`、`limit?`、`cursor?` | 该子 Task 发给其 Owner 的 child_done / child_blocked / child_cancelled 通知及投递事实，分页同 subscriptions |
@@ -120,7 +122,7 @@ Executor 开始、恢复及执行要求同步仍读完整 `execution`，不能�
 
 列表默认只看未结束记录；可显式查询 done / cancelled。Owner 列表侧重各任务的执行者、状态、最新活动摘录、确认差异和成果可用性；Executor 列表侧重本人承接关系、状态与待确认版本。摘要使用现有字段和活动摘录，不生成另一份“进度总结”；摘录标明截断，正文通过专门视图读取，完整 description 不静默截断。
 
-列表 `status` 可为业务状态、`unfinished`（默认）或 `all`；`query` 只匹配标题。overview/execution/definition 返回扁平字段，不包在 `task` 中；列表为 `{items,next_cursor}`，历史为 `{task_id,items,next_cursor}`。未提供 include 的 overview，其 `activity` 为可空摘录，`outcome` 为 `{available:false}` 或带 `id,revision,at,current` 的可用性记录，不附成果全文。execution/definition 返回当前 `description,references,metadata`，不附 activity/outcome。changelog 摘要带 `description_available,description_length`；选择单版返回 `task_id,revision,description,reason,author,at,source`。
+列表 `status` 可为业务状态、`unfinished`（默认）或 `all`；`query` 只匹配标题。`retro=unhandled` 只返回最新已记录 retro 有发现（非 null）且尚无处理记录的 Agent Task，`retro=watching` 只返回该 retro 最新处理为 watching 的 Task；带 retro 筛选时 `status` 默认 `all`，游标与筛选绑定。overview/execution/definition 返回扁平字段，不包在 `task` 中；列表为 `{items,next_cursor}`，历史为 `{task_id,items,next_cursor}`。未提供 include 的 overview，其 `activity` 为可空摘录，`outcome` 为 `{available:false}` 或带 `id,revision,at,current` 的可用性记录，不附成果全文。execution/definition 返回当前 `description,references,metadata`，不附 activity/outcome。changelog 摘要带 `description_available,description_length`；选择单版返回 `task_id,revision,description,reason,author,at,source`。
 
 #### 单项按需组合
 
@@ -663,6 +665,14 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 
 只把 waiting 改为 cancelled；已 cancelled 返回 unchanged。triggered / expired 返回 `SUBSCRIPTION_NOT_WAITING`，不撤回已消费通知、已发送消息或宿主 queue 项。Task 与 subscription 必须匹配；返回 `result: {status,task_id,subscription}`。与状态变化的竞态按事务先后决定：取消先提交则不会触发，触发先提交则取消失败。同 request_id 重放原结果。
 
+### task_retro_handle
+
+完整输入：`actor_session_id, request_id, task_id, outcome_id, status, note, references?`。不接受 `write_context` 或 revision：处理对象由 `outcome_id` 精确指定，通常是 Task 最新已记录 retro 的 outcome_id；reopen 前的旧 retro 也可按其 outcome_id 处理。`status` 为 `fixed`（已修，可引用 PR/commit）、`followup`（已建后续 Task 或 Issue，`references` 必填；终态，后续完成后不回头更新、不再通知）、`watching`（待观察）或 `dismissed`（不处理，note 写理由）；note 必填、非空、最多 2,000 字符。
+
+只有 actor 等于 Task.owner（创建它的节点）才能写入，否则 `OWNER_REQUIRED`；Executor 不处理自己的 retro，actor 仍只是归因而非认证。automation 返回 `AUTOMATION_MANAGED`；`outcome_id` 不是该 Task 已记录的 retro（含尚无 retro）返回 `RETRO_NOT_FOUND`；retro 为显式 null 返回 `RETRO_NO_FINDINGS`。每次改写追加一条历史，与最新记录完全相同则 `unchanged`。返回 `result: {status,task_id,outcome_id,handling}`。不发送消息、不改变 Task 状态、定义、lifecycle 或 write_context，也不授权修复或扩大范围。
+
+读取时，有发现的已记录 retro 附 `handling`：尚未处理为 `{status:'unhandled'}`，否则为最新记录；execution/definition、overview 的 `include=["retro"]` 与 outcomes 历史带 `note,references`，未选 include 的 overview 与 list 只带 `id,status,author,at`。null retro 与 automation 不带 `handling`。
+
 ### 通知投递证据
 
 触发状态变更的响应保留原 `result`（包括 `subscription_ids`），另外附 `notifications` 完整订阅记录和独立 `notification_error`。投递失败不回滚已经保存的 Task 状态或成果。重放仍保留原 Task 效果，通知证据按当前持久记录返回；用 `task_read(view=subscriptions)` 单独查询不会重新发送。
@@ -732,6 +742,8 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 | `NOTIFICATION_PENDING` | Task 已保存，明确未发送的通知待恢复；不要重做 Task 变更 |
 | `NOTIFICATION_UNCONFIRMED` / `NOTIFICATION_STORAGE_UNCONFIRMED` | 通知效果或其持久确认不明，检查现有证据，不盲重发 |
 | `OWNER_NOT_FOUND` / `OWNER_UNAVAILABLE` | Owner 不存在或存在性读取失败，未发送，不自动新建替代者 |
+| `OWNER_REQUIRED` | 只有 Task Owner 可处理其 retro；Executor 不处理自己的 retro |
+| `RETRO_NOT_FOUND` / `RETRO_NO_FINDINGS` | 指定的不是该 Task 已记录的 retro，或该 retro 为显式 null；读取 Task retro 或 outcomes 后使用其 outcome_id |
 
 操作步骤维护还可能返回 `OPERATION_NOT_PENDING` / `OPERATION_FINALIZED`；存储新版本不兼容为 `SCHEMA_TOO_NEW`。已进入业务处理的本地错误通常附 HTTP 意义的 `status`（冲突默认 409）；MCP 的失败以 `isError` 和结构化 `error` 表达，不依赖调用者从文本推测。未列出的宿主错误保留其真实步骤语义。
 
@@ -781,7 +793,7 @@ Executor:
 
 模块 HTTP MCP 与普通 HTTP API 挂载于宿主，共用业务服务和独立
 `task-board.sqlite`，不启动额外 daemon。宿主按角色装配配置，
-不为十六个业务工具另建注册表。
+不为十七个业务工具另建注册表。
 
 官方 stateful Streamable HTTP transport 让后续 POST 的取消通知关联原调用；
 取消在下一次 Task 到宿主调用前检查，不回滚已完成动作，也不保证中断已提交

@@ -72,7 +72,7 @@ HTTP MCP 配置和工具选择。Web 与 MCP 创建共用宿主角色选择流�
 
 | 选择 | Skill | Task MCP 工具（省略 `task_` 前缀） |
 | --- | --- | --- |
-| node（Node） | `cockpit-task-tree`、`github-coding` | 全部十六个：read、create、session_create、session_prepare、assign、edit、cancel、subscribe、unsubscribe、script_read、script_register、automation_start、automation_reconcile、ack、report、reopen |
+| node（Node） | `cockpit-task-tree`、`github-coding` | 全部十七个：read、create、session_create、session_prepare、assign、edit、cancel、subscribe、unsubscribe、script_read、script_register、automation_start、automation_reconcile、ack、report、reopen、retro_handle |
 
 原 `owner`、`executor` 角色已删除且无别名；宿主冷启动到 0.1.13 前，操作者须备份并迁移
 `$COCKPIT_HOME/session-roles/<sessionId>.json`，把 `cockpit-task/owner` 和

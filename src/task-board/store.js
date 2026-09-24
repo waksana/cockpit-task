@@ -38,7 +38,7 @@ export class TaskStore {
     try {
       chmodSync(file, 0o600);
       const version = this.db.prepare('PRAGMA user_version').get().user_version;
-      if (version > 7) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
+      if (version > 8) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
       this.db.exec(`
       PRAGMA journal_mode=WAL;
       PRAGMA synchronous=FULL;
@@ -179,7 +179,16 @@ export class TaskStore {
         );
         CREATE INDEX IF NOT EXISTS child_notices_task ON child_notices(task_id,seq);
         CREATE INDEX IF NOT EXISTS child_notices_pending ON child_notices(seq) WHERE delivery_status='pending';
-        PRAGMA user_version=7;
+        -- Schema v8: Owner handling of one recorded retro, append-only; nothing is backfilled.
+        CREATE TABLE IF NOT EXISTS retro_handlings (
+          seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+          task_id TEXT NOT NULL REFERENCES tasks(id), outcome_id TEXT NOT NULL REFERENCES outcomes(id),
+          status TEXT NOT NULL CHECK(status IN ('fixed','followup','watching','dismissed')),
+          note TEXT NOT NULL, refs TEXT NOT NULL, author TEXT NOT NULL, at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS retro_handlings_outcome ON retro_handlings(outcome_id,seq);
+        CREATE INDEX IF NOT EXISTS retro_handlings_task ON retro_handlings(task_id,seq);
+        PRAGMA user_version=8;
         COMMIT;
       `);
       this.automation = new AutomationStore(this, { platform });
@@ -398,7 +407,7 @@ export class TaskStore {
     if (name === 'task_script_read') return this.automation.script(input);
     const handlers = {
       task_create: 'create', task_edit: 'edit', task_ack: 'ack', task_report: 'report', task_cancel: 'cancel', task_reopen: 'reopen',
-      task_subscribe: 'subscribe', task_unsubscribe: 'unsubscribe',
+      task_subscribe: 'subscribe', task_unsubscribe: 'unsubscribe', task_retro_handle: 'handleRetro',
       task_script_register: 'registerScript', task_automation_start: 'startAutomation',
       task_automation_reconcile: 'reconcileAutomation',
     };
@@ -834,7 +843,38 @@ export class TaskStore {
       executor: outcome.executor, author: outcome.author, at: outcome.at, source: 'reported',
       current: outcome.revision === row.revision, has_findings: outcome.retro !== null,
       ...(includeText ? { text: outcome.retro } : {}),
+      ...(outcome.retro !== null ? { handling: this.retroHandling(outcome.id, includeText) } : {}),
     };
+  }
+  handlingEntry(entry, full = true) {
+    return {
+      id: entry.id, status: entry.status, author: entry.author, at: entry.at,
+      ...(full ? { note: entry.note, references: JSON.parse(entry.refs) } : {}),
+    };
+  }
+  retroHandling(outcomeId, full = true) {
+    const entry = this.db.prepare('SELECT * FROM retro_handlings WHERE outcome_id=? ORDER BY seq DESC LIMIT 1').get(outcomeId);
+    return entry ? this.handlingEntry(entry, full) : { status: 'unhandled' };
+  }
+  handleRetro(input) {
+    const row = this.row(input.task_id);
+    if (row.kind === 'automation') fail('AUTOMATION_MANAGED', 'Automation has no Agent retro to handle');
+    if (row.owner !== input.actor_session_id) {
+      fail('OWNER_REQUIRED', 'Only the Task Owner, the node that created it, handles its retro; an Executor never handles its own retro. Actor attribution is not authentication');
+    }
+    const outcome = this.db.prepare('SELECT * FROM outcomes WHERE task_id=? AND id=? AND retro_recorded=1').get(row.id, input.outcome_id.toLowerCase());
+    if (!outcome) fail('RETRO_NOT_FOUND', 'outcome_id is not a recorded retro of this Task; read the Task retro or outcomes and use its outcome_id');
+    if (outcome.retro === null) fail('RETRO_NO_FINDINGS', 'This retro was submitted as null (no findings) and needs no handling');
+    const refs = JSON.stringify(input.references || []);
+    const previous = this.db.prepare('SELECT * FROM retro_handlings WHERE outcome_id=? ORDER BY seq DESC LIMIT 1').get(outcome.id);
+    const base = { task_id: row.id, outcome_id: outcome.id };
+    if (previous && previous.status === input.status && previous.note === input.note && canonical(JSON.parse(previous.refs)) === canonical(input.references || [])) {
+      return { result: { status: 'unchanged', ...base, handling: this.handlingEntry(previous) } };
+    }
+    const id = randomUUID(), at = now();
+    this.db.prepare('INSERT INTO retro_handlings(id,task_id,outcome_id,status,note,refs,author,at) VALUES(?,?,?,?,?,?,?,?)')
+      .run(id, row.id, outcome.id, input.status, input.note, refs, input.actor_session_id, at);
+    return { result: { status: 'applied', ...base, handling: this.retroHandling(outcome.id) } };
   }
   latestRetro(row, includeText = false) {
     const outcome = row.kind === 'automation' ? null : this.db.prepare(
@@ -923,8 +963,9 @@ export class TaskStore {
     if (input.include) return withRole(this.transaction(() => this.selected(input), { readOnly: true }));
     if (input.view === 'operation') return this.operation(input.request_id);
     if (input.view === 'list') {
-      const { owner, executor, parent_task_id: parent, query, status = 'unfinished' } = input;
-      const scope = hash({ view: 'list', owner: owner ?? null, executor: executor ?? null, parent: parent?.toLowerCase() ?? null, query: query ?? null, status });
+      const { owner, executor, parent_task_id: parent, query, retro } = input;
+      const status = input.status ?? (retro ? 'all' : 'unfinished');
+      const scope = hash({ view: 'list', owner: owner ?? null, executor: executor ?? null, parent: parent?.toLowerCase() ?? null, query: query ?? null, status, ...(retro ? { retro } : {}) });
       const clauses = ['seq < ?'], values = [this.cursor(input, scope)];
       if (owner) { clauses.push('owner=?'); values.push(owner); }
       if (parent) { clauses.push('parent_task_id=?'); values.push(parent.toLowerCase()); }
@@ -932,6 +973,12 @@ export class TaskStore {
       if (status === 'unfinished') clauses.push("status NOT IN ('done','cancelled')");
       else if (status !== 'all') { clauses.push('status=?'); values.push(status); }
       if (query) { clauses.push('instr(lower(title), lower(?)) > 0'); values.push(query); }
+      if (retro) {
+        const latest = "(SELECT o.id FROM outcomes o WHERE o.task_id=tasks.id AND o.retro_recorded=1 ORDER BY o.seq DESC LIMIT 1)";
+        const handled = `(SELECT h.status FROM retro_handlings h WHERE h.outcome_id=${latest} ORDER BY h.seq DESC LIMIT 1)`;
+        clauses.push(retro === 'watching' ? `${handled}='watching'`
+          : `kind='agent' AND EXISTS (SELECT 1 FROM outcomes o WHERE o.id=${latest} AND o.retro IS NOT NULL) AND ${handled} IS NULL`);
+      }
       const limit = input.limit ?? 20;
       const rows = this.db.prepare(`SELECT * FROM tasks WHERE ${clauses.join(' AND ')} ORDER BY seq DESC LIMIT ?`).all(...values, limit + 1);
       return this.page(rows, limit, scope, row => withRole(this.overview(row, false)));
@@ -951,6 +998,13 @@ export class TaskStore {
       const entry = this.db.prepare('SELECT revision,description,reason,author,at FROM definitions WHERE task_id=? AND revision=?').get(row.id, input.revision);
       if (!entry) fail('REVISION_NOT_FOUND', 'Definition revision does not exist', 404);
       return { task_id: row.id, ...entry, source: 'reported' };
+    }
+    if (input.view === 'retro_handlings') {
+      const scope = hash({ view: input.view, task_id: row.id });
+      const limit = input.limit ?? 5;
+      const rows = this.db.prepare('SELECT * FROM retro_handlings WHERE task_id=? AND seq < ? ORDER BY seq DESC LIMIT ?')
+        .all(row.id, this.cursor(input, scope), limit + 1);
+      return this.page(rows, limit, scope, entry => ({ ...this.handlingEntry(entry), outcome_id: entry.outcome_id }), { task_id: row.id });
     }
     const table = { changelog: 'definitions', activity: 'activities', outcomes: 'outcomes' }[input.view];
     const scope = hash({ view: input.view, task_id: row.id });

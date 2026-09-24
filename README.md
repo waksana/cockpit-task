@@ -50,7 +50,8 @@ Executor 完成交付后、报告 done 前进行轻量复盘：仅记录有实�
 候选、具体慢点/重复卡点或 Skill/MCP 发现、契约和能力验证缺口；区分观察、假设与外部等待，
 不编造耗时、不套多段模板。done 同次必须提交新 outcome 与显式 `retro` 文本或 `null`
 （无有用发现），普通报告不传 retro。复盘独立于成果和阻塞，不授权改进或扩大范围；
-Owner 按需读取，无新增通知、派单或强制审阅。服务保证提交，不保证思考或文本质量。
+服务不新增通知、派单或完成门槛；Owner 按 Skill 用 `task_retro_handle`
+处理有发现的 retro（有子 Task 的 Executor 在自己 done 前，根节点仅在用户问起时）。服务保证提交，不保证思考或文本质量。
 
 Owner 也可为已授权、可信、可重复的已知脚本选择轻量 automation Task；不是把任意工作
 转成脚本。先用 `task_script_read` / `task_script_register` 发现或不可变登记，

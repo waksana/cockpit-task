@@ -52,6 +52,7 @@ Task 的创建工具为新 session 选择它；指派不补装任何能力，也
 | `activity` | 执行者报告的事实；每条有 revision、executor、author、时间及正文 |
 | `outcome` | 成果 summary 与可选 references，保留所属 revision 与执行归属 |
 | `retro` | Agent 完成时显式提交的独立复盘文本或 null，与同次 outcome 关联，不代替成果或阻塞 |
+| `retro_handlings` | schema v8 Owner 对某条有发现 retro 的处理记录（fixed/followup/watching/dismissed），按 outcome_id 追加保留历史 |
 | `references` | `{label,target}` 数组；资料、成果或独立 Task 引用，不形成依赖 |
 | `blocked_by` | 最多 20 个同一 Owner 的 blocker Task UUID（schema v6 `task_dependencies`）；全部 done 前 `ready=false`，指派/启动返回 `TASK_NOT_READY`；仅待派发（todo、无 Executor、automation 未启动）时可整组替换，改变 `editable` 而非 revision；拒绝自身、环和新增已取消 blocker |
 | `dependency_notices` | schema v6 就绪/blocker 取消通知及投递证据，按依赖方、类型、blocker 与其生命周期唯一 |
@@ -197,7 +198,7 @@ Executor 先完成交付，再于 done 前回顾实际工作，只记录有证�
 具体慢点/重复卡点，或 Skill/MCP 发现、契约及能力验证缺口。观察、假设与外部等待
 要分开，不编造耗时，不要求固定多段模板或凑内容；无有用发现显式提交 null。
 普通报告省略 retro，仅 done 接受；缺字段不等于 null，应拒绝。
-复盘不代替 outcome/blockers、不授权改进或扩大范围，无新增派单、通知或 Owner 强制审阅。
+复盘不代替 outcome/blockers、不授权改进或扩大范围，服务不新增派单、通知或完成门槛；Owner 按 Skill 处理有发现的 retro（见下文复盘处理）。
 服务保证显式提交和持久化，不保证实际思考或文本质量。脚本 automation 不产生 Agent 复盘。
 
 schema v4 在 outcomes 增加 `retro TEXT`（可空）和
@@ -211,6 +212,21 @@ has_findings 仅表示文本非 null，不代表质量；
 未记录为 `{status:'not_recorded'}`，automation 为 `{status:'not_applicable'}`。
 默认 overview/list 只返回状态及归因摘要，不含 text；overview 显式选择 retro 时返回全文。文本最多 2,000 字符，
 `{outcome,retro}` 合并序列化最多 16,000 字符，历史分页预算保持不变。
+
+### 复盘处理与 schema v8
+
+复盘由创建 Task 的节点（其 Owner）消化：有子 Task 的 Executor 在自己 done 前逐条处理子 Task
+有发现的 retro，子树处理不了的写进自己的 retro 往上传；根节点不主动汇总，只在用户问起时处理。
+不做定期汇总 Task、水位或计数。
+
+schema v8 仅新建追加式 `retro_handlings` 表（`id,task_id,outcome_id,status,note,refs,author,at`），
+既有 retro 均视为未处理，不回填；只能向前滚动，打开过 v8 的数据库不能再由 v7 包打开。
+`task_retro_handle` 仅接受 Task.owner 对该 Task 任一已记录、文本非 null 的 retro（按 outcome_id，通常为最新）写入
+`fixed` / `followup` / `watching` / `dismissed` 与 note；followup 必须带引用且为终态，
+后续完成后不回头更新，也不再通知。reopen 后再次 done 的新 retro 需重新处理，旧处理留在历史。
+有发现的 retro 对象附 `handling`：`{status:'unhandled'}` 或最新 `{id,status,author,at,note,references}`；
+overview/list 只含 `id,status,author,at`。list 的 `retro=unhandled|watching` 筛选（默认 `status=all`）
+与 `retro_handlings` 历史视图用于按需查询。处理不发消息、不改变 Task 状态或 write_context。
 
 ## 5. 状态订阅与消息
 
