@@ -7,6 +7,7 @@ export const TASK_EVENTS = Object.freeze({
   updated: 'Task updated',
   cancelled: 'Task cancelled',
   status_changed: 'Subscribed Task status changed',
+  blocked: 'Task blocked',
   ready: 'Subtask ready',
   blocker_cancelled: 'Subtask blocker cancelled',
   child_done: 'Subtask done',

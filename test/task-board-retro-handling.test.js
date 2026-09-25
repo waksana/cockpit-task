@@ -163,7 +163,7 @@ test('retro handling survives restart without backfilling completed outcomes', a
   const id = await f.start('orchestrator', 'worker');
   await f.finish('worker', id, 'Legacy finding');
   f.restart();
-  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 9);
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 10);
   assert.deepEqual(f.store.read({ view: 'overview', task_id: id }).retro.handling, { status: 'unhandled' });
   const outcomeId = f.store.task(id).retro.outcome_id;
   assert.equal((await f.handle('orchestrator', id, outcomeId, { status: 'dismissed', note: 'Legacy' })).error, null);

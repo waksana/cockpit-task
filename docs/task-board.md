@@ -52,6 +52,13 @@ the paired host's `_meta["cockpit/invocation"].sessionId`; callers no longer
 supply `actor_session_id`. Schema v9 is roll-forward only and requires Cockpit
 0.4.7 or a compatible source containing waksana/cockpit#205.
 
+Current source also prepares schema v10: four lifecycle statuses (`todo`,
+`in_progress`, `done`, `cancelled`), durable Task/text prerequisites, boundary-only
+readiness notices and finished automation as done with truthful run facts. No version
+bump, production migration or release is implied. The packaged migration CLI defaults
+to read-only inventory; see the
+[reviewed migration procedure](https://github.com/waksana/cockpit-task/blob/main/docs/task-implementation.md#schema-v10-migration).
+
 ## Roles and records
 
 Every session is a Task tree node and receives the single `node` role (Node)
@@ -98,10 +105,10 @@ A Subtask must be more specific than its parent, never passed down unchanged and
 the parent's authorized scope; the parent integrates Subtask results before done.
 The service rejects self-assignment (`SELF_ASSIGNMENT`) and assigning an ancestor's orchestrator
 or assignee (`DELEGATION_CYCLE`). `DELEGATION_OWNER_MISMATCH` is removed because v9 derives
-`orchestrator` from host invocation metadata instead of accepting an input. When a Subtask reaches done, blocked or
+`orchestrator` from host invocation metadata instead of accepting an input. When a Subtask reaches done or
 cancelled, the service sends its orchestrator (the parent's assignee) one
 `[Subtask done](task:<uuid>?event=child_done)` card per transition
-(`child_blocked`/`child_cancelled` likewise) without a subscription, skipping it only when a
+(`child_cancelled` likewise) without a subscription, skipping self-authored transitions, when a
 subscription for that transition already notified the same orchestrator or the parent is finished; the
 `child_notices` and `assignee_notices` read views page delivery facts.
 `task_session_create` gives new sessions the `node` role. The board shows the delegation
@@ -183,7 +190,7 @@ Task auto-ACKs the new revision. Terminal definitions can be edited without reop
 | `task_session_create` | Create an assignee, optionally preparing explicitly selected native resources |
 | `task_session_prepare` | Prepare a loaded idle assignee with no unfinished Task; no creation or dispatch |
 | `task_assign` | Check an existing assignee, bind once, best-effort set its default/auto session title to the Task title, and send one assigned reference |
-| `task_edit` | Replace the complete description, materials or `blocked_by`; authorized assignee self-edits auto-ACK changed descriptions, while changes by anyone else to assigned unfinished Agent work make the service send a fixed immediate assignee notice |
+| `task_edit` | Atomically replace the agreement/materials/active prerequisites; assignee description changes auto-ACK. Ready/blocked boundaries and ready-period agreement updates notify others; blocked-period updates stay silent |
 | `task_ack` | Confirm the current definition separately from status |
 | `task_report` | Explicit activity, status and/or outcome; Agent done requires a new outcome and explicit retro text or null |
 | `task_reopen` | Orchestrator or original assignee reopens eligible done Agent work for the original assignee; assignee self-reopen auto-ACKs, other reopen sends `[Task updated]`; no dispatch |
@@ -299,7 +306,8 @@ are allowed. Ordinary edits/reports stay silent without an explicit subscription
 | Dependent's blockers are all done | `[Subtask ready](task:<uuid>?event=ready)` |
 | A blocker of a waiting dependent was cancelled | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` |
 | A Subtask became done, sent to its orchestrator | `[Subtask done](task:<uuid>?event=child_done)` |
-| A Subtask became blocked, sent to its orchestrator | `[Subtask blocked](task:<uuid>?event=child_blocked)` |
+| An assignee records a concrete unmet condition, sent to its orchestrator | `[Task blocked](task:<uuid>?event=blocked)` |
+| Historical Subtask blocked notice (no longer emitted) | `[Subtask blocked](task:<uuid>?event=child_blocked)` |
 | A Subtask became cancelled, sent to its orchestrator | `[Subtask cancelled](task:<uuid>?event=child_cancelled)` |
 
 Pass only the UUID to tools. Event values are exact lowercase URL metadata, not
@@ -312,7 +320,14 @@ not a separate dashboard. Message reason is fixed; title, state, definition and
 history are fetched from Task. Native session observations are labelled separately,
 read on demand and never imply business progress or capability readiness.
 
-When someone other than the assignee changes an assigned unfinished Agent Task's description or `blocked_by`, reopens it, or when one of its blockers resolves/cancels, the service records an `assignee_notices` row and sends exactly one fixed `[Task updated]` link with `mode:"immediate"`. When someone else cancels it, the service sends exactly one `[Task cancelled]` link. The complete message body is the link; the Skill defines how the recipient handles each event. These notices interject into a running turn without queue handling or interruption. Acceptance is not consumption or ACK; uncertain delivery does not authorize retries or a handwritten duplicate.
+Assigned work receives one `[Task updated]` at ready-to-blocked or blocked-to-ready
+boundaries, for ordinary agreement changes while ready, reopen, or blocker cancellation.
+Self-authored changes do not remind the actor. While blocked, ordinary edits and partial
+resolution save silently, not as queued messages for later replay. Assignee-added text
+conditions still send one `[Task blocked]` to the orchestrator. Cancellation sends the
+assignee `[Task cancelled]` unless self-authored. Assignee notices use `mode:"immediate"`;
+the whole message is the link. Acceptance is not ACK or user authorization, and uncertain
+delivery never authorizes a retry or handwritten duplicate.
 
 ### One-shot status subscriptions
 
@@ -340,24 +355,28 @@ in a bounded pass. One-shot triggering does not guarantee exactly-once host deli
 
 ### Task dependencies (blocked_by)
 
-For "do B after A", orchestrator creates B immediately as an unassigned Task with
-`blocked_by: [A, ...]` and its complete description instead of per-prerequisite
-subscriptions. `task_create` and `task_edit` accept at most 20 unique blocker UUIDs;
-edit replaces the whole set on any unfinished Task (automation only while still created). Blockers must exist, differ from B, not be B's ancestor (`BLOCKER_ANCESTOR`), and may belong to any orchestrator; newly added blockers cannot be cancelled and
-cycles are rejected. Blocker changes bump `editable`, not the definition revision.
+`blocked_by` accepts up to 20 unique `{task_id}` or `{condition}` items (legacy UUID
+strings remain accepted). A condition states what is missing and what satisfies it.
+Task references reject missing, self, ancestor, cancelled and cyclic prerequisites.
+The active set can be replaced atomically on unfinished work (automation only before
+start), without a false-ready interval. Assignees may add conditions; only their
+orchestrator or the user resolves or replaces one. Full prerequisite requirements
+belong in the referenced Task, not duplicated into both definitions.
 
-B is ready when every blocker is done. `task_assign` and `task_automation_start`
-reject `TASK_NOT_READY` otherwise, with no override. Readiness never changes
-status, assigns, starts or dispatches. Reads expose `blocked_by` (`task_id`,
-current `status`) and `ready` in overview/list context and on the classic board card.
+Reads expose only active `{task_id,status}` / `{condition}` entries; no active entries
+means `ready=true`. Assignment, automation start and Agent done reject `TASK_NOT_READY`
+otherwise. Reading, ACK, discussion and definition changes remain possible. Completion
+permanently resolves the active relation. Cancellation does not satisfy it; reopen
+never revives old relations or wakes old dependents. A new gap needs a new explicit
+dependency round after authorized, eligible rework has been arranged.
 
-When the last blocker of an undispatched dependent becomes done, the system enqueues one
-`event=ready` card for the dependent to its orchestrator; a cancelled blocker enqueues one
-`event=blocker_cancelled` card. If the dependent is already assigned, the assignee receives `[Task updated]` instead. Each notice is keyed by dependent, kind, blocker and
-blocker lifecycle, so a reopened blocker completing again may notify again. Non-assignee edits to `blocked_by` on an assigned Agent Task notify that assignee separately. orchestrator reassesses on the dependency card, then dispatches, revises
-`blocked_by` or cancels B. `task_read(view=dependency_notices)` returns delivery
-records with the same recovery semantics as subscriptions. There is no polling,
-automatic assignment or workflow engine.
+The last prerequisite's completion or explicit resolution notifies the assigned
+assignee, or the orchestrator if undispatched, once unless self-authored. Cancellation
+retains replanning notices. `task_read(view=dependencies)` pages active/resolved history;
+`dependency_notices` pages delivery facts. Readiness neither dispatches nor overrides
+authorization: a user's "wait until I say continue" remains in the agreement. A temporary
+pause itself is not a blocker, lifecycle status or request for orchestrator help.
+There is no polling, automatic assignment or session stop mechanism.
 
 orchestrator may also record recognized but undecided follow-up as an unassigned planning
 Task blocked by its prerequisites, plainly marked as a pending decision that must not

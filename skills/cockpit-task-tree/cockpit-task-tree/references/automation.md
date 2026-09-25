@@ -16,9 +16,9 @@ Agent delivery. Automation needs a Linux (or WSL2) host; elsewhere use an Agent 
 3. **Subscribe only if needed, then start.** If a necessary follow-up of yours depends on
    the result, subscribe before `task_automation_start` so fast completion cannot race it.
    Start enqueues the run once; replaying the same request never reruns it.
-4. **Read the result.** The service marks success `done` and failure or interruption
-   `blocked`, each with an outcome. Read the outcome, and run facts or logs only for a
-   concrete question; a truncated log is not complete evidence. Do not poll.
+4. **Read the result.** Every ended run is `done`; that lifecycle fact never means success.
+   Read the outcome and the separate `succeeded`, `failed` or `interrupted` run fact, and
+   logs only for a concrete question; a truncated log is not complete evidence. Do not poll.
 5. **Cancel or recover.** Cancelling before launch prevents the run; during it, cancellation
    requests termination but proves neither exit nor rollback. Recovery never reruns started
    work: an interrupted run blocks the queue behind a barrier. Review its possible effects

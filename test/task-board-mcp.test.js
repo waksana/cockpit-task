@@ -108,12 +108,12 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     assert.match(descriptions.task_assign, /not atomic.*queued or unconfirmed/);
     assert.match(descriptions.task_assign, /per-step results and failure-time availability_reasons; never blindly resend/);
     assert.doesNotMatch(descriptions.task_assign, /Does not interrupt or queue instructions/);
-    assert.match(descriptions.task_edit, /actual description change.*unfinished Task/);
+    assert.match(descriptions.task_edit, /actual description change.*automatically acknowledges/);
     assert.match(descriptions.task_reopen, /orchestrator or the original assignee.*done Agent Task to in_progress/);
     assert.match(descriptions.task_reopen, /no later assignment/);
     assert.match(descriptions.task_cancel, /Cancelled Tasks cannot reopen/);
     assert.match(descriptions.task_edit, /unchanged text and metadata-only edits do not/);
-    assert.match(descriptions.task_edit, /Never changes execution status/);
+    assert.match(descriptions.task_edit, /Never changes lifecycle status/);
     assert.match(descriptions.task_report, /done requires a new outcome in the same request/);
     assert.match(descriptions.task_report, /Stale activity may save while stale status\/outcome\/retro are rejected/);
     assert.match(descriptions.task_report, /explicit retro: useful text or null for no findings; omission is rejected/);
@@ -130,7 +130,7 @@ test('published tool descriptions explain filters, dispatch races and same-repor
   } finally { await f.close(); }
 });
 
-test('a status notification needs only one selective MCP read for done, blocked and absent outcomes', async () => {
+test('a status notification needs only one selective MCP read for done, in-progress and absent outcomes', async () => {
   const root = mkdtempSync(join(tmpdir(), 'task-selective-mcp-'));
   const store = new TaskStore(root), sent = [], reads = [];
   const service = new TaskService(store, {
@@ -143,7 +143,7 @@ test('a status notification needs only one selective MCP read for done, blocked 
   }, undefined, toolSchemas);
   try {
     await f.connect();
-    for (const [index, status, hasOutcome] of [[0, 'done', true], [1, 'blocked', true], [2, 'blocked', false]]) {
+    for (const [index, status, hasOutcome] of [[0, 'done', true], [1, 'in_progress', true], [2, 'in_progress', false]]) {
       const created = store.executeLocal('task_create', {
         actor: 'orchestrator', request_id: `create-${index}`, title: 'Selective notification', description: 'Synthetic only',
       });
@@ -156,8 +156,8 @@ test('a status notification needs only one selective MCP read for done, blocked 
       const base = { task_id: task.task_id, revision: 1, write_context: task.write_context, actor: task.assignee };
       store.executeLocal('task_ack', { ...base, request_id: `ack-${index}` });
       const { revision, ...subscription } = base;
-      store.executeLocal('task_subscribe', { ...subscription, request_id: `subscribe-${index}`, statuses: [status] });
-      const text = `${'Full activity. '.repeat(80)}${status === 'blocked' ? 'Asked the user directly; no Orchestrator relay needed.' : 'Delivered.'}`;
+      store.executeLocal('task_subscribe', { ...subscription, actor: 'observer', request_id: `subscribe-${index}`, statuses: [status] });
+      const text = `${'Full activity. '.repeat(80)}${status === 'in_progress' ? 'Work remains owned by the assignee.' : 'Delivered.'}`;
       const { actor, ...reportBase } = base;
       const report = await f.client.callTool({ name: 'task_report', arguments: {
         ...reportBase, request_id: `report-${index}`, status, activity: { text },
@@ -166,7 +166,7 @@ test('a status notification needs only one selective MCP read for done, blocked 
       }, _meta: { 'cockpit/invocation': { sessionId: actor, runtimeSessionId: actor, subagent: false } } });
       assert.notEqual(report.isError, true);
       assert.equal(sent.length, index + 1);
-      assert.deepEqual(sent[index], { orchestrator: `assignee-${index}`, text: `[Subscribed Task status changed](task:${task.task_id}?event=status_changed)` });
+      assert.deepEqual(sent[index], { orchestrator: 'observer', text: `[Subscribed Task status changed](task:${task.task_id}?event=status_changed)` });
       const count = reads.length;
       const response = await f.client.callTool({ name: 'task_read', arguments: {
         view: 'overview', task_id: task.task_id, include: ['activity', 'outcome', 'retro'],
@@ -376,8 +376,10 @@ test('real notification failure crosses MCP without erasing Task effects or rese
   });
 
   const f = fixture((name, input, options) => service.execute(name, input, options), undefined, toolSchemas);
-  const call = async (name, input) => {
-    const response = await f.client.callTool({ name, arguments: input });
+  const call = async (name, input, sessionId = 'orchestrator') => {
+    const response = await f.client.callTool({ name, arguments: input,
+      _meta: { 'cockpit/invocation': { sessionId, runtimeSessionId: sessionId, subagent: false } },
+    });
     assert.deepEqual(JSON.parse(response.content[0].text), response.structuredContent);
     assert.ok(response.structuredContent.definition_check);
     return response;
@@ -391,7 +393,7 @@ test('real notification failure crosses MCP without erasing Task effects or rese
     const { task_id, write_context } = created.structuredContent.result;
     const registered = await call('task_subscribe', {
       request_id: 'subscribe', task_id, write_context, statuses: ['cancelled'],
-    });
+    }, 'observer');
     assert.notEqual(registered.isError, true);
     assert.deepEqual(sent, []);
     const input = { request_id: 'cancel', task_id, write_context, reason: 'Synthetic cancellation' };
@@ -411,7 +413,7 @@ test('real notification failure crosses MCP without erasing Task effects or rese
     assert.equal(replay.isError, true);
     assert.deepEqual(replay.structuredContent, envelope);
     assert.deepEqual(sent, [{
-      orchestrator: 'orchestrator', text: `[Subscribed Task status changed](task:${task_id}?event=status_changed)`,
+      orchestrator: 'observer', text: `[Subscribed Task status changed](task:${task_id}?event=status_changed)`,
     }]);
   } finally {
     await f.close();

@@ -192,7 +192,14 @@ orchestrator 或原 assignee 可调用；工作仍继续归原 assignee，不要
 
 ### Assignee notices are service-sent immediate prompts
 
-Agents never send Task notices to other agents. When someone other than the assignee changes an assigned unfinished Agent Task description or `blocked_by`, reopens it, cancels it, or a blocker of an assigned dependent resolves/cancels, the module writes an `assignee_notices` row and uses host `prompt` with `mode:"immediate"` to send fixed updated/cancelled text to the assignee. Callers do not use `cockpit_send_prompt` or free text for these cards.
+Agents never send Task notices to other agents. Assigned unfinished work receives
+an `assignee_notices` updated row for ready-period agreement updates, ready/blocked
+boundaries, reopen or blocker cancellation; self-authored changes do not remind the
+actor. Ordinary blocked-period edits and partial unblocking stay silent. Cancellation
+retains its own assignee notice. The module uses `prompt` with `mode:"immediate"` and
+only the fixed updated/cancelled link. Assignee-added text conditions separately notify
+their orchestrator with `[Task blocked]`. Callers never use `cockpit_send_prompt` or
+free text for these cards; no native mode/permission/stop policy is added.
 运行中的 immediate 是向当前轮次插入消息，不是新开一轮；不整理、删除或重放队列，
 也不为通知中断主轮次或后台工作。它不能回答待决 ask/plan/elicitation，受理不等于已读或 ACK，
 失败或未知效果只作有界核对，不盲重试或自动升级为中断。

@@ -5,8 +5,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { LIMITS, TaskError, parseInternal, definitionFits } from './contracts.js';
 import { AutomationStore } from './automation-store.js';
 import { groupAlive } from './automation-runner.js';
+import { validateLifecyclePlan } from './lifecycle-migration.js';
 
 export { TaskError } from './contracts.js';
+export { inspectLifecycleMigration } from './lifecycle-migration.js';
 const terminal = status => status === 'done' || status === 'cancelled';
 const now = () => new Date().toISOString();
 const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -23,6 +25,7 @@ const notificationTable = table => {
   if (!['subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices'].includes(table)) throw new Error('Unknown notification table');
   return table;
 };
+
 function decode(value, code) {
   try {
     if (!/^[A-Za-z0-9_-]+$/.test(value)) throw new Error();
@@ -33,14 +36,17 @@ function decode(value, code) {
 }
 
 export class TaskStore {
-  constructor(directory, { platform = process.platform } = {}) {
+  constructor(directory, { platform = process.platform, migrationPlan = null } = {}) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const file = join(directory, 'task-board.sqlite');
     this.db = new DatabaseSync(file);
     try {
-      chmodSync(file, 0o600);
       const version = this.db.prepare('PRAGMA user_version').get().user_version;
-      if (version > 9) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
+      if (version > 10) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
+      if (version === 9 && migrationPlan === null) {
+        fail('MIGRATION_REVIEW_REQUIRED', 'Every existing schema v9 database requires a reviewed lifecycle plan, including an empty legacy Task set');
+      }
+      chmodSync(file, 0o600);
       this.db.exec(`
       PRAGMA journal_mode=WAL;
       PRAGMA synchronous=FULL;
@@ -48,6 +54,10 @@ export class TaskStore {
       PRAGMA busy_timeout=5000;
       BEGIN IMMEDIATE;
       `);
+      if (migrationPlan !== null) {
+        if (version !== 9) fail('MIGRATION_REVIEW_REQUIRED', 'An explicit lifecycle plan applies only to schema v9');
+        validateLifecyclePlan(this.db, migrationPlan);
+      }
       // Schemas before v9 are built with their historical names, then renamed once by v9.
       if (version < 9) this.db.exec(`
       CREATE TABLE IF NOT EXISTS tasks (
@@ -195,7 +205,8 @@ export class TaskStore {
         CREATE INDEX IF NOT EXISTS retro_handlings_task ON retro_handlings(task_id,seq);
       `);
       if (version < 9) this.migrateVocabulary();
-      this.db.exec('PRAGMA user_version=9; COMMIT;');
+      if (version < 10) this.migrateLifecycle(migrationPlan?.tasks);
+      this.db.exec('PRAGMA user_version=10; COMMIT;');
       this.automation = new AutomationStore(this, { platform });
     } catch (error) {
       this.db.close();
@@ -245,6 +256,176 @@ export class TaskStore {
         WHERE tool='task_assign' AND json_type(input,'$.executor') IS NOT NULL;
       UPDATE operations SET result=json_remove(json_set(result,'$.operation.assignee',json_extract(result,'$.operation.executor')),'$.operation.executor')
         WHERE tool='task_assign' AND json_type(result,'$.operation.executor') IS NOT NULL;
+    `);
+  }
+
+  migrateLifecycle(plan) {
+    const at = now();
+    const legacy = this.db.prepare("SELECT * FROM tasks WHERE status IN ('blocked','in_review') ORDER BY seq").all();
+    const entries = plan && typeof plan === 'object' && !Array.isArray(plan) ? plan : {};
+    const inventory = legacy.map(row => {
+      const dependencies = this.db.prepare('SELECT count(*) AS count FROM task_dependencies WHERE task_id=?').get(row.id).count;
+      const run = row.kind === 'automation'
+        ? this.db.prepare('SELECT state,exit_code,signal,error,barrier,finished_at FROM automation_runs WHERE task_id=?').get(row.id)
+        : null;
+      return {
+        task_id: row.id, revision: row.revision, status: row.status, kind: row.kind,
+        dependency_count: dependencies, automation: run,
+      };
+    });
+    const validated = new Map();
+    for (const item of inventory) {
+      const entry = entries[item.task_id];
+      if (!entry || typeof entry !== 'object' || entry.revision !== item.revision
+        || typeof entry.source !== 'string' || !entry.source.trim()) continue;
+      const expected = item.kind === 'automation' ? ['automation_finished']
+        : item.status === 'in_review' ? ['resume']
+          : item.dependency_count ? ['preserve_dependencies'] : ['condition', 'paused'];
+      if (!expected.includes(entry.action)) continue;
+      if (entry.action === 'condition'
+        && (typeof entry.condition !== 'string' || !entry.condition.trim() || entry.condition.length > LIMITS.blockerCondition)) continue;
+      if (entry.action === 'automation_finished'
+        && (!item.automation || ['created', 'queued', 'starting', 'running'].includes(item.automation.state))) continue;
+      validated.set(item.task_id, entry);
+    }
+    if (validated.size !== inventory.length) {
+      fail('MIGRATION_REVIEW_REQUIRED',
+        'Schema v10 requires a reviewed entry with the exact revision and supported action for every legacy blocked/in_review Task; no migration changes were committed',
+        409, { schema: 10, inventory, required_actions: ['preserve_dependencies', 'condition', 'paused', 'resume', 'automation_finished'] });
+    }
+
+    this.db.exec(`
+      DROP INDEX IF EXISTS task_dependencies_task;
+      DROP INDEX IF EXISTS task_dependencies_blocker;
+      DROP INDEX IF EXISTS task_dependencies_active_task;
+      DROP INDEX IF EXISTS task_dependencies_active_condition;
+      ALTER TABLE task_dependencies RENAME TO task_dependencies_v9;
+      CREATE TABLE task_dependencies (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+        task_id TEXT NOT NULL REFERENCES tasks(id),
+        kind TEXT NOT NULL CHECK(kind IN ('task','condition')),
+        blocker_id TEXT REFERENCES tasks(id), condition TEXT,
+        author TEXT NOT NULL, at TEXT NOT NULL,
+        resolved_at TEXT, resolved_by TEXT,
+        resolution TEXT CHECK(resolution IN ('done','removed')),
+        blocker_lifecycle INTEGER,
+        CHECK((kind='task' AND blocker_id IS NOT NULL AND condition IS NULL AND task_id<>blocker_id)
+          OR (kind='condition' AND blocker_id IS NULL AND condition IS NOT NULL)),
+        CHECK((resolved_at IS NULL AND resolved_by IS NULL AND resolution IS NULL)
+          OR (resolved_at IS NOT NULL AND resolved_by IS NOT NULL AND resolution IS NOT NULL))
+      );
+      CREATE INDEX task_dependencies_task ON task_dependencies(task_id,seq);
+      CREATE INDEX task_dependencies_blocker ON task_dependencies(blocker_id)
+        WHERE blocker_id IS NOT NULL AND resolved_at IS NULL;
+      CREATE UNIQUE INDEX task_dependencies_active_task ON task_dependencies(task_id,blocker_id)
+        WHERE kind='task' AND resolved_at IS NULL;
+      CREATE UNIQUE INDEX task_dependencies_active_condition ON task_dependencies(task_id,condition)
+        WHERE kind='condition' AND resolved_at IS NULL;
+      CREATE TABLE migration_v10_items (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT NOT NULL UNIQUE REFERENCES tasks(id), revision INTEGER NOT NULL,
+        prior_status TEXT NOT NULL, action TEXT NOT NULL, source TEXT NOT NULL,
+        condition TEXT, migrated_at TEXT NOT NULL
+      );
+    `);
+    for (const dependency of this.db.prepare('SELECT * FROM task_dependencies_v9 ORDER BY seq').all()) {
+      const blocker = this.db.prepare('SELECT status,lifecycle FROM tasks WHERE id=?').get(dependency.blocker_id);
+      const resolved = blocker?.status === 'done' || validated.get(dependency.blocker_id)?.action === 'automation_finished';
+      this.db.prepare(`INSERT INTO task_dependencies(
+        id,task_id,kind,blocker_id,author,at,resolved_at,resolved_by,resolution,blocker_lifecycle
+      ) VALUES(?,?,'task',?,?,?,?,?,?,?)`).run(
+        randomUUID(), dependency.task_id, dependency.blocker_id, dependency.author, dependency.at,
+        resolved ? at : null, resolved ? 'migration:v10' : null, resolved ? 'done' : null,
+        resolved ? blocker.lifecycle + Number(validated.get(dependency.blocker_id)?.action === 'automation_finished') : null,
+      );
+    }
+    this.db.exec('DROP TABLE task_dependencies_v9;');
+    this.db.exec(`
+      DROP INDEX IF EXISTS dependency_notices_task;
+      DROP INDEX IF EXISTS dependency_notices_pending;
+      ALTER TABLE dependency_notices RENAME TO dependency_notices_v9;
+      CREATE TABLE dependency_notices (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+        task_id TEXT NOT NULL REFERENCES tasks(id), blocker_id TEXT REFERENCES tasks(id),
+        dependency_id TEXT, blocker_lifecycle INTEGER, orchestrator TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK(kind IN ('ready','blocker_cancelled','blocked')),
+        event TEXT NOT NULL, created_at TEXT NOT NULL,
+        delivery_status TEXT NOT NULL DEFAULT 'pending'
+          CHECK(delivery_status IN ('pending','unknown','accepted','queued','not_sent')),
+        attempted_at TEXT, completed_at TEXT, delivery_error TEXT
+      );
+      INSERT INTO dependency_notices(
+        seq,id,task_id,blocker_id,blocker_lifecycle,orchestrator,kind,event,created_at,
+        delivery_status,attempted_at,completed_at,delivery_error
+      ) SELECT seq,id,task_id,blocker_id,blocker_lifecycle,orchestrator,kind,event,created_at,
+        delivery_status,attempted_at,completed_at,delivery_error FROM dependency_notices_v9;
+      DROP TABLE dependency_notices_v9;
+      CREATE INDEX dependency_notices_task ON dependency_notices(task_id,seq);
+      CREATE INDEX dependency_notices_pending ON dependency_notices(seq) WHERE delivery_status='pending';
+      CREATE UNIQUE INDEX dependency_notices_dependency ON dependency_notices(task_id,kind,dependency_id)
+        WHERE dependency_id IS NOT NULL;
+    `);
+    for (const row of legacy) {
+      const entry = validated.get(row.id);
+      if (entry.action === 'condition') {
+        this.db.prepare(`INSERT INTO task_dependencies(
+          id,task_id,kind,condition,author,at
+        ) VALUES(?,?,'condition',?,?,?)`).run(randomUUID(), row.id, entry.condition.trim(), 'migration:v10', at);
+      }
+      const status = entry.action === 'automation_finished' ? 'done' : 'in_progress';
+      if (entry.action === 'automation_finished') {
+        const run = this.db.prepare('SELECT * FROM automation_runs WHERE task_id=?').get(row.id);
+        if (!this.db.prepare('SELECT 1 FROM outcomes WHERE task_id=? AND run_id=?').get(row.id, run.run_id)) {
+          const summary = [
+            `Migrated finished automation ${run.state}; script ${run.script_id}; run ${run.run_id}.`,
+            `Exit code: ${run.exit_code ?? 'unconfirmed'}; signal: ${run.signal ?? 'none'}.`,
+            run.error,
+            run.barrier ? 'Process-group termination remains unconfirmed; explicit reconciliation is required.' : null,
+            'Historical run facts only. Migration did not execute a script or certify success.',
+          ].filter(Boolean).join('\n');
+          this.db.prepare(`INSERT INTO outcomes(id,task_id,revision,assignee,author,summary,refs,at,run_id)
+            VALUES(?,?,?,NULL,?,?,?, ?,?)`).run(
+            randomUUID(), row.id, run.revision ?? row.revision, `automation:${run.run_id}`, summary, '[]', at, run.run_id,
+          );
+        }
+      }
+      this.db.prepare('UPDATE tasks SET status=?,lifecycle=lifecycle+1,updated_at=? WHERE id=?').run(status, at, row.id);
+      this.db.prepare(`INSERT INTO migration_v10_items(
+        task_id,revision,prior_status,action,source,condition,migrated_at
+      ) VALUES(?,?,?,?,?,?,?)`).run(
+        row.id, row.revision, row.status, entry.action, entry.source.trim(),
+        entry.action === 'condition' ? entry.condition.trim() : null, at,
+      );
+    }
+    this.db.exec(`CREATE TABLE migration_v10_subscriptions (
+      subscription_id TEXT PRIMARY KEY REFERENCES subscriptions(id), prior_statuses TEXT NOT NULL,
+      prior_state TEXT NOT NULL, migrated_at TEXT NOT NULL
+    )`);
+    for (const subscription of this.db.prepare("SELECT * FROM subscriptions WHERE state='waiting'").all()) {
+      const targets = JSON.parse(subscription.statuses);
+      const current = targets.filter(status => !['blocked', 'in_review'].includes(status));
+      const expired = !current.length || terminal(this.row(subscription.task_id).status);
+      if (current.length !== targets.length || expired) {
+        this.db.prepare('INSERT INTO migration_v10_subscriptions VALUES(?,?,?,?)')
+          .run(subscription.id, subscription.statuses, subscription.state, at);
+        this.db.prepare('UPDATE subscriptions SET statuses=?,state=?,ended_at=? WHERE id=?')
+          .run(JSON.stringify(current), expired ? 'expired' : 'waiting', expired ? at : null, subscription.id);
+      }
+    }
+    for (const table of ['subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices']) {
+      this.db.prepare(`UPDATE ${table} SET delivery_status='not_sent',completed_at=?,delivery_error=?
+        WHERE delivery_status='pending'`).run(at, JSON.stringify({
+        code: 'MIGRATION_NOTIFICATION_EXPIRED',
+        message: 'Known-unsent notice expired at schema v10 migration; no historical wakeups were replayed',
+      }));
+    }
+    this.db.exec(`
+      CREATE TRIGGER tasks_status_insert BEFORE INSERT ON tasks
+      WHEN NEW.status NOT IN ('todo','in_progress','done','cancelled')
+      BEGIN SELECT RAISE(ABORT,'invalid Task lifecycle status'); END;
+      CREATE TRIGGER tasks_status_update BEFORE UPDATE OF status ON tasks
+      WHEN NEW.status NOT IN ('todo','in_progress','done','cancelled')
+      BEGIN SELECT RAISE(ABORT,'invalid Task lifecycle status'); END;
     `);
   }
 
@@ -332,30 +513,56 @@ export class TaskStore {
     return orchestrator && assignee ? 'orchestrator_and_assignee' : assignee ? 'assignee' : orchestrator ? 'orchestrator' : 'none';
   }
   dependencies(taskId) {
-    const blocked_by = this.db.prepare(`SELECT d.blocker_id AS task_id, t.status FROM task_dependencies d
-      JOIN tasks t ON t.id=d.blocker_id WHERE d.task_id=? ORDER BY d.seq`).all(taskId).map(entry => ({ ...entry }));
-    return { blocked_by, ready: blocked_by.every(entry => entry.status === 'done') };
+    const blocked_by = this.db.prepare(`SELECT d.id,d.kind,d.blocker_id,d.condition,t.status
+      FROM task_dependencies d LEFT JOIN tasks t ON t.id=d.blocker_id
+      WHERE d.task_id=? AND d.resolved_at IS NULL ORDER BY d.seq`).all(taskId).map(entry =>
+      entry.kind === 'task'
+        ? { task_id: entry.blocker_id, status: entry.status }
+        : { condition: entry.condition });
+    return { blocked_by, ready: blocked_by.length === 0 };
+  }
+  dependency(entry) {
+    return {
+      dependency_id: entry.id, task_id: entry.task_id, kind: entry.kind,
+      ...(entry.kind === 'task' ? { blocker_id: entry.blocker_id } : { condition: entry.condition }),
+      author: entry.author, created_at: entry.at,
+      active: entry.resolved_at === null,
+      resolved_at: entry.resolved_at, resolved_by: entry.resolved_by, resolution: entry.resolution,
+      blocker_lifecycle: entry.blocker_lifecycle,
+    };
   }
   awaitingDispatch(row) {
     if (row.status !== 'todo' || row.assignee) return false;
     return row.kind !== 'automation' || this.automation.run(row.id, { includeLog: false }).state === 'created';
   }
   assertReady(row) {
-    const waiting = this.dependencies(row.id).blocked_by.filter(entry => entry.status !== 'done');
+    const waiting = this.dependencies(row.id).blocked_by;
     if (waiting.length) {
-      fail('TASK_NOT_READY', `Task is blocked by ${waiting.length} Task(s) not yet done (${waiting.map(entry => `${entry.task_id}: ${entry.status}`).join(', ')}); dispatch after every blocker is done, or edit blocked_by`);
+      fail('TASK_NOT_READY', `Task has ${waiting.length} unmet prerequisite(s) (${waiting.map(entry =>
+        entry.task_id ? `${entry.task_id}: ${entry.status}` : entry.condition).join('; ')}); dispatch after every blocker is satisfied or explicitly resolved`);
     }
   }
   setBlockers(row, requested, author, at) {
-    const next = requested.map(value => value.toLowerCase());
-    const current = this.db.prepare('SELECT blocker_id FROM task_dependencies WHERE task_id=?').all(row.id).map(entry => entry.blocker_id);
-    const added = next.filter(value => !current.includes(value));
-    const removed = current.filter(value => !next.includes(value));
+    const normalized = requested.map(value => typeof value === 'string'
+      ? { kind: 'task', task_id: value.toLowerCase(), key: `task:${value.toLowerCase()}` }
+      : 'task_id' in value
+        ? { kind: 'task', task_id: value.task_id.toLowerCase(), key: `task:${value.task_id.toLowerCase()}` }
+        : { kind: 'condition', condition: value.condition.trim(), key: `condition:${value.condition.trim()}` });
+    const current = this.db.prepare(`SELECT id,kind,blocker_id,condition FROM task_dependencies
+      WHERE task_id=? AND resolved_at IS NULL ORDER BY seq`).all(row.id).map(entry => ({
+      ...entry, key: entry.kind === 'task' ? `task:${entry.blocker_id}` : `condition:${entry.condition}`,
+    }));
+    const added = normalized.filter(value => !current.some(entry => entry.key === value.key));
+    const removed = current.filter(value => !normalized.some(entry => entry.key === value.key));
     if (!added.length && !removed.length) return false;
     if (terminal(row.status) || (row.kind === 'automation' && this.automation.run(row.id, { includeLog: false }).state !== 'created')) {
       fail('DEPENDENCY_LOCKED', 'blocked_by can change only on an unfinished Task (automation only before it starts)');
     }
-    for (const id of added) {
+    if (removed.some(entry => entry.kind === 'condition') && row.assignee === author && row.orchestrator !== author) {
+      fail('CONDITION_RESOLUTION_REQUIRED', 'Only the Task orchestrator or user may resolve or replace a textual blocker; the assignee may add a concrete unmet condition');
+    }
+    for (const entry of added.filter(value => value.kind === 'task')) {
+      const id = entry.task_id;
       if (id === row.id) fail('DEPENDENCY_SELF', 'A Task cannot be blocked by itself', 400);
       const blocker = this.db.prepare('SELECT id,status FROM tasks WHERE id=?').get(id);
       if (!blocker) fail('BLOCKER_NOT_FOUND', `Blocker Task ${id} does not exist`, 404);
@@ -365,13 +572,30 @@ export class TaskStore {
       }
       if (blocker.status === 'cancelled') fail('BLOCKER_CANCELLED', `Blocker Task ${id} is cancelled and can never become done`);
     }
-    for (const id of removed) this.db.prepare('DELETE FROM task_dependencies WHERE task_id=? AND blocker_id=?').run(row.id, id);
-    for (const id of added) {
-      this.db.prepare('INSERT INTO task_dependencies(task_id,blocker_id,author,at) VALUES(?,?,?,?)').run(row.id, id, author, at);
+    for (const entry of removed) {
+      this.db.prepare(`UPDATE task_dependencies
+        SET resolved_at=?,resolved_by=?,resolution='removed' WHERE id=? AND resolved_at IS NULL`).run(at, author, entry.id);
     }
-    const cycle = added.length && this.db.prepare(`WITH RECURSIVE reachable(id) AS (
-        SELECT blocker_id FROM task_dependencies WHERE task_id=?
+    for (const entry of added) {
+      if (entry.kind === 'condition') {
+        this.db.prepare(`INSERT INTO task_dependencies(id,task_id,kind,condition,author,at)
+          VALUES(?,?,'condition',?,?,?)`).run(randomUUID(), row.id, entry.condition, author, at);
+        continue;
+      }
+      const blocker = this.row(entry.task_id);
+      const resolved = blocker.status === 'done';
+      this.db.prepare(`INSERT INTO task_dependencies(
+        id,task_id,kind,blocker_id,author,at,resolved_at,resolved_by,resolution,blocker_lifecycle
+      ) VALUES(?,?,'task',?,?,?,?,?,?,?)`).run(
+        randomUUID(), row.id, entry.task_id, author, at,
+        resolved ? at : null, resolved ? author : null, resolved ? 'done' : null,
+        resolved ? blocker.lifecycle : null,
+      );
+    }
+    const cycle = added.some(entry => entry.kind === 'task') && this.db.prepare(`WITH RECURSIVE reachable(id) AS (
+        SELECT blocker_id FROM task_dependencies WHERE task_id=? AND kind='task' AND resolved_at IS NULL
         UNION SELECT d.blocker_id FROM task_dependencies d JOIN reachable r ON d.task_id=r.id
+          WHERE d.kind='task' AND d.resolved_at IS NULL
       ) SELECT 1 FROM reachable WHERE id=? LIMIT 1`).get(row.id, row.id);
     if (cycle) fail('DEPENDENCY_CYCLE', 'blocked_by would create a dependency cycle');
     return true;
@@ -521,11 +745,13 @@ export class TaskStore {
       fail('INVALID_INPUT', 'Combined serialized description and materials exceed 64000 characters', 400);
     }
     const at = now();
+    const beforeDependencies = this.dependencies(row.id);
     const blockersChanged = input.blocked_by !== undefined && this.setBlockers(row, input.blocked_by, input.actor, at);
     const metadataChanged = (input.title !== undefined && input.title !== row.title)
       || canonical(JSON.parse(references)) !== canonical(JSON.parse(row.refs))
       || canonical(JSON.parse(metadata)) !== canonical(JSON.parse(row.metadata)) || blockersChanged;
-    const dependencyResult = input.blocked_by !== undefined ? { blockers_changed: blockersChanged, ...this.dependencies(row.id) } : {};
+    const afterDependencies = this.dependencies(row.id);
+    const dependencyResult = input.blocked_by !== undefined ? { blockers_changed: blockersChanged, ...afterDependencies } : {};
     if (!descriptionChanged && !metadataChanged) return { result: { ...this.effects(row, 'unchanged'), ...dependencyResult } };
     const revision = row.revision + Number(descriptionChanged);
     this.db.prepare('UPDATE tasks SET title=?,description=?,refs=?,metadata=?,revision=?,editable=editable+?,updated_at=? WHERE id=?')
@@ -534,13 +760,29 @@ export class TaskStore {
       this.recordDefinition(this.row(row.id), input.reason, input.actor, at);
       if (!terminal(row.status) && row.assignee === input.actor) this.recordAck(this.row(row.id), input.actor);
     }
-    // Every new revision someone else writes for a working assignee is announced by the service itself.
-    const notify = (descriptionChanged || blockersChanged) && row.kind === 'agent' && row.assignee && !terminal(row.status) && row.assignee !== input.actor;
-    const notice_ids = notify ? [this.recordAssigneeNotice(this.row(row.id), input, at)] : [];
+    const becameBlocked = beforeDependencies.ready && !afterDependencies.ready;
+    const becameReady = !beforeDependencies.ready && afterDependencies.ready;
+    const ordinaryUpdate = descriptionChanged && beforeDependencies.ready && afterDependencies.ready;
+    const notice_ids = [];
+    if (row.kind === 'agent' && row.assignee && !terminal(row.status) && row.assignee !== input.actor
+      && (becameBlocked || becameReady || ordinaryUpdate)) {
+      notice_ids.push(this.recordAssigneeNotice(this.row(row.id), input, at));
+    }
+    const priorConditions = new Set(beforeDependencies.blocked_by.filter(entry => entry.condition).map(entry => entry.condition));
+    const addedConditions = afterDependencies.blocked_by.filter(entry => entry.condition && !priorConditions.has(entry.condition));
+    if (row.kind === 'agent' && row.assignee === input.actor && row.orchestrator !== input.actor && addedConditions.length) {
+      const dependency = this.db.prepare(`SELECT id FROM task_dependencies
+        WHERE task_id=? AND kind='condition' AND condition=? AND resolved_at IS NULL`).get(row.id, addedConditions.at(-1).condition);
+      notice_ids.push(this.recordDependencyNotice(this.row(row.id), input, at, 'blocked', {
+        dependency_id: dependency.id,
+      }));
+    } else if (!row.assignee && becameReady && row.orchestrator !== input.actor) {
+      notice_ids.push(this.recordDependencyNotice(this.row(row.id), input, at, 'ready'));
+    }
     return {
       result: {
         ...this.effects(this.row(row.id)), description_changed: descriptionChanged, metadata_changed: metadataChanged,
-        ...dependencyResult, ...(notify ? { notice_ids } : {}),
+        ...dependencyResult, ...(notice_ids.length ? { notice_ids } : {}),
       },
     };
   }
@@ -606,6 +848,7 @@ export class TaskStore {
       .get(row.id, input.revision, row.assignee);
     if (!ack) fail('ACK_REQUIRED', 'The fixed assignee has not acknowledged the specified revision');
     const stale = input.revision !== row.revision;
+    if (!stale && input.status === 'done') this.assertReady(row);
     const field = requested => ({ status: requested ? 'rejected' : 'not_requested' });
     const fields = {
       activity: field(input.activity), task_status: field(input.status), outcome: field(input.outcome),
@@ -723,9 +966,18 @@ export class TaskStore {
           event_id: randomUUID(), request_id: input.request_id, from_status: row.status, status, at, actor: input.actor,
           ...(input.source === 'automation' ? { source: 'automation', run_id: input.run_id } : {}),
         };
-        this.db.prepare("UPDATE subscriptions SET state='triggered',ended_at=?,event=?,delivery_status='pending' WHERE id=?")
-          .run(at, JSON.stringify(event), subscription.id);
-        ids.push(subscription.id);
+        const suppression = subscription.subscriber === input.actor ? 'SELF_NOTIFICATION_SUPPRESSED'
+          : status === 'cancelled' && row.kind === 'agent' && subscription.subscriber === row.assignee
+            ? 'DUPLICATE_NOTIFICATION_SUPPRESSED' : null;
+        const error = suppression ? JSON.stringify({
+          code: suppression, message: suppression === 'SELF_NOTIFICATION_SUPPRESSED'
+            ? 'The subscriber caused this transition; no self-reminder is sent.'
+            : 'The immediate Task cancelled notice covers this transition and recipient.',
+        }) : null;
+        this.db.prepare(`UPDATE subscriptions SET state='triggered',ended_at=?,event=?,delivery_status=?,
+          completed_at=?,delivery_error=? WHERE id=?`)
+          .run(at, JSON.stringify(event), suppression ? 'not_sent' : 'pending', suppression ? at : null, error, subscription.id);
+        if (!suppression) ids.push(subscription.id);
       } else if (terminal(status)) {
         this.db.prepare("UPDATE subscriptions SET state='expired',ended_at=? WHERE id=?").run(at, subscription.id);
       }
@@ -736,39 +988,41 @@ export class TaskStore {
     // Only a real transition of a blocker into done/cancelled can notify, once per dependent.
     if (status === row.status || !terminal(status)) return [];
     const blocker = this.row(row.id);
-    const dependents = this.db.prepare(`SELECT t.* FROM task_dependencies d JOIN tasks t ON t.id=d.task_id
-      WHERE d.blocker_id=? ORDER BY d.seq`).all(row.id);
+    const dependencies = this.db.prepare(`SELECT d.id AS dependency_id,t.* FROM task_dependencies d JOIN tasks t ON t.id=d.task_id
+      WHERE d.blocker_id=? AND d.kind='task' AND d.resolved_at IS NULL ORDER BY d.seq`).all(row.id);
     const ids = [];
-    for (const dependent of dependents) {
+    for (const dependent of dependencies) {
       const kind = status === 'done' ? 'ready' : 'blocker_cancelled';
+      if (status === 'done') {
+        this.db.prepare(`UPDATE task_dependencies SET resolved_at=?,resolved_by=?,resolution='done',blocker_lifecycle=?
+          WHERE id=? AND resolved_at IS NULL`).run(at, input.actor ?? input.source ?? 'service', blocker.lifecycle, dependent.dependency_id);
+      }
       if (kind === 'ready' && !this.dependencies(dependent.id).ready) continue;
       // An assigned dependent is its assignee's to resume: the service points it back at its Task.
       if (!this.awaitingDispatch(dependent)) {
-        if (dependent.kind === 'agent' && dependent.assignee && !terminal(dependent.status)) {
+        if (dependent.kind === 'agent' && dependent.assignee && !terminal(dependent.status)
+          && dependent.assignee !== input.actor) {
           ids.push(this.recordAssigneeNotice(dependent, input, at));
         }
         continue;
       }
-      const id = randomUUID();
-      const event = {
-        event_id: randomUUID(), blocker_id: row.id, blocker_status: status, request_id: input.request_id, at,
-        actor: input.actor,
-        ...(input.source === 'automation' ? { source: 'automation', run_id: input.run_id } : {}),
-      };
-      const inserted = this.db.prepare(`INSERT OR IGNORE INTO dependency_notices(id,task_id,blocker_id,blocker_lifecycle,orchestrator,kind,event,created_at)
-        VALUES(?,?,?,?,?,?,?,?)`).run(id, dependent.id, row.id, blocker.lifecycle, dependent.orchestrator, kind, JSON.stringify(event), at);
-      if (inserted.changes) ids.push(id);
+      if (dependent.orchestrator === input.actor) continue;
+      const notice = this.recordDependencyNotice(dependent, input, at, kind, {
+        dependency_id: dependent.dependency_id, blocker_id: row.id, blocker_lifecycle: blocker.lifecycle,
+        blocker_status: status,
+      });
+      if (notice) ids.push(notice);
     }
     return ids;
   }
   transitionChild(row, status, input, at, triggered = []) {
-    // A Subtask's done/blocked/cancelled transition wakes its orchestrator (the parent's assignee) while the parent is unfinished.
-    if (!row.parent_task_id || status === row.status || !['done', 'blocked', 'cancelled'].includes(status)) return [];
+    // A Subtask's terminal transition wakes its orchestrator (the parent's assignee) while the parent is unfinished.
+    if (!row.parent_task_id || status === row.status || !['done', 'cancelled'].includes(status)) return [];
     // A subscription card to the same orchestrator already covers this transition; anyone else's does not.
     const covered = triggered.some(id => this.db.prepare('SELECT subscriber FROM subscriptions WHERE id=?').get(id)?.subscriber === row.orchestrator);
     if (covered) return [];
     const parent = this.row(row.parent_task_id);
-    if (terminal(parent.status) || parent.assignee !== row.orchestrator) return [];
+    if (terminal(parent.status) || parent.assignee !== row.orchestrator || row.orchestrator === input.actor) return [];
     const child = this.row(row.id);
     const id = randomUUID();
     const event = {
@@ -789,6 +1043,23 @@ export class TaskStore {
     this.db.prepare('INSERT INTO assignee_notices(id,task_id,revision,assignee,kind,event,created_at) VALUES(?,?,?,?,?,?,?)')
       .run(id, row.id, row.revision, row.assignee, kind, JSON.stringify(event), at);
     return id;
+  }
+  recordDependencyNotice(row, input, at, kind, {
+    dependency_id = null, blocker_id = null, blocker_lifecycle = null, blocker_status = null,
+  } = {}) {
+    const id = randomUUID();
+    const event = {
+      event_id: randomUUID(), request_id: input.request_id, at, actor: input.actor,
+      ...(dependency_id ? { dependency_id } : {}),
+      ...(blocker_id ? { blocker_id, blocker_status } : {}),
+      ...(input.source === 'automation' ? { source: 'automation', run_id: input.run_id } : {}),
+    };
+    const inserted = this.db.prepare(`INSERT OR IGNORE INTO dependency_notices(
+      id,task_id,blocker_id,dependency_id,blocker_lifecycle,orchestrator,kind,event,created_at
+    ) VALUES(?,?,?,?,?,?,?,?,?)`).run(
+      id, row.id, blocker_id, dependency_id, blocker_lifecycle, row.orchestrator, kind, JSON.stringify(event), at,
+    );
+    return inserted.changes ? id : null;
   }
   assigneeNotice(row) {
     return {
@@ -812,7 +1083,8 @@ export class TaskStore {
   }
   notice(row) {
     return {
-      notice_id: row.id, task_id: row.task_id, blocker_id: row.blocker_id, orchestrator: row.orchestrator, kind: row.kind,
+      notice_id: row.id, task_id: row.task_id, blocker_id: row.blocker_id, dependency_id: row.dependency_id,
+      orchestrator: row.orchestrator, kind: row.kind,
       event: JSON.parse(row.event), created_at: row.created_at,
       notification: {
         status: row.delivery_status, attempted_at: row.attempted_at, completed_at: row.completed_at,
@@ -1089,7 +1361,14 @@ export class TaskStore {
       }
       const limit = input.limit ?? 20;
       const rows = this.db.prepare(`SELECT * FROM tasks WHERE ${clauses.join(' AND ')} ORDER BY seq DESC LIMIT ?`).all(...values, limit + 1);
-      return this.page(rows, limit, scope, row => withRole(this.overview(row, false)));
+      return this.page(rows, limit, scope, row => {
+        const item = this.overview(row, false);
+        // Lists must remain pageable even with twenty JSON-escaped maximum-length conditions.
+        item.blocked_by = item.blocked_by.map(entry => entry.condition === undefined ? entry : {
+          condition: entry.condition.slice(0, 80), truncated: entry.condition.length > 80,
+        });
+        return withRole(item);
+      });
     }
     const row = this.row(input.task_id);
     if (input.view === 'automation_log') return this.automation.log(input);
@@ -1113,6 +1392,13 @@ export class TaskStore {
       const rows = this.db.prepare('SELECT * FROM retro_handlings WHERE task_id=? AND seq < ? ORDER BY seq DESC LIMIT ?')
         .all(row.id, this.cursor(input, scope), limit + 1);
       return this.page(rows, limit, scope, entry => ({ ...this.handlingEntry(entry), outcome_id: entry.outcome_id }), { task_id: row.id });
+    }
+    if (input.view === 'dependencies') {
+      const scope = hash({ view: input.view, task_id: row.id });
+      const limit = input.limit ?? 5;
+      const rows = this.db.prepare('SELECT * FROM task_dependencies WHERE task_id=? AND seq < ? ORDER BY seq DESC LIMIT ?')
+        .all(row.id, this.cursor(input, scope), limit + 1);
+      return this.page(rows, limit, scope, entry => this.dependency(entry), { task_id: row.id });
     }
     const table = { changelog: 'definitions', activity: 'activities', outcomes: 'outcomes' }[input.view];
     const scope = hash({ view: input.view, task_id: row.id });

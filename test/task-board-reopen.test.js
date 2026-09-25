@@ -167,7 +167,7 @@ test('assignment history preserves reopen eligibility after restart', t => {
   const f = fixture(t), prior = f.done(f.assign(f.create()));
   const history = f.store.read({ view: 'outcomes', task_id: prior.task_id });
   f.restart();
-  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 9);
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 10);
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM task_assignments').get().n, 1);
   assert.deepEqual(f.store.read({ view: 'outcomes', task_id: prior.task_id }), history);
   assert.equal(f.reopen(prior).task_status, 'in_progress');
@@ -203,7 +203,7 @@ test('expired and explicitly cancelled waits remain ended across reopening and s
     actor: 'orchestrator', request_id: randomUUID(), task_id: assigned.task_id,
     subscription_id: cancelled.subscription_id,
   });
-  const expired = subscription(['blocked']);
+  const expired = subscription(['cancelled']);
   const completed = f.done(assigned);
   const histories = [cancelled, expired].map(entry => f.store.getSubscription(entry.subscription_id));
   assert.deepEqual(histories.map(entry => entry.state), ['cancelled', 'expired']);

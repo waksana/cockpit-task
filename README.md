@@ -12,26 +12,32 @@ Task 是 Cockpit 模块：用共同的持久化 Task 记录协作，通过唯一
 的业务身份，也不是可选角色。旧 `owner` / `executor` 角色已删除且无别名。
 服务拒绝自我指派、沿祖先链的回环指派，以及执行中节点与他人互相代建 Task。
 
-Subtask 进入 done、blocked 或 cancelled 时，服务自动向其 orchestrator（父 Task 的 assignee）
+Subtask 进入 done 或 cancelled 时，服务自动向其 orchestrator（父 Task 的 assignee）
 每次转换发送一张 `[Subtask done](task:<uuid>?event=child_done)`（或
-`child_blocked` / `child_cancelled`）卡片，无需订阅；仅当同一次转换已触发订阅且 subscriber 正是该 orchestrator 时才不重复，
+`child_cancelled`）卡片，无需订阅；仅当同一次转换已触发订阅且 subscriber 正是该 orchestrator 时才不重复，
 父 Task 已结束时不发送。旧的无前缀卡片标签仍可识别。
 
 通用引用为 `[Task](task:<uuid>)`；首次指派由 `task_assign` 仅发送一次
-`[Task assigned](task:<uuid>?event=assigned)`。当 assignee 之外的调用者改变已指派未结束 Agent Task 的完整 description、`blocked_by`、重开或取消时，服务自动用 `mode:"immediate"` 向 assignee 发送固定
+`[Task assigned](task:<uuid>?event=assigned)`。当 assignee 之外的调用者在 ready 时修改完整 description、改变 ready/blocked 边界、重开或取消已指派未结束 Agent Task 时，服务自动用 `mode:"immediate"` 向 assignee 发送固定
 `[Task updated](task:<uuid>?event=updated)` 或 `[Task cancelled](task:<uuid>?event=cancelled)`；通知完整正文仅为该链接，处理规则由 `cockpit-task-tree` Skill 统一规定。
-event 只说明这条消息的原因，不是 Task 状态；卡片仍读取当前数据。assignee 只接收 assigned / updated / cancelled 三类 Task 卡。
+event 只说明这条消息的原因，不是 Task 状态；卡片仍读取当前数据。assignee 新增具体
+文字前置条件时，服务向 orchestrator 发送一次 `[Task blocked](task:<uuid>?event=blocked)`，
+不向 assignee 自我提醒。
 
 状态订阅使用独立的 `[Subscribed Task status changed](task:<uuid>?event=status_changed)`，
 发送给实际 subscriber（Web board 用户的卡片路由到 orchestrator），不是要求 assignee 读取并 ACK 的更新指令。
 登记时若已处于目标状态则明确失败，不创建订阅或补发消息；只有登记后第一次
-进入目标状态才触发，不重复订阅、不轮询、不打断编排者当前工作。
+进入目标状态才触发，不重复订阅、不轮询、不打断编排者当前工作。操作者自己的订阅只消费、不自我提醒；
+同一收件人的取消订阅由即时取消指令覆盖，抑制原因持久保存。阻塞期间普通要求更新和部分解除静默。
 
-“A 完成后做 B”时，编排者 立即以 `blocked_by` 创建未指派的 B 并写完整要求，
+“A 完成后做 B”时，编排者立即以 `blocked_by: [{task_id: A}]` 创建未指派的 B 并写完整要求，
 不必为每个前置 Task 订阅。所有 blocker done 前 `task_assign` / `task_automation_start`
 返回 `TASK_NOT_READY`；未指派依赖方就绪时发送 `[Subtask ready](task:<uuid>?event=ready)` 给其编排者，
 blocker 取消则发送 `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)`；已指派依赖方改由 assignee 收到 `[Task updated]`。
 这些通知不自动改状态、指派或启动。blocker 可由任意编排者创建；仍拒绝自身、成环、祖先 blocker（`BLOCKER_ANCESTOR`）和已取消 blocker，最多 20 个。
+`blocked_by` 也可包含 `{condition}`，用于记录具体尚未满足的外部条件及满足标准。
+active 关系决定 `ready`；解除会持久保存，blocker 后续 reopen 不会让旧关系复活。
+assignee 可新增 condition，但只有 orchestrator/Web user 可解除或原子替换它。
 
 默认 Agent Task 由一个 assignee 完整负责，可在内部使用 subagents。要求直接修改 Task，
 执行者在同步点读取并 ACK；执行动态和结果带有实际确认的版本。可在授权范围内
@@ -56,7 +62,8 @@ blocker 取消则发送 `[Subtask blocker cancelled](task:<uuid>?event=blocker_c
 转成脚本。先用 `task_script_read` / `task_script_register` 发现或不可变登记，
 `task_create` 保存脚本和类型化参数快照，按必要后续行动选择订阅后，再显式
 `task_automation_start`。服务持久单队列执行，不创建执行者、不 ACK、不占 session
-任务槽。成功写 done+outcome，失败/中断写 blocked+outcome，不自动重跑。
+任务槽。成功、失败或中断均表示本次执行结束并写 `done+outcome`，真实结果保留在
+`automation.state`、exit/signal/error、日志与 barrier；不自动重跑，不能仅凭 Task `done` 判断成功。
 脚本自动化仅支持 Linux（含 WSL2）；其他平台登记、创建与启动均返回 `AUTOMATION_PLATFORM`
 且不写入任何记录。
 Linux 进程组终止屏障只由 `task_automation_reconcile` 在内核确认组已不存在后解除；
@@ -140,6 +147,13 @@ orchestrator/assignee 公共词汇切换。v9 从宿主
 `_meta["cockpit/invocation"].sessionId` 派生调用者，删除工具输入中的
 `actor_session_id`；必须与提供该 metadata 的 Cockpit 0.4.7 联合部署。
 schema v9 只能向前滚动，0.1.13 不能打开升级后的数据库。
+源码当前 schema v10 将 lifecycle 收敛为 `todo`、`in_progress`、`done`、`cancelled`，
+并把 Task/condition blocker 改为持久化关系轮次。v9→v10 不会猜测旧
+`blocked` / `in_review` 的含义：先运行 `node scripts/migrate-task-v10.js --data-root <dir>`
+只读盘点，再对每项以精确 revision、source_fingerprint 和事实来源编写计划，
+先用 `--preflight --plan <file>` 无副作用核对，最后经独立授权显式传
+`--apply --plan <file>`；任一项缺失或源数据漂移时整个迁移拒绝。上线前必须对包含 WAL 的最新一致副本
+重新盘点并演练；源码合并不授权修改生产数据。
 `0.1.12` 打包 `0.1.11` 之后已合并的原生 Task 依赖和 `github-coding` Skill 更新（#59、#61、#63、#65）。
 Task 依赖新增 schema v6（`task_dependencies`、`dependency_notices`），v5→v6
 迁移只新建表。schema v6 只能向前滚动：已安装的 `0.1.11` 不能打开 v6；

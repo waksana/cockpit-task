@@ -5,8 +5,8 @@ description: "Operating manual for every Task tree node: Task is the only channe
 
 # Task tree
 
-Use the `cockpit-task` MCP. Tool descriptions, schemas, results and error messages carry the
-arguments, fields, views, limits, error codes and recovery steps; this Skill says how to act.
+Use `cockpit-task` MCP. Tool schemas/results define fields, limits and recovery;
+this Skill guides decisions.
 
 ## Core idea
 
@@ -17,10 +17,9 @@ the user, asked directly.
 
 ## Relations
 
-For any Task, `assignee` is you: it is your Task, and you hold at most one unfinished Task.
-`orchestrator` is you: you created it, so it is your Subtask (a top-level Task when you had
-no Task). Reads return `actor_role`; when unsure, read the Task. The host supplies your
-identity, a subagent acts for its session, and the service authorizes each write by relation:
+If `assignee` is you, it is your Task (at most one unfinished). If `orchestrator` is you,
+you created it (a Subtask when you had a Task). Read `actor_role` when unsure. Host identity
+determines write authority; a subagent acts for its session:
 
 | Caller | Tools |
 | --- | --- |
@@ -48,17 +47,19 @@ identity, a subagent acts for its session, and the service authorizes each write
   when changing repository files. Methods never widen authorization or change communication.
 - When the agreement changes, for example the user changes their mind or you agree a new
   scope with them, revise your own Task.
-- Record only meaningful facts in activity, report status truthfully, and never present
-  partial work as complete.
+- Record meaningful activity, report status truthfully, and never call partial work complete.
 - Mark done with a new outcome (result, evidence, limits) and a retro (evidence-based
   findings, or `null` when there are none).
+- Lifecycle is `todo`, `in_progress`, `done` or `cancelled`. `in_progress` means started,
+  not continuously running. Review is work, not a lifecycle state.
+- A user's temporary pause is not a blocker or an escalation. Keep any explicit
+  "wait until I say continue" in the agreement; a notice or ready prerequisite cannot
+  override it. Task records do not stop native sessions or running tools.
 
 **R3 Do it yourself, or split it.**
-- Do what you can complete yourself. Split work that is too big or parallel into more
-  specific Subtasks by independently deliverable result, not by stage or trade, and assign
-  each to a new node. Each Subtask description carries every requirement of your Task that
-  applies to it or to deeper levels. Do not do a delegated Subtask yourself; its assignee
-  decides how.
+- Work yourself or split by independently deliverable result, not by stage or trade.
+  Each Subtask description carries every requirement applicable to it or deeper levels.
+  Assign a new node; do not take over delegated work.
 - Before dispatching, check all unfinished Tasks for conflicting work on the same thing and
   order them with `blocked_by`.
 - When things change, revise, reorder or cancel obsolete Subtasks.
@@ -69,11 +70,13 @@ identity, a subagent acts for its session, and the service authorizes each write
   that needs integration to one top-level Task and let its assignee split it.
 
 **R4 Report work outside your Task upward.**
-- If it blocks you, report `blocked` and state what must happen first, including any user
-  decision you are waiting for.
+- If it blocks you, atomically add a concrete `{condition}` to `blocked_by`: state what is
+  missing and what satisfies it. The service notifies your orchestrator once. Do not use a
+  generic "blocked" marker or the user's temporary unavailability as a condition.
 - If it does not block you, put it in your outcome.
 - An orchestrator reading this handles it within its own scope (create a Task, set
-  `blocked_by`, revise a definition) or reports it upward the same way.
+  `blocked_by`, atomically replace the condition with `{task_id}`, revise the definition),
+  explicitly resolves the condition, or reports it upward the same way.
 
 **R5 Authorization comes from the user.**
 - Discussion, research and records do not authorize changes, dispatch or implementation;
@@ -94,15 +97,18 @@ identity, a subagent acts for its session, and the service authorizes each write
 | Card | Received by | Act |
 | --- | --- | --- |
 | `[Task assigned]` | assignee | F2 |
-| `[Task updated]` | assignee: someone else changed the description or `blocked_by`, reopened the Task, or its blockers finished or were cancelled | F3 |
+| `[Task updated]` | assignee: a ready Task's agreement changed, it became blocked/ready, it reopened, or a blocker was cancelled; not self-authored | F3 |
 | `[Task cancelled]` | assignee: someone else cancelled the Task | F4 |
-| `[Subtask done]`, `[Subtask blocked]`, `[Subtask cancelled]` | the Subtask's orchestrator | F5 |
+| `[Task blocked]` | orchestrator: the assignee recorded a concrete unmet condition | F5 |
+| `[Subtask done]`, `[Subtask cancelled]` | the Subtask's orchestrator | F5 |
+| `[Subtask blocked]` | legacy history only; no new lifecycle transition emits it | F5 |
 | `[Subtask ready]`, `[Subtask blocker cancelled]` | orchestrator of an undispatched dependent | F5 |
 | `[Subscribed Task status changed]` | the subscriber | the follow-up you subscribed for |
 
 Cards are `task:` links with fixed text and never carry free-form notes. Older labels, such
 as `[Task assigned to you]` or an `As Owner:` prefix, mean the same card. A top-level
-Task's transitions reach the root only through its own subscription.
+Task's lifecycle transitions reach the root only through its own subscription;
+a new assignee-recorded unmet condition also sends `[Task blocked]`.
 
 ## Basic situations
 
@@ -116,12 +122,17 @@ Task's transitions reach the root only through its own subscription.
   current agreement, and address every changed requirement in your outcome, including why
   one does not apply.
 - **F4 `[Task cancelled]`.** Read the cancellation, stop affected work, report nothing more.
-- **F5 Subtask cards.** `done`: read the outcome, verify and integrate; handle anything
-  reported upward (R4). `blocked`: read the reason; do not repeat a user question it is
-  already waiting on, otherwise handle it (R4). `cancelled` or `blocker cancelled`:
-  re-plan. `ready`: assign it.
+- **F5 Dependency/Subtask cards.** `done`: read the outcome, verify and integrate; automation
+  `done` only proves that run ended, so inspect its succeeded/failed/interrupted fact.
+  `Task blocked`: read the current condition and handle it (R4), without repeating a user
+  question already in progress. `cancelled` or `blocker cancelled`: re-plan. `ready`: read
+  the latest agreement and ACK when assigned; readiness never overrides authorization,
+  assigns or starts work.
 - **F6 Cancel or reopen.** With the user's consent, cancel with a reason, or reopen a done
   Task with a complete description and reason; the service notifies the assignee.
+  Reopen never revives resolved dependencies. A dependent with a new gap records a new
+  condition; its orchestrator explicitly replaces it with a new Task reference after
+  authorized, eligible rework is arranged. Other old dependents are unaffected.
 - **F7 Trusted scripts.** Agent work is the default. Only an existing, trusted, repeatable
   script within the user's authorization runs as automation; never create a script to
   bypass Agent delivery, and registration does not authorize running it. See
@@ -132,8 +143,9 @@ Task's transitions reach the root only through its own subscription.
 You do not check or perform these yourself:
 - **Rejected writes**: the service rejects, saving nothing:
   - self-assignment, assignment up the lineage, more than 3 levels, a second unfinished Task
-    for a node, and dispatch before blockers are done;
-  - `blocked_by` on an ancestor or in a cycle;
+    for a node, and dispatch or done while prerequisites are unmet;
+  - a Task blocker on an ancestor or in a cycle, and an assignee trying to resolve a
+    textual condition without its orchestrator;
   - reports without an ACK of that revision, and stale status, outcome or retro;
   - done without an outcome and an explicit retro.
 - **Idempotent writes**: writes replay by `request_id` and reject stale `write_context`.

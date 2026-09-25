@@ -93,10 +93,10 @@ test('Orchestrators without an unfinished Agent assignment create top-level Task
   assert.equal(f.store.task(other.result.task_id).parent_task_id, null);
 });
 
-test('a blocked parent still owns its children, and lineage survives the parent finishing', async t => {
+test('an in-progress parent still owns its children, and lineage survives the parent finishing', async t => {
   const f = fixture(t);
   const root = await f.start('user-orchestrator', 'lead');
-  assert.equal((await f.report('lead', root, { status: 'blocked', activity: { text: 'Waiting for children' } })).error, null);
+  assert.equal((await f.report('lead', root, { status: 'in_progress', activity: { text: 'Waiting for children' } })).error, null);
   const child = await f.create('lead');
   assert.equal(f.store.task(child.result.task_id).parent_task_id, root);
   assert.equal((await f.report('lead', root, { status: 'done', outcome: { summary: 'Integrated' }, retro: null })).error, null);
@@ -113,7 +113,7 @@ test('schema keeps existing top-level Tasks without inventing lineage', t => {
   store.close();
   store = new TaskStore(root);
   try {
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 9);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 10);
     assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
     assert.equal(store.db.prepare('PRAGMA foreign_key_check').all().length, 0);
     assert.deepEqual(store.db.prepare('SELECT * FROM operations').all(), receipts);
@@ -201,32 +201,36 @@ test('reads given an actor report its per-Task role from Task facts', async t =>
   assert.equal(Object.hasOwn(f.store.read({ view: 'overview', task_id: root }), 'actor_role'), false);
 });
 
-test('child done, blocked and cancelled transitions notify the parent Assignee once each', async t => {
+test('a child condition escalates once while done and cancelled remain lifecycle notices', async t => {
   const f = fixture(t);
   const root = await f.start('user-orchestrator', 'lead');
   const child = await f.start('lead', 'worker');
-  const blocked = await f.report('worker', child, { status: 'blocked', activity: { text: 'Need a decision' } });
+  const condition = 'The user must choose the target before implementation can continue.';
+  const blocked = await f.as('worker', 'task_edit', {
+    task_id: child, write_context: f.store.task(child).write_context, revision: 1,
+    reason: 'Record an unmet prerequisite', blocked_by: [{ condition }],
+  });
   assert.equal(blocked.error, null);
   assert.equal(blocked.result.notice_ids.length, 1);
-  assert.deepEqual(f.cards('lead'), [`[Subtask blocked](task:${child}?event=child_blocked)`]);
-  assert.equal((await f.report('worker', child, { status: 'blocked', activity: { text: 'Still waiting' } })).result.notice_ids, undefined,
-    'Staying blocked is not a new transition');
-  assert.equal((await f.report('worker', child, { status: 'in_progress' })).error, null);
-  assert.equal((await f.report('worker', child, { status: 'blocked' })).result.notice_ids.length, 1, 'Each real transition notifies again');
+  assert.deepEqual(f.cards('lead'), [`[Task blocked](task:${child}?event=blocked)`]);
+  assert.equal((await f.report('worker', child, { status: 'in_progress', activity: { text: 'Still waiting' } })).result.notice_ids, undefined);
+  assert.equal((await f.as('lead', 'task_edit', {
+    task_id: child, write_context: f.store.task(child).write_context, revision: 1,
+    reason: 'The prerequisite was explicitly resolved', blocked_by: [],
+  })).error, null);
   const done = await f.report('worker', child, { status: 'done', outcome: { summary: 'Child delivered' }, retro: null });
   assert.equal(done.error, null);
   assert.deepEqual(f.cards('lead'), [
-    `[Subtask blocked](task:${child}?event=child_blocked)`,
-    `[Subtask blocked](task:${child}?event=child_blocked)`,
+    `[Task blocked](task:${child}?event=blocked)`,
     `[Subtask done](task:${child}?event=child_done)`,
   ]);
   assert.equal(f.cards('user-orchestrator').length, 0, 'Only the direct Orchestrator is notified');
   const notices = f.childNotices(child);
-  assert.deepEqual(notices.map(notice => notice.kind), ['child_done', 'child_blocked', 'child_blocked'], 'Newest first, like subscriptions');
+  assert.deepEqual(notices.map(notice => notice.kind), ['child_done']);
   assert.ok(notices.every(notice => notice.orchestrator === 'lead' && notice.parent_task_id === root && notice.notification.status === 'accepted'));
 
   const other = await f.start('lead', 'helper');
-  assert.equal((await f.as('lead', 'task_cancel', { task_id: other, write_context: f.store.task(other).write_context, reason: 'Not needed' })).error, null);
+  assert.equal((await f.as('helper', 'task_cancel', { task_id: other, write_context: f.store.task(other).write_context, reason: 'Not needed' })).error, null);
   assert.equal(f.cards('lead').at(-1), `[Subtask cancelled](task:${other}?event=child_cancelled)`);
   assert.equal(f.childNotices(other).length, 1);
   assert.equal(f.cards('user-orchestrator').length, 0, 'Top-level Tasks never produce child notices');
@@ -293,18 +297,6 @@ test('third-party Subtask subscriptions do not suppress child notices to the par
   assert.deepEqual(f.cards('observer'), [`[Subscribed Task status changed](task:${doneChild}?event=status_changed)`]);
   assert.equal(f.childNotices(doneChild).length, 1);
 
-  const blockedChild = await f.start('lead', 'helper');
-  const assigneeSub = await f.as('helper', 'task_subscribe', {
-    task_id: blockedChild, write_context: f.store.task(blockedChild).write_context, statuses: ['blocked'],
-  });
-  assert.equal(assigneeSub.error, null, JSON.stringify(assigneeSub.error));
-  const blocked = await f.report('helper', blockedChild, { status: 'blocked', activity: { text: 'Need input' } });
-  assert.equal(blocked.error, null, JSON.stringify(blocked.error));
-  assert.deepEqual(blocked.result.subscription_ids, [assigneeSub.result.subscription.subscription_id]);
-  assert.equal(blocked.result.notice_ids.length, 1);
-  assert.equal(f.cards('lead').at(-1), `[Subtask blocked](task:${blockedChild}?event=child_blocked)`);
-  assert.deepEqual(f.cards('helper'), [`[Subscribed Task status changed](task:${blockedChild}?event=status_changed)`]);
-  assert.equal(f.childNotices(blockedChild).length, 1);
 });
 
 test('a pending child notice survives restart and is recovered exactly once', async t => {

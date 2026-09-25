@@ -53,8 +53,9 @@ cancelled / automation 不恢复执行。
 ### Assignee notices are automatic service messages
 
 普通要求更新只写 Task；agent 不给其他 agent 手写通知或补发 Task 卡。
-当 assignee 之外的调用者改变已指派、未结束 Agent Task 的 description 或 `blocked_by`、
-重开它，或其 blocker 全部 done / 有 blocker cancelled 时，服务记录一条
+对已指派、未结束 Agent Task，仅 ready 状态的普通 description 更新、ready/blocked
+边界转换、reopen 或 blocker cancelled 触发通知；不提醒操作者本人。
+仍有前置未满足时，普通更新与部分解除静默，不排队等候重放。服务记录一条
 `assignee_notices(kind:"updated")` 并通过宿主 `prompt` 的 `mode:"immediate"` 发送固定文本：
 
 ```text
@@ -123,10 +124,11 @@ assignee 开始、恢复及执行要求同步仍读完整 `execution`，不能�
 | `changelog` | `task_id`、`limit?`、`cursor?`，或 `task_id,revision` | 默认修订摘要页；指定 revision 返回该版完整 description，不得同时传 limit/cursor |
 | `activity` | `task_id`、`limit?`、`cursor?` | assignee 活动页，每条保留其 revision 和作者 |
 | `outcomes` | `task_id`、`limit?`、`cursor?` | 保留的成果页，区分对应定义版本和执行归属 |
+| `dependencies` | `task_id`、`limit?`、`cursor?` | active/resolved 前置轮次历史，包含 dependency_id、kind、blocker_id 或 condition、作者/时间、resolution 与 blocker_lifecycle |
 | `retro_handlings` | `task_id`、`limit?`、`cursor?` | 该 Task 全部 retro 处理记录（新到旧），每条带 `outcome_id`、status、note、references、author、at |
 | `subscriptions` | `task_id`、`limit?`、`cursor?` | 有界订阅历史、匹配状态及投递事实，不扫描 orchestrator 聊天 |
-| `dependency_notices` | 依赖方 `task_id`、`limit?`、`cursor?` | 该 Task 的 ready / blocker_cancelled 通知及投递事实，分页同 subscriptions |
-| `child_notices` | 子 `task_id`、`limit?`、`cursor?` | 该 Subtask 发给其 orchestrator 的 child_done / child_blocked / child_cancelled 通知及投递事实，分页同 subscriptions |
+| `dependency_notices` | 依赖方 `task_id`、`limit?`、`cursor?` | ready / blocker_cancelled / blocked 通知及投递事实，含可空 dependency_id，分页同 subscriptions |
+| `child_notices` | 子 `task_id`、`limit?`、`cursor?` | child_done / child_cancelled 通知及旧 child_blocked 历史，分页同 subscriptions |
 | `assignee_notices` | `task_id`、`limit?`、`cursor?` | 该 Task 的 assignee updated/cancelled 通知及投递事实，分页同 subscriptions；条目含 `notice_id,task_id,assignee,kind:"updated"|"cancelled",revision,event,created_at,notification` |
 | `automation_log` | `task_id`、`offset?`、`limit?` | automation 合并 stdout/stderr 的有界保留页与明确遗漏计数 |
 | `operation` | `request_id` | 某次明确操作的结果，特别是指派步骤 |
@@ -143,7 +145,7 @@ assignee 开始、恢复及执行要求同步仍读完整 `execution`，不能�
 
 | 组名 | 选择后的字段/语义 |
 | --- | --- |
-| `context` | 顶层 `id,task_id,title,orchestrator,assignee,status,revision,acknowledged_revision,created_at,updated_at,write_context,kind`；`include=["context"]` 只取这些字段 |
+| `context` | 顶层 `id,task_id,title,orchestrator,assignee,status,revision,acknowledged_revision,created_at,updated_at,write_context,kind,parent_task_id,depth,blocked_by,ready`；`include=["context"]` 只取这些字段 |
 | `activity` | 最新一条完整记录 `{id,task_id,revision,assignee,author,text,at,source:"reported",current}`，无记录为 null；不是 overview 摘录 |
 | `outcome` | 最新一条完整记录 `{id,task_id,revision,assignee,author,summary,references,at,run_id,source,current}`，无记录为 null；不附未选的 retro |
 | `retro` | 最新已记录复盘的完整对象，沿用 recorded/not_recorded/not_applicable；recorded 的 text=null 明确表示无发现 |
@@ -237,21 +239,28 @@ Web/HTTP 读取固定以 `user` 归因，不伪造 human session ID；定向读�
 省略时为 `kind=agent`。创建 automation 也不执行或自动订阅，必须显式 start。
 script_id 与输入此后不能改变，重新执行须新授权和新 Task。
 
-`blocked_by` 为最多 20 个不重复（大小写不敏感）的 blocker Task UUID，用于“A 完成后做 B”：
+`blocked_by` 为最多 20 个 active 前置：`{task_id:UUID}` 或 `{condition:文字}`，
+兼容旧 UUID 字符串。Task ID 大小写不敏感去重，condition 去首尾空白后去重，
+每项文字最长 2,000 字符，写明缺什么与何时满足，不能用空泛“卡住了”。
 blocker 必须存在、不是自身、不是依赖方祖先、不是已取消，且不成环；可来自任意 orchestrator
 （错误：`DEPENDENCY_SELF`、`BLOCKER_NOT_FOUND`、`BLOCKER_ANCESTOR`、
 `BLOCKER_CANCELLED`、`DEPENDENCY_CYCLE`）。读取 context 返回
-`blocked_by:[{task_id,status}]` 与 `ready`（全部 blocker done 或无 blocker 时为 true）。
-未就绪时 `task_assign` 与 `task_automation_start` 返回 `TASK_NOT_READY`，没有覆盖参数。
+`blocked_by:[{task_id,status}|{condition}]` 仅含未解除关系，空集才 `ready=true`。
+`list` 的文字条件仅含最多 80 字符预览和 `truncated` 标记，确保最大全转义条件也不阻断分页；
+完整条件从 execution/definition 或 dependencies 历史读取，不能拿预览替换完整要求。
+新引用已 done Task 会立即记为已解除。未就绪时 assign、automation start 和 Agent done
+返回 `TASK_NOT_READY`，没有覆盖参数；读、ACK、讨论和修订仍可进行。
 调用 session 若正在执行未完成的 Agent Task，服务自动把新 Task 记录为该 Task 的 Subtask（`parent_task_id` 为当前 Task，`depth` 为父级加一；顶层为 1）；父 Task 已在第 3 层时返回 `DELEGATION_DEPTH_EXCEEDED` 且不保存。context 返回 `parent_task_id` 与 `depth`；`list` 可用 `parent_task_id` 读取直接 Subtask。谱系不影响就绪。
 读取（list 项、overview、execution、definition 及 include 读取）附 `actor_role`：`assignee`、`orchestrator` 或 `none`，由调用 session 和 Task 事实推导；写入授权也使用同一关系。v9 前遗留的同人行可能显示 `orchestrator_and_assignee`。
 指派时 `assignee` 等于 `orchestrator` 返回 `SELF_ASSIGNMENT`；`assignee` 是任一祖先 Task 的 `orchestrator` 或 `assignee` 返回 `DELEGATION_CYCLE`。`DELEGATION_OWNER_MISMATCH` 已删除，因为 `orchestrator` 总是调用者。
-Subtask 真实转入 done、blocked 或 cancelled 且父 Task 未结束、父 Task 的 assignee 即 Subtask 的 orchestrator 时，系统向该 orchestrator 发送一次 `[Subtask done](task:<uuid>?event=child_done)`（或 `[Subtask blocked](task:<uuid>?event=child_blocked)`、`[Subtask cancelled](task:<uuid>?event=child_cancelled)`），无需订阅；引用指向 Subtask。按 Subtask、状态与生命周期唯一，每次转换一张；只有同一转换已触发订阅且 subscriber 正是该 orchestrator 时才不重复，其他 session 的订阅不消费父级 Subtask 卡。投递规则同 subscriptions，id 附在 `notice_ids`。
+Subtask 真实转入 done 或 cancelled 且父 Task 未结束、父 Task 的 assignee 即 Subtask 的 orchestrator 时，系统向该 orchestrator 发送一次 `[Subtask done](task:<uuid>?event=child_done)` 或 `[Subtask cancelled](task:<uuid>?event=child_cancelled)`，无需订阅。操作者本人不再提醒；同一转换已通知该 orchestrator 的订阅去重，第三方订阅不吞掉父级通知。新的 assignee 文字条件另发 `[Task blocked](task:<uuid>?event=blocked)`，不写 blocked 状态。
 就绪不改变状态、不指派、不启动。仍待派发（todo、无 assignee；automation 尚未启动）的依赖方在
 最后一个 blocker 真实转入 done 时，系统向其 orchestrator 发送一次 `[Subtask ready](task:<uuid>?event=ready)`；
 blocker 被取消时发送一次 `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)`。
-引用指向依赖方。通知按依赖方、类型、blocker 与 blocker 生命周期唯一，重开后再次 done 可再通知；
-orchestrator 编辑不会产生 dependency notice；但任何非 assignee 对已指派未结束 Agent Task 的 `blocked_by` 编辑会另行产生 assignee `[Task updated]` notice。投递与 subscriptions 使用相同证据与恢复规则，触发写入的 result 附 `notice_ids`。
+引用指向依赖方。done 在同一事务永久解除 active 关系；reopen 不复活旧关系或通知旧依赖方。
+新问题须显式新建一轮依赖。取消不解除关系。已派出依赖方通知 assignee，未派出通知
+orchestrator，操作者本人不重复提醒。编辑明确解除最后一个前置也适用。
+普通 blocked 期间更新、部分解除静默；投递事实随 `notice_ids` 返回。
 
 ### task_script_read / task_script_register
 
@@ -284,10 +293,11 @@ Task 的输入对象最多 8000 序列化字符；脚本配置整体最多 12000
 输入：`request_id, task_id, write_context, revision`。仅接受
 todo/created automation，在最新 revision/context 下持久排队一次；不发 assigned、
 不创建 session、不 ACK、不自动订阅。orchestrator 若有具体必要后续行动，应在 start 前
-显式订阅 done/blocked 或必要 cancelled，避免快速完成的竞态。无此需要则不订阅。
+显式订阅 done 或必要 cancelled，避免快速完成的竞态。无此需要则不订阅。
 
 服务单队列串行 claim 并执行。queued/starting/running 禁止 task_edit；
-成功 done+服务 outcome，失败/中断 blocked+outcome，已取消的状态保持 cancelled。
+成功、失败或中断都 done+真实服务 outcome，已取消的状态保持 cancelled。
+done 只表示本次执行结束，必须读 run/exit/error/log 判断结果，不证明成功或进程组退出。
 重放不重新执行。重启不重跑 starting/running；转中断并设置持久屏障，尚未启动的
 queued 工作可以恢复，但不能越过屏障。通知后重读最新 Task/outcome，不建立监控循环。
 
@@ -300,8 +310,8 @@ Linux 内核进程组探测 `kill(-pgid,0)` 必须返回 `ESRCH`、证明记录�
 显式 reconcile 无需探测即可解除屏障，但仍不重跑该 Task。
 任何仍存在的组（包括未回收 zombie）、`EPERM` 或观察不确定都不解除。
 未回收 zombie 可能使屏障一直保留，直到宿主回收；不手改数据库或绕过屏障。
-关闭服务不总能证明退出，blocked+barrier 是正确的保守结果。
-它不杀恢复进程、不重跑、不把 blocked 改为 done、不宣称回滚或成功。
+关闭服务不总能证明退出，done+barrier 是正确的保守结果。
+它不杀恢复进程、不重跑、不改 Task 状态、不宣称回滚或成功。
 任何再次执行必须新授权、新 Task。完整操作示例见
 [orchestrator 自动化参考](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md)。
 
@@ -515,7 +525,9 @@ automation 在 queued/starting/running 返回 `AUTOMATION_DEFINITION_LOCKED`；
 
 `blocked_by` 整组替换，任何未结束 Task 都允许；终态 Task 或 automation 不再处于 created 阶段时返回 `DEPENDENCY_LOCKED`。只校验新增 blocker，
 已保留的已取消 blocker 可保留。改变 blocker 属于资料编辑：递增 editable，不产生 description revision；
-若目标是已指派未结束 Agent Task 且调用者不是 assignee，服务自动给 assignee 发送 `[Task updated]`。
+assignee 可新增文字条件，但只有 orchestrator/Web user 可解除或替换，违者
+`CONDITION_RESOLUTION_REQUIRED`。整组替换原子完成，不出现临时假 ready。
+按本节开头的通知边界发送 `[Task updated]`；assignee 新增条件向其 orchestrator 上行一次。
 结果附 `blockers_changed`、`blocked_by` 与 `ready`。
 
 description 如提供，必须是完整的新定义，不是让执行者自行拼接的增量文字。实际正文改变时，原子写入 description、新 revision 和一条 changelog。相同正文不制造虚假修订，也不借无变化的编辑隐式 ACK。重要更新的所有说明必须进入这个完整定义，不允许另附聊天说明或自由文本通知。
@@ -527,9 +539,9 @@ Task 未结束且正文实际改变时，同时确认新 revision；不改变 st
 相同正文、仅资料修改及终态编辑不自动 ACK。编辑不能恢复 done / cancelled，
 旧成果仍标注原版本。
 
-当 description 实际改变且目标是已指派、未结束 Agent Task、调用者不是 assignee 时，
+当 description 实际改变且目标是 ready 的已指派未结束 Agent Task、调用者不是 assignee 时，
 服务保存 description 修订后记录一条 `assignee_notices(kind:"updated")`，返回 `notice_ids`，
-并按通知统一路径返回 `notifications` 与 `notification_error`。blocked_by 改变使用同一 updated notice。
+并按通知统一路径返回 `notifications` 与 `notification_error`。blocked_by 仅在有效边界转换时使用 updated notice。
 服务发送给 `assignee` session 的文本固定为：
 
 ```text
@@ -549,7 +561,7 @@ Task 未结束且正文实际改变时，同时确认新 revision；不改变 st
 
 输入：共用变更字段，加 `revision`。
 
-具有 ACK 工具即可对指定 Task 提交确认，不按操作者与 Task 的关系拒绝。
+只有该 Task 的 assignee 可确认；其他调用者返回 `ASSIGNEE_REQUIRED`。
 确认语义是固定 assignee 已读当前定义；记录其 confirmed_for 和自报 author，
 并不验证实际阅读或理解。Skill 必须如实确认，不能代 assignee 虚报。
 后端校验当前 revision、已有执行归属和未结束生命周期。
@@ -568,7 +580,7 @@ activity/status/outcome 至少有一项；retro 仅可随 done 提交且此时�
 | 可选部分 | 输入形状 | 意义 |
 | --- | --- | --- |
 | `activity` | `{text}` | assignee 对所依据版本的执行活动，作者与保存时间由服务记录 |
-| `status` | `in_progress`、`blocked`、`in_review`、`done` | 明确状态变化；不靠 activity 文本推断 |
+| `status` | `in_progress`、`done` | 明确生命周期变化；阻塞由前置条件推导 |
 | `outcome` | `{summary, references?}` | 提交的成果；保留其 description revision 和执行归属 |
 | `retro` | 非空白 string 或 null | done 必须显式提交；null 表示复盘后无有用发现，普通报告省略 |
 
@@ -677,12 +689,12 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 取消仍在等待的订阅。不新增必要性字段或服务端规则，assignee 执行不依赖是否订阅。
 
 完整输入：`request_id, task_id, write_context, statuses`。
-`statuses` 是 1–6 个互不重复的 Task 状态：`todo`、`in_progress`、`blocked`、
-`in_review`、`done`、`cancelled`。不接受 recipient、orchestrator、subscriber、规则表达式或 revision；subscriber 由调用者派生，HTTP/Web board 用户 `user` 路由到 Task orchestrator。
+`statuses` 是 1–4 个互不重复的 Task 状态：`todo`、`in_progress`、`done`、
+`cancelled`。不接受 recipient、orchestrator、subscriber、规则表达式或 revision；subscriber 由调用者派生，HTTP/Web board 用户 `user` 路由到 Task orchestrator。
 
 当前状态检查、生命周期上下文检查和登记在同一个 SQLite 事务内。当前状态已在目标集合中时返回 `ALREADY_IN_TARGET_STATUS`，不创建订阅、不立即通知。终态 Task 无未来转换，其他目标也拒绝。每个 subscriber 对同一 Task 最多一项 waiting 订阅；同一 subscriber 已有等待时明确失败，不静默替换或合并目标。
 
-输出 `result` 为本地变更效果和 `subscription` 完整记录。recipient 固定取 subscriber，不取 Task.orchestrator（除 Web board `user` 映射）。登记本身不发送消息、不 ACK、不改变 Task 状态、定义或 write_context。首次成功进入任意目标状态时，状态提交、订阅消费、事件事实和 pending 投递记录同事务保存。相同状态报告、activity、edit、ACK 和被拒绝的状态请求不触发；没有订阅时保持静默。一次消费后不自动续订。
+输出 `result` 为本地变更效果和 `subscription` 完整记录。recipient 固定取 subscriber，不取 Task.orchestrator（除 Web board `user` 映射）。登记本身不发送消息、不 ACK、不改变 Task 状态、定义或 write_context。首次成功进入任意目标状态时，状态提交、订阅消费、事件事实和投递记录同事务保存。操作者自己的订阅消费为 `not_sent/SELF_NOTIFICATION_SUPPRESSED`；assignee 的取消订阅由即时取消指令覆盖，记录 `not_sent/DUPLICATE_NOTIFICATION_SUPPRESSED`。其他订阅正常 pending。相同状态报告、activity、edit、ACK 和被拒绝的状态请求不触发；一次消费后不自动续订。
 
 触发后系统只发送 `[Subscribed Task status changed](task:<uuid>?event=status_changed)`，通过宿主 enqueue 新 prompt；busy subscriber 的 queued 是正常结果，不中断、不清队列。卡片读取最新数据，不承诺展示触发时状态，也不要求 subscriber ACK。原始触发事实通过 subscriptions 读取。
 
@@ -741,7 +753,9 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 | `DELEGATION_DEPTH_EXCEEDED` | orchestrator 正执行的父 Task 已达 3 层委派上限，未保存；直接交付本层或询问用户如何重构 |
 | `SELF_ASSIGNMENT` | assignee 与 orchestrator 相同，未指派；指派给其他 session。仅已持有 Task 的节点或用户明确要求时才亲自完成，根节点仍默认委派 |
 | `DELEGATION_CYCLE` | assignee 是祖先 Task 的 orchestrator 或 assignee，未指派；选择谱系外的 session |
-| `TASK_NOT_READY` | `blocked_by` 尚有未 done 的 blocker；等待 ready 通知或修订 blocker，不绕过 |
+| `TASK_NOT_READY` | 尚有未满足前置；拒绝指派、启动或 done，等就绪或明确修订，不绕过 |
+| `CONDITION_RESOLUTION_REQUIRED` | assignee 不能独自解除/替换文字条件，由 orchestrator/user 处理 |
+| `MIGRATION_REVIEW_REQUIRED` | v10 盘点/计划缺失、证据不完整或源数据漂移；只读重新盘点，不猜测迁移 |
 | `DEPENDENCY_LOCKED` / `DEPENDENCY_SELF` / `DEPENDENCY_CYCLE` | 终态或已启动 automation 不能改 blocker，或 blocker 为自身/成环 |
 | `BLOCKER_NOT_FOUND` / `BLOCKER_ANCESTOR` / `BLOCKER_CANCELLED` | 新增 blocker 不存在、是依赖方祖先（会死锁）或已取消；跨 orchestrator blocker 允许 |
 | `REOPEN_NOT_ELIGIBLE` | 无 schema v5 后的指派追踪或已发生后续指派；不能回填历史或自动建替代环境绕过 |
@@ -782,7 +796,7 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 
 以下为调用顺序，省略的共用字段仍为实际输入必填。通用引用仍为 `[Task](task:<uuid>)`，例如 `[Task](task:de33dc0a-2f93-4c5a-b14e-87111940d520)`。整条首次派单消息则为 `[Task assigned](task:<uuid>?event=assigned)`，不附 description。
 
-只有小写 `assigned` / `updated` / `cancelled` / `status_changed` / `ready` / `blocker_cancelled` / `child_done` / `child_blocked` / `child_cancelled` 是有效 event。历史 “As Owner:” / “As Executor:” 前缀和 older `[Task assigned to you]` 标签仍被识别。消息原因固定不变，卡片仍读取最新
+只有小写 `assigned` / `updated` / `cancelled` / `status_changed` / `ready` / `blocked` / `blocker_cancelled` / `child_done` / `child_blocked` / `child_cancelled` 是有效 event；child_blocked 仅兼容历史。历史 “As Owner:” / “As Executor:” 前缀和 older `[Task assigned to you]` 标签仍被识别。消息原因固定不变，卡片仍读取最新
 Task；renderer 只看 URL 中的显式 event，不从 label 或 Task status 推断。
 通用引用及历史消息不显示事件标题，保持兼容；未知 event、畸形 query 不认领，
 不能丢弃 query 后冒充通用引用。不使用可能被识别为文件的相对 `task/<id>` 路径。
@@ -813,7 +827,10 @@ assignee:
 
 每次 MCP 调用都由宿主 `_meta` 提供调用 session；每次写入都带新的明确 request_id；已有 Task 写入还带读取返回的 write_context，create/session_create/session_prepare/unsubscribe 不带。相同操作重试保留相同输入、request_id 和 caller。每次响应都处理 definition_check。仅登记 backlog 不创建/准备 assignee 或派单。
 
-assignee notice 由服务自动发送：assignee 之外的调用者改变 assigned unfinished Agent Task 的 description / `blocked_by`、重开或依赖变化时发送固定 `[Task updated](task:<uuid>?event=updated)` 和读取/ACK 最新版要求；取消时发送固定 `[Task cancelled](task:<uuid>?event=cancelled)` 和停止受影响工作要求。服务用 `mode:"immediate"`，不整理或重放队列、不为通知中断工作；受理不是 ACK。未知效果不手写重复卡片。
+assignee notice 由服务按 ready/blocked 边界、ready 期间约定更新、reopen 与取消规则自动发送，
+不提醒操作者本人。完整正文仅为 `[Task updated](task:<uuid>?event=updated)` 或
+`[Task cancelled](task:<uuid>?event=cancelled)`。服务用 `mode:"immediate"`，不整理或重放队列；
+受理不是 ACK，通知不覆盖用户暂缓约定。未知效果不手写重复卡片。
 
 ## 6. 传输与启动边界
 

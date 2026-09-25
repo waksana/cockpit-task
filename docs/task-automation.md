@@ -26,7 +26,7 @@ ordinary Agent Tasks are unaffected.
    Creation never runs code. Script selection/input snapshots are never editable.
 4. Default to no subscription. Only if a future state enables a concrete necessary
    authorized orchestrator action, register a
-   one-shot subscription **before start**. Prefer `done` / `blocked`, adding
+   one-shot subscription **before start**. Prefer `done`, adding
    `cancelled` only when necessary. There is no automatic subscription.
 5. Explicitly call `task_automation_start` with actor, stable request ID, Task ID,
    latest `revision` and returned `write_context`. This enqueues once in the
@@ -53,8 +53,10 @@ Definitions and editable materials freeze in `queued`, `starting`, `running`.
 
 Run states are `created`, `queued`, `starting`, `running`, `succeeded`, `failed`,
 `interrupted`, `cancelled`. A queued Task remains `todo`; claiming it changes Task
-status to `in_progress`. Success writes `done` plus a service-generated outcome;
-failure/interruption writes `blocked` plus an outcome (cancellation remains cancelled).
+status to `in_progress`. Success, failure, and interruption all write `done` plus a
+service-generated outcome because the run has ended (cancellation remains cancelled).
+Task `done` does not mean the script succeeded: inspect `automation.state`, exit/signal/error,
+the outcome, retained log, and any barrier.
 No Agent reporting or polling is involved. An available outcome is evidence, not
 proof of every intended external effect: read its content and execution boundary.
 Automatic subscription transitions record `event.source='automation'`,
@@ -88,7 +90,7 @@ Cancellation before launch prevents execution. Running cancellation requests
 process-group termination, but never rolls back effects or proves exit. Read the
 run's final outcome/barrier; Task `cancelled` alone is insufficient.
 Restart never reruns started work: recovered starting/running runs become interrupted,
-blocked with an outcome (or remain cancelled), and hold a persistent queue barrier.
+done with an outcome (or remain cancelled), and hold a persistent queue barrier.
 Prelaunch queued work may resume, but cannot pass that barrier.
 
 `task_automation_reconcile` requires actor, stable request ID, Task ID,
@@ -96,13 +98,12 @@ Prelaunch queued work may resume, but cannot pass that barrier.
 interrupted/finished barrier only after the Linux kernel process-group probe
 `kill(-pgid,0)` returns `ESRCH`, proving that the recorded group no longer exists.
 If no durable PID/group exists, the script could not have received its launch
-handshake; explicit reconciliation can clear that barrier without a probe, never
-replaying the Task. Any existing group (including unreaped zombies),
+handshake; explicit reconciliation can clear that barrier without a probe, never replaying the Task. Any existing group (including unreaped zombies),
 `EPERM` or uncertain observation does not release the queue. Unreaped zombie groups
 can keep the barrier until the host reaps them; never manually edit the database or
-bypass the barrier. Shutdown cannot always prove exit; blocked plus a barrier is
-the correct conservative result. Reconciliation does not kill
-recovered processes, rerun anything, change blocked to done, or claim success.
+bypass the barrier. Shutdown cannot always prove exit; `done` plus an interrupted run
+fact and a barrier is the correct conservative result. Reconciliation does not kill
+recovered processes, rerun anything, change Task lifecycle, or claim success.
 Inspect possible effects first. A repeat needs new authorization and a new Task.
 
 ## Trust and delivery boundary
