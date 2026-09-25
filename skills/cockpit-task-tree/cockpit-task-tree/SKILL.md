@@ -71,8 +71,7 @@ determines write authority; a subagent acts for its session:
 
 **R4 Report work outside your Task upward.**
 - If it blocks you, atomically add a concrete `{condition}` to `blocked_by`: state what is
-  missing and what satisfies it. The service notifies your orchestrator once. Do not use a
-  generic "blocked" marker or the user's temporary unavailability as a condition.
+  missing and what satisfies it. The service notifies your orchestrator once.
 - If it does not block you, put it in your outcome.
 - An orchestrator reading this handles it within its own scope (create a Task, set
   `blocked_by`, atomically replace the condition with `{task_id}`, revise the definition),
@@ -101,7 +100,7 @@ determines write authority; a subagent acts for its session:
 | `[Task cancelled]` | assignee: someone else cancelled the Task | F4 |
 | `[Task blocked]` | orchestrator: the assignee recorded a concrete unmet condition | F5 |
 | `[Subtask done]`, `[Subtask cancelled]` | the Subtask's orchestrator | F5 |
-| `[Subtask blocked]` | legacy history only; no new lifecycle transition emits it | F5 |
+| `[Subtask blocked]` | legacy card to the Subtask's orchestrator; no new transition emits it | F5 |
 | `[Subtask ready]`, `[Subtask blocker cancelled]` | orchestrator of an undispatched dependent | F5 |
 | `[Subscribed Task status changed]` | the subscriber | the follow-up you subscribed for |
 
@@ -118,16 +117,17 @@ a new assignee-recorded unmet condition also sends `[Task blocked]`.
   authorization), assign, then stop and stay available.
 - **F2 `[Task assigned]`.** Read the full Task and ACK. Do it or split it (R3). Ask the user
   real decisions and revise your Task (R1, R2). Report status; finish with outcome and retro.
-- **F3 `[Task updated]`.** Read the full Task, ACK the latest revision, continue by the
-  current agreement, and address every changed requirement in your outcome, including why
-  one does not apply.
+- **F3 `[Task updated]`.** Read the full Task, ACK the latest revision, and act within the
+  current agreement and prerequisites. Address every changed requirement in your outcome,
+  including why one does not apply.
 - **F4 `[Task cancelled]`.** Read the cancellation, stop affected work, report nothing more.
-- **F5 Dependency/Subtask cards.** `done`: read the outcome, verify and integrate; automation
-  `done` only proves that run ended, so inspect its succeeded/failed/interrupted fact.
-  `Task blocked`: read the current condition and handle it (R4), without repeating a user
-  question already in progress. `cancelled` or `blocker cancelled`: re-plan. `ready`: read
-  the latest agreement and ACK when assigned; readiness never overrides authorization,
-  assigns or starts work.
+- **F5 Dependency/Subtask cards.** `done`: read the outcome, verify and integrate; for
+  automation, inspect run facts and any barrier, not just Task status (F7).
+  `Task blocked` or legacy `Subtask blocked`: read current requirements and blocking
+  evidence, then handle unmet needs (R4). `cancelled` or `blocker cancelled`: re-plan.
+  `ready`: the orchestrator reads current facts and dispatches an unassigned Task when
+  authorized (R3, R5); for an assigned Task, its assignee reads/ACKs the latest agreement
+  and continues permitted work (R2).
 - **F6 Cancel or reopen.** With the user's consent, cancel with a reason, or reopen a done
   Task with a complete description and reason; the service notifies the assignee.
   Reopen never revives resolved dependencies. A dependent with a new gap records a new

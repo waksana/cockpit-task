@@ -214,6 +214,19 @@ test('notices table matches TASK_EVENTS and assignee card scope', () => {
   assert.deepEqual(assigneeLabels.sort(), ['Task assigned', 'Task cancelled', 'Task updated']);
 });
 
+test('ready and legacy blocked guidance preserves actionable routing without duplicating pause rules', () => {
+  const skill = prose(read(treeDirectory, 'SKILL.md'));
+  const situations = skill.split('**F5 Dependency/Subtask cards.**')[1].split('**F6')[0];
+  assert.match(situations, /orchestrator reads current facts and dispatches an unassigned Task when authorized/);
+  assert.match(situations, /assigned Task, its assignee reads\/ACKs the latest agreement and continues permitted work/);
+  assert.match(situations, /legacy `Subtask blocked`: read current requirements and blocking evidence/);
+  assert.match(situations, /automation, inspect run facts and any barrier/);
+  assert.equal((skill.match(/temporary pause/g) ?? []).length, 1);
+  assert.equal((skill.match(/wait until I say continue/g) ?? []).length, 1);
+  assert.match(prose(read(treeDirectory, 'references/automation.md')),
+    /`done` unless explicitly cancelled; neither status proves success or process-group exit/);
+});
+
 test('basic situations F1-F7 and service guarantees preserve the core contract', () => {
   const skill = read(treeDirectory, 'SKILL.md');
   regexInOrder(skill, ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7'].map(id => new RegExp(`\\*\\*${id} `)));
