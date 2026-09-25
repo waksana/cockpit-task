@@ -115,14 +115,18 @@ cannot account for escaped processes. Immutable configuration and script SHA256
 do not freeze runtime/interpreter bytes, imports, dependencies or external state.
 Do not put secrets in Task inputs or retained output.
 
-Current source/package version is **0.2.0**, retaining completion retro for Agent Tasks,
+Current source/package version is **0.3.0**, retaining completion retro for Agent Tasks,
 selective Task reads, the coding/deployment Skill boundary clarification,
 orchestrator request follow-through (#45), immediate assignee update notices (#47),
 Agent reopen (#49), orchestrator sequential subscription follow-up (#53), assignee
 session titles (#55), native Task dependencies and github-coding Skill updates,
-and adding per-Task hierarchical delegation and the tree-node model from #71/#72/#74
-via #75, schema v8 retro handling and the schema v9 vocabulary/invocation switch.
-Schema v9 is roll-forward only; installed 0.1.13 cannot open v9.
+per-Task hierarchical delegation and the tree-node model from #71/#72/#74 via #75,
+schema v8 retro handling and the schema v9 vocabulary/invocation switch.
+It packages schema v10's four-state lifecycle and durable prerequisites. Finished
+automation is done even when the run failed or was interrupted; run facts and barriers
+remain authoritative. The incompatible migration is roll-forward only; installed
+0.2.0 cannot open v10. Every existing v9 database needs the
+[reviewed migration procedure](task-implementation.md#schema-v10-migration).
 Automation Tasks remain ineligible for reopen. Automation remains exempt from retro. Source
 changes and isolated validation are not installation, production tests, deployment
 or restart authorization; no existing installation is replaced or upgraded by

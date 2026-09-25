@@ -1,7 +1,7 @@
 # Task
 
 Task is a Cockpit module for independent work records shared by orchestrator and assignee.
-Its module ID and HTTP MCP key are `cockpit-task`, version `0.2.0` (source preparation; no deployment implied).
+Its module ID and HTTP MCP key are `cockpit-task`, version `0.3.0` (source preparation; no deployment implied).
 It runs in Cockpit, not a standalone daemon or dashboard.
 
 Version 0.1.13 packaged per-Task hierarchical delegation and the tree-node model
@@ -46,16 +46,19 @@ preserves legacy creation. This is separate from the unchanged UI support baseli
 `9fd5204bda99a8bd65b2c5ef152cc47ce87837d5` / `uiSurfaceVersion: 1`.
 Source support is not a release or deployment claim.
 
-Version 0.2.0 packages schema v8 outcome retro handling and the schema v9
+Version 0.2.0 packaged schema v8 outcome retro handling and the schema v9
 orchestrator/assignee vocabulary switch. MCP tools derive caller identity from
 the paired host's `_meta["cockpit/invocation"].sessionId`; callers no longer
 supply `actor_session_id`. Schema v9 is roll-forward only and requires Cockpit
 0.4.7 or a compatible source containing waksana/cockpit#205.
 
-Current source also prepares schema v10: four lifecycle statuses (`todo`,
+Version 0.3.0 prepares schema v10: four lifecycle statuses (`todo`,
 `in_progress`, `done`, `cancelled`), durable Task/text prerequisites, boundary-only
-readiness notices and finished automation as done with truthful run facts. No version
-bump, production migration or release is implied. The packaged migration CLI defaults
+readiness notices and finished automation as done with truthful run facts. The
+incompatible lifecycle/schema contract requires a new pre-1.0 minor version; released
+0.2.0 remains immutable and cannot open v10. Every existing v9 database requires an
+explicit reviewed plan, including those with no blocked/in_review Tasks. No production
+migration, installation or release is implied. The packaged migration CLI defaults
 to read-only inventory; see the
 [reviewed migration procedure](https://github.com/waksana/cockpit-task/blob/main/docs/task-implementation.md#schema-v10-migration).
 
@@ -406,7 +409,7 @@ npm test
 npm run package:module
 ```
 
-`dist/cockpit-task-0.2.0.tgz` contains runtime dependencies, backend/frontend assets,
+`dist/cockpit-task-0.3.0.tgz` contains runtime dependencies, backend/frontend assets,
 the node role prompt, the tree Skill and the shared coding Skill. Its `.sha256` sidecar identifies the
 archive. [Task CI](https://github.com/waksana/cockpit-task/blob/main/.github/workflows/task-board-ci.yml) retains these as the
 `cockpit-task-module` artifact; an artifact is not an installation or deployment.
@@ -415,7 +418,7 @@ Installation is an explicit operator action on a compatible host. From the host
 checkout, stage the local artifact using the host's module installer:
 
 ```sh
-pnpm module install /absolute/path/to/cockpit-task-0.2.0.tgz --trust-local-code
+pnpm module install /absolute/path/to/cockpit-task-0.3.0.tgz --trust-local-code
 ```
 
 This command deliberately omits automatic enablement. Follow that host's documented
