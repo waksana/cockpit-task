@@ -40,19 +40,74 @@ with `DELEGATION_DEPTH_EXCEEDED` beyond 3 levels before any row is saved. Lineag
 immutable and changes no readiness or authority rule. There is no caller/orchestrator mismatch case because v9 derives orchestrator from host invocation metadata; `DELEGATION_OWNER_MISMATCH` is removed. `bindAssignment`
 rejects `SELF_ASSIGNMENT` (assignee = orchestrator) and `DELEGATION_CYCLE` (assignee owns or
 executes any ancestor) before readiness. A Subtask's real transition into
-done/blocked/cancelled, in the same write transaction (including automation
+done/cancelled, in the same write transaction (including automation
 `finish`), inserts one `child_notices` row for its orchestrator when the parent is unfinished,
 the parent's assignee is that orchestrator and no subscription for the same transition already notified that same orchestrator;
 delivery and startup recovery share the subscription path. Reads derive `actor_role` from the host-supplied caller and `orchestrator`/`assignee`; nothing is stored.
-Blocker sets are validated in the write transaction: at most
-20 unique ids, existing Tasks from any orchestrator, no self, no ancestor blocker (`BLOCKER_ANCESTOR`), no newly added cancelled blocker,
-and no cycle (recursive CTE). Edits are allowed only while the dependent awaits
-dispatch and bump `editable`, not the revision. A blocker's committed transition
-into done/cancelled, in the same transaction, inserts notices for dependents still
-awaiting dispatch (`ready` only when all blockers are done). Binding and automation
-start reject `TASK_NOT_READY`; readiness never changes status or dispatches.
+Schema v10 blocker sets contain at most 20 unique Task references or concrete text
+conditions. Task references permit any orchestrator, but reject self, ancestors
+(`BLOCKER_ANCESTOR`), newly added cancelled Tasks and active cycles (recursive CTE).
+Edits on unfinished Tasks (automation only before start) bump `editable`, not revision.
+Only the orchestrator/Web user can resolve or replace an assignee's text condition;
+complete-set replacement is atomic. Done resolves active dependency rounds permanently.
+Reopen never scans or revives old relations. Cancellation retains active relations.
+Binding, automation start and Agent done reject `TASK_NOT_READY` while any active
+prerequisite remains; reads, ACK, discussion and definition edits remain possible.
+Readiness never changes lifecycle or dispatches.
 `report`/`cancel`/automation finish return these as `notice_ids`, delivered and
 recovered through the same outbox path as `subscription_ids`.
+
+### Schema v10 migration
+
+The lifecycle is `todo`, `in_progress`, `done`, `cancelled`; blocking is derived from
+active prerequisites, not a fifth status. Review and user pauses do not become lifecycle
+states. `in_progress` does not imply a continuously running native session.
+
+The packaged `scripts/migrate-task-v10.js` defaults to a read-only, transactionally
+consistent v9 inventory. It reads every legacy blocked/in_review Task, complete
+definitions, activities, outcomes, dependencies and automation facts. Sensitive data
+and plans belong in restricted local artifacts, never a repository or public Issue.
+Use SQLite online backup (including committed WAL), not a lone `.sqlite` file copy.
+
+```sh
+node scripts/migrate-task-v10.js --data-root <consistent-copy> > inventory.json
+node scripts/migrate-task-v10.js --data-root <consistent-copy> --preflight --plan plan.json
+# Only after separate production migration authorization, with writers quiesced:
+node scripts/migrate-task-v10.js --data-root <authorized-data-root> --apply --plan plan.json
+```
+
+The plan is `{schema:9,target_schema:10,source_fingerprint,tasks:{<id>:entry}}`.
+Every existing v9 database requires this reviewed plan, even when `tasks` is empty.
+Ordinary module startup refuses v9 rather than silently upgrading it. New database
+initialization is separate and does not require a legacy-data plan.
+Each entry has exact `revision`, evidence `source`, and one `action`:
+`preserve_dependencies` for blocked Agents with dependencies; `condition` plus concrete
+`condition` for a real unmet requirement without dependencies; `paused` only for a
+documented user pause without a real prerequisite; `resume` for Agent in_review;
+`automation_finished` only for a finished automation run. `paused` is a migration
+classification, not a new status or session control. Missing/contradictory evidence
+requires user clarification, not an inferred condition.
+
+Preflight is read-only. The fingerprint binds all logical tables, histories, receipts
+and schema in the consistent source snapshot. Apply rechecks it under `BEGIN IMMEDIATE`;
+any source drift, missing/extra entry or wrong revision fails with
+`MIGRATION_REVIEW_REQUIRED` rather than overwriting newer facts. Schema and data changes
+commit together. Existing legacy states cannot be automatically migrated by activation.
+
+Blocked/in_review Agents become in_progress. Existing dependencies stay; references to
+done blockers are recorded resolved, including finished automation migrated to done.
+Other relations stay active. Finished automation becomes done, with truthful run-linked
+outcome supplementation only if missing; no fabricated ACK/retro, launch or barrier change.
+`migration_v10_items` retains each decision and source. `migration_v10_subscriptions`
+retains prior waiting subscription targets/state before retired targets are removed;
+empty waits and waits on migrated terminal Tasks expire. Previously pending notices
+become explicit `not_sent/MIGRATION_NOTIFICATION_EXPIRED`, without replay or a wakeup storm.
+Accepted, queued, unknown and other historical records remain untouched.
+
+The migration is forward-only; older modules cannot open schema v10. Source merge,
+package creation and an isolated rehearsal do not authorize production apply, deployment,
+restart or release. Inventory again immediately before an authorized rollout; a previous
+snapshot plan is not a live-database plan.
 
 Schema version 9 renames vocabulary in place: tasks.owner→orchestrator, tasks.executor→assignee; activities/outcomes/task_assignments.executor→assignee; subscriptions.owner→subscriber; dependency_notices/child_notices.owner→orchestrator; subscriptions.actor_session_id→author. It drops legacy occupancy/waiting indexes and creates `assignee_occupancy`, `task_assignments_assignee` and `subscriptions_waiting_subscriber`; it adds `operations.invocation` and creates `assignee_notices(kind)` with `assignee_notices_task` / `assignee_notices_pending`. Notification event JSON is migrated from `actor_session_id` to `actor`, and saved `task_assign` operation input/result JSON moves `executor` to `assignee`. The migration is roll-forward only; older installed modules reject user_version 9 with `SCHEMA_TOO_NEW`.
 
@@ -208,8 +263,9 @@ No Agent assignee, ACK or session slot is invented; assign/ack/report reject thi
 Definitions/materials freeze in queued/starting/running; script and input snapshots
 are never mutable. Claim records starting/in_progress and a barrier. The worker
 launch handshake follows durable PID/process-group storage. Success atomically
-stores done plus a service outcome; failure/interruption stores blocked plus an
-outcome, preserving cancellation. Automatic subscription transitions have
+stores done plus a service outcome; failure/interruption also stores done plus a
+truthful outcome, preserving explicit cancellation. Done means the run ended, not
+success or confirmed process-group exit. Automatic subscription transitions have
 `event.source='automation'`, `event.run_id` and `actor:null`.
 Outcomes have `assignee:null`, `source:'automation'` and `author:'automation:<run_id>'`:
 the author is a service label, never a native session or fabricated assignee.
@@ -228,16 +284,16 @@ not have been sent: explicit reconciliation clears this pre-handshake barrier wi
 a probe or replay. Any existing group, including unreaped zombies, `EPERM` or observation
 uncertainty keeps the barrier. Unreaped zombie groups can block until the host reaps
 them; do not edit the database or bypass this guard. Shutdown cannot always prove
-exit, so blocked plus a barrier is a correct conservative result.
-Reconciliation never kills recovered processes, reruns work or changes
-blocked to done. Repeating requires new authorization and a new Task.
+exit, so done plus a barrier is a correct conservative result.
+Reconciliation never kills recovered processes, reruns work or changes Task status.
+Repeating requires new authorization and a new Task.
 
 Scripts must not daemonize/detach/escape the process group. This is same-user trusted
 execution, not a sandbox or authentication. Immutable registration and script hash
 do not freeze interpreters, runtime, imports or dependencies. Optional subscriptions
 precede start only for concrete orchestrator follow-up; no automatic subscription, Agent
 monitoring loop, workflow engine or production installation is introduced;
-a `blocked_by` Task cannot start until every blocker is done.
+a `blocked_by` Task cannot start until every prerequisite is satisfied or explicitly resolved.
 
 ## Invocation metadata
 
@@ -337,7 +393,11 @@ consumption, immutable transition event and `pending` delivery together.
 Same-status reports and failed transitions do not trigger; an unmatched terminal
 transition expires the wait. Waiting cancellation races through the same
 transaction boundary and cannot revoke an already triggered event.
-An assignee notice commits with the local write that caused it. A non-assignee description or `blocked_by` change, reopen, cancel, or dependency resolution/cancellation on an assigned unfinished Agent Task writes one `assignee_notices` row; failed authorization or lifecycle checks reject the original write.
+An assignee notice commits with the local write that caused it. Ready-period agreement
+edits, ready/blocked boundaries, reopen and cancellation on assigned unfinished Agent
+work notify once unless self-authored. Blocked-period edits and partial resolution
+save silently. New assignee text conditions still notify the orchestrator via a
+`dependency_notices(kind='blocked')` row. Failed authorization/lifecycle checks save nothing.
 
 The delivery record is a bounded durable outbox, not a second native queue or
 scheduler. A passive `session/get` lookup first checks that the notice's original recipient
@@ -442,7 +502,8 @@ checked against retained fields too, not merely the supplied patch.
 | Dependent ready notice to orchestrator | `[Subtask ready](task:<uuid>?event=ready)` |
 | Dependent blocker-cancelled notice to orchestrator | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` |
 | Subtask done notice to its orchestrator (the parent's assignee) | `[Subtask done](task:<uuid>?event=child_done)` |
-| Subtask blocked notice to its orchestrator (the parent's assignee) | `[Subtask blocked](task:<uuid>?event=child_blocked)` |
+| Assignee-recorded concrete condition to its orchestrator | `[Task blocked](task:<uuid>?event=blocked)` |
+| Historical Subtask blocked notice (not newly emitted) | `[Subtask blocked](task:<uuid>?event=child_blocked)` |
 | Subtask cancelled notice to its orchestrator (the parent's assignee) | `[Subtask cancelled](task:<uuid>?event=child_cancelled)` |
 
 Labels name the recipient's role for the linked Task; older assignment labels such as

@@ -12,7 +12,7 @@ export class TaskError extends Error {
 
 export const LIMITS = Object.freeze({
   description: 24000, activity: 4000, outcome: 8000, retro: 2000, metadata: 8000, retroNote: 2000,
-  references: 20, blockers: 20, excerpt: 320, list: 50, history: 10,
+  references: 20, blockers: 20, blockerCondition: 2000, excerpt: 320, list: 50, history: 10,
   page: 24000, selection: 48000, definitionPayload: 64000, reportPayload: 16000, delegationDepth: 3,
 });
 export const definitionFits = ({ description, references = [], metadata = {} }) =>
@@ -25,9 +25,16 @@ const revision = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 const reference = z.strictObject({ label: text(200), target: text(2000) });
 const references = z.array(reference).max(LIMITS.references)
   .refine(value => JSON.stringify(value).length <= 8000, 'References must fit within 8000 characters');
-const blockedBy = z.array(id).max(LIMITS.blockers)
-  .refine(values => new Set(values.map(value => value.toLowerCase())).size === values.length, 'Blocker Task IDs must be unique')
-  .describe('Complete set of Task IDs (max 20, any orchestrator, never an ancestor of this Task) that must all be done before this Task can be assigned or started. Readiness gate only: never changes status, assigns or dispatches');
+const taskBlocker = z.strictObject({ task_id: id });
+const conditionBlocker = z.strictObject({ condition: text(LIMITS.blockerCondition) });
+const blockedBy = z.array(z.union([id, taskBlocker, conditionBlocker])).max(LIMITS.blockers)
+  .refine(values => {
+    const keys = values.map(value => typeof value === 'string'
+      ? `task:${value.toLowerCase()}`
+      : 'task_id' in value ? `task:${value.task_id.toLowerCase()}` : `condition:${value.condition.trim()}`);
+    return new Set(keys).size === keys.length;
+  }, 'Blockers must be unique')
+  .describe('Complete active prerequisite set (max 20): {task_id} references one Task execution, while {condition} states a concrete unmet condition and how it becomes satisfied. Replacing a condition with a Task reference is atomic. Readiness is derived and never changes status, assigns or dispatches.');
 // Validate JSON iteratively so cyclic, deep, exotic and non-finite JS inputs fail safely.
 function validMetadata(value) {
   const seen = new Set();
@@ -86,7 +93,7 @@ export const scriptSchema = z.strictObject({
     type: z.enum(['string', 'integer', 'boolean']), description: text(1000),
   })).max(32).refine(values => new Set(values.map(value => value.name)).size === values.length, 'Parameter names must be unique'),
 }).refine(value => JSON.stringify(value).length <= 12000, 'Script registration exceeds 12000 characters');
-export const TASK_STATUSES = Object.freeze(['todo', 'in_progress', 'blocked', 'in_review', 'done', 'cancelled']);
+export const TASK_STATUSES = Object.freeze(['todo', 'in_progress', 'done', 'cancelled']);
 export const RETRO_HANDLING_STATUSES = Object.freeze(['fixed', 'followup', 'watching', 'dismissed']);
 const retroFilter = z.enum(['unhandled', 'watching']);
 export const READ_GROUPS = Object.freeze(['context', 'activity', 'outcome', 'retro', 'definition', 'automation', 'cancellation']);
@@ -98,14 +105,14 @@ export const schemas = {
     z.strictObject({
       view: z.literal('list'), orchestrator: session.optional(), assignee: session.optional(), parent_task_id: id.optional(),
       retro: retroFilter.optional(),
-      status: z.enum(['todo', 'in_progress', 'blocked', 'in_review', 'done', 'cancelled', 'unfinished', 'all']).optional(),
+      status: z.enum(['todo', 'in_progress', 'done', 'cancelled', 'unfinished', 'all']).optional(),
       query: text(200).optional(), limit: z.number().int().min(1).max(LIMITS.list).optional(), cursor: text(2000).optional(),
     }),
     taskRead('overview').extend({ include: readInclude.optional() }),
     ...['execution', 'definition'].map(taskRead),
     z.strictObject({ view: z.literal('changelog'), task_id: id, ...pagination, revision: revision.optional() })
       .refine(x => x.revision === undefined || (x.cursor === undefined && x.limit === undefined), 'A revision selector cannot be paginated'),
-    ...['activity', 'outcomes', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices'].map(view => z.strictObject({ view: z.literal(view), task_id: id, ...pagination })),
+    ...['activity', 'outcomes', 'dependencies', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices'].map(view => z.strictObject({ view: z.literal(view), task_id: id, ...pagination })),
     z.strictObject({
       view: z.literal('automation_log'), task_id: id,
       offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
@@ -144,7 +151,7 @@ export const schemas = {
   task_report: z.strictObject({
     ...existing, revision, activity: z.strictObject({ text: text(LIMITS.activity) })
       .refine(value => JSON.stringify(value).length <= LIMITS.reportPayload, 'Serialized activity exceeds 16000 characters').optional(),
-    status: z.enum(['in_progress', 'blocked', 'in_review', 'done']).optional(),
+    status: z.enum(['in_progress', 'done']).optional(),
     outcome: z.strictObject({ summary: text(LIMITS.outcome), references: references.optional() })
       .refine(value => JSON.stringify(value).length <= LIMITS.reportPayload, 'Serialized outcome and references exceed 16000 characters').optional(),
     retro: text(LIMITS.retro).nullable().optional()
@@ -172,15 +179,15 @@ export const schemas = {
 };
 // The MCP SDK publishes properties only for object roots, not discriminated unions.
 const readToolSchema = z.strictObject({
-  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices', 'automation_log', 'operation']),
-  task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes, retro_handlings, subscriptions, dependency_notices, child_notices, assignee_notices and automation_log'),
+  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'dependencies', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices', 'automation_log', 'operation']),
+  task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes, dependencies, retro_handlings, subscriptions, dependency_notices, child_notices, assignee_notices and automation_log'),
   include: readInclude.optional(),
   request_id: request.optional().describe('Required only for the operation view'),
   orchestrator: session.optional().describe('List filter only: Tasks this session orchestrates'),
   assignee: session.optional().describe('List filter only: Tasks assigned to this session'),
   parent_task_id: id.optional().describe('List filter only: direct Subtasks of this parent Task'),
   retro: retroFilter.optional().describe('List filter only: latest retro has findings and is unhandled, or is marked watching; status then defaults to all'),
-  status: z.enum(['todo', 'in_progress', 'blocked', 'in_review', 'done', 'cancelled', 'unfinished', 'all']).optional().describe('List filter only; defaults to unfinished, or all with a retro filter'),
+  status: z.enum(['todo', 'in_progress', 'done', 'cancelled', 'unfinished', 'all']).optional().describe('List filter only; defaults to unfinished, or all with a retro filter'),
   query: text(200).optional().describe('List title filter only'),
   limit: z.number().int().min(1).max(8192).optional().describe('List: maximum 50. Histories: maximum 10. automation_log: maximum 8192 characters'),
   offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe('automation_log only: character offset'),

@@ -13,7 +13,7 @@ const stage = mkdtempSync(join(output, 'cockpit-task-package-'));
 const pending = `${stage}.tgz`;
 try {
   for (const path of [
-    'cockpit.module.json', 'src/task-board', 'web/task-board',
+    'cockpit.module.json', 'src/task-board', 'web/task-board', 'scripts/migrate-task-v10.js',
     'roles/task-node.md',
     'skills/cockpit-task-tree', 'skills/github-coding', 'node_modules',
   ]) {

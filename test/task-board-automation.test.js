@@ -105,7 +105,7 @@ test('registration/create do not execute; typed literal argv, optional pre-subsc
     assert.equal(task.automation.state, 'created');
     assert.deepEqual(task.automation.parameters, values);
     assert.equal(f.store.read({ view: 'subscriptions', task_id: id }).items.length, 0);
-    assert.equal((await f.change('task_subscribe', id, { statuses: ['done', 'blocked'] })).error, null);
+    assert.equal((await f.change('task_subscribe', id, { statuses: ['done'] })).error, null);
     const start = { request_id: 'stable-start', task_id: id, revision: 1, write_context: task.write_context };
     assert.equal((await f.write('task_automation_start', start)).error, null);
     const done = await f.finished(id);
@@ -236,13 +236,14 @@ test('non-Linux platforms reject registration, automation creation and start ear
   } finally { await f.close(); }
 });
 
-test('nonzero, changed script and executable spawn failure block with bounded logs and no retry', async () => {
+test('nonzero, changed script and executable spawn failure finish done with truthful bounded outcomes and no retry', async () => {
   const f = fixture();
   try {
     await f.register('failure', `process.stdout.write("x".repeat(${LOG_LIMIT + 10000})); process.stdout.write("\\u0000".repeat(9000)); process.stderr.write("failure"); process.exitCode=9;`);
     const id = await f.create('failure');
     await f.start(id);
-    assert.equal((await f.finished(id)).status, 'blocked');
+    assert.equal((await f.finished(id)).status, 'done');
+    assert.equal(f.store.automation.run(id).state, 'failed');
     assert.equal(f.store.automation.run(id).exit_code, 9);
     let output = '', offset = 0, page;
     do {
@@ -258,7 +259,7 @@ test('nonzero, changed script and executable spawn failure block with bounded lo
     const changed = await f.create('changed');
     writeFileSync(path, 'console.log("changed");');
     await f.start(changed);
-    assert.equal((await f.finished(changed)).status, 'blocked');
+    assert.equal((await f.finished(changed)).status, 'done');
     assert.match(f.store.automation.run(changed).error, /bytes changed/);
     const executable = join(f.directory, 'missing-executable');
     writeFileSync(executable, '#!/definitely/missing/interpreter\n', { mode: 0o700 });
@@ -269,7 +270,7 @@ test('nonzero, changed script and executable spawn failure block with bounded lo
     assert.equal(registered.error, null);
     const spawnFail = await f.create('spawn-fail');
     await f.start(spawnFail);
-    assert.equal((await f.finished(spawnFail)).status, 'blocked');
+    assert.equal((await f.finished(spawnFail)).status, 'done');
     assert.match(f.store.automation.run(spawnFail).error, /Spawn failed: ENOENT/);
     await f.restart();
     assert.equal(f.store.read({ view: 'outcomes', task_id: id }).items.length, 1);
@@ -319,7 +320,7 @@ test('graceful close escalates termination, preserves interrupted outcome and re
     await until(() => f.store.automation.run(first).log.includes('ready'));
     await f.start(second);
     await f.restart();
-    assert.equal(f.store.task(first).status, 'blocked');
+    assert.equal(f.store.task(first).status, 'done');
     assert.equal(f.store.task(first).automation.state, 'interrupted');
     assert.equal(groupAlive(f.store.task(first).automation.process_group), false);
     assert.equal((await f.finished(second)).status, 'done');
@@ -357,7 +358,7 @@ test('crashed service never replays effects; surviving group blocks queue until 
     assert.equal(groupAlive(group), true);
     f.service.automation.recover();
     assert.equal(f.store.task(id).automation.state, 'interrupted');
-    assert.equal(f.store.task(id).status, 'blocked');
+    assert.equal(f.store.task(id).status, 'done');
     assert.equal(f.store.task(id).automation.barrier, true);
     assert.equal(f.store.task(next).automation.state, 'queued');
     assert.equal((await f.change('task_automation_reconcile', id, { reason: 'Observe still-running process' })).error.code, 'PROCESS_GROUP_ACTIVE');
@@ -365,7 +366,7 @@ test('crashed service never replays effects; surviving group blocks queue until 
     await until(() => !groupAlive(group));
     assert.equal((await f.change('task_automation_reconcile', id, { reason: 'Synthetic process group terminated; effects inspected' })).error, null);
     assert.equal((await f.finished(next)).status, 'done');
-    assert.equal(f.store.task(id).status, 'blocked');
+    assert.equal(f.store.task(id).status, 'done');
     assert.equal(readFileSync(marker, 'utf8'), 'once\n');
     assert.equal(f.store.read({ view: 'outcomes', task_id: id }).items.length, 1);
   } finally {
@@ -385,7 +386,7 @@ test('pre-handshake crash has no executable replay and explicit reconciliation u
     await f.start(next);
     f.service.automation.recover();
     assert.equal(f.store.task(id).automation.pid, null);
-    assert.equal(f.store.task(id).status, 'blocked');
+    assert.equal(f.store.task(id).status, 'done');
     assert.equal((await f.change('task_automation_reconcile', id, { reason: 'No durable PID, therefore no go handshake' })).error, null);
     assert.equal((await f.finished(next)).status, 'done');
     assert.equal(f.store.read({ view: 'automation_log', task_id: id }).text, '');
@@ -440,7 +441,7 @@ test('v2 migration preserves Agent outcomes and defaults while allowing null-Ass
     assert.equal(store.task(task.task_id).automation, null);
     assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items[0].summary, 'Legacy result');
     assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items[0].source, 'reported');
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 9);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 10);
     assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
   } finally {
     store?.close();
@@ -474,7 +475,7 @@ test('automation respects blocked_by: start waits for readiness and a finished b
   } finally { await f.close(); }
 });
 
-test('an automation child reaching done or blocked notifies the executing parent Orchestrator once', async () => {
+test('automation children notify done while preserving succeeded and failed run facts', async () => {
   const f = fixture();
   try {
     // Make 'orchestrator' execute an Agent Task so its automation Tasks become children.
@@ -499,18 +500,19 @@ test('an automation child reaching done or blocked notifies the executing parent
     assert.equal(f.sent.some(entry => entry.id === 'observer' && entry.text === `[Subscribed Task status changed](task:${ok}?event=status_changed)`), true);
     const bad = await f.create('bad');
     await f.start(bad);
-    assert.equal((await f.finished(bad)).status, 'blocked');
+    assert.equal((await f.finished(bad)).status, 'done');
+    assert.equal(f.store.automation.run(bad).state, 'failed');
     await until(() => cards().length === 2);
     assert.deepEqual(cards(), [
       `[Subtask done](task:${ok}?event=child_done)`,
-      `[Subtask blocked](task:${bad}?event=child_blocked)`,
+      `[Subtask done](task:${bad}?event=child_done)`,
     ]);
     const [notice] = f.store.read({ view: 'child_notices', task_id: ok }).items;
     assert.equal(notice.event.source, 'automation');
     assert.equal(notice.event.actor, null);
     assert.equal(notice.parent_task_id, root);
     const queued = await f.create('ok');
-    const cancelled = await f.write('task_cancel', { task_id: queued, write_context: f.store.task(queued).write_context, reason: 'Not needed' });
+    const cancelled = await f.write('task_cancel', { actor: 'user', task_id: queued, write_context: f.store.task(queued).write_context, reason: 'Not needed' });
     assert.equal(cancelled.error, null);
     await until(() => cards().length === 3);
     assert.equal(cards()[2], `[Subtask cancelled](task:${queued}?event=child_cancelled)`);

@@ -60,7 +60,7 @@ test('official MCP tools/list publishes all Task read selectors and a required v
     'request_id', 'retro', 'revision', 'status', 'task_id', 'view',
   ].sort());
   assert.deepEqual(schema.properties.view.enum, [
-    'list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices', 'automation_log', 'operation',
+    'list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'dependencies', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices', 'automation_log', 'operation',
   ]);
   assert.equal(schema.properties.task_id.type, 'string');
   assert.equal(schema.properties.task_id.format, 'uuid');
@@ -171,7 +171,7 @@ test('official MCP publishes nullable bounded retro and requires explicit comple
   for (const input of [
     { ...completed, retro: null }, { ...completed, retro: 'Automate repeated fixture setup.' },
     { ...base, activity: { text: 'Actual work' } },
-    ...['in_progress', 'blocked', 'in_review'].map(status => ({ ...base, status })),
+    { ...base, status: 'in_progress' },
   ]) {
     const response = await client.callTool({ name: 'task_report', arguments: input });
     assert.notEqual(response.isError, true);

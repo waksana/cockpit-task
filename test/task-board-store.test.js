@@ -142,9 +142,9 @@ test('selected overview returns only requested full latest records, distinguishi
   f.ack(task);
   const text = 'Full activity beyond the overview excerpt. '.repeat(85);
   f.report(task, { activity: { text: 'Earlier report' }, outcome: { summary: 'Earlier outcome' } });
-  const blocked = f.report(task, { status: 'blocked', activity: { text } });
+  const blocked = f.report(task, { status: 'in_progress', activity: { text } });
   const selected = read(['activity', 'outcome']);
-  assert.equal(selected.status, 'blocked');
+  assert.equal(selected.status, 'in_progress');
   assert.equal(selected.write_context, blocked.write_context);
   assert.equal(selected.activity.text, text);
   assert.equal(selected.activity.current, true);
@@ -914,7 +914,7 @@ test('v8 migration renames Task vocabulary, events and assignment receipts', t =
   db.close();
 
   store = new TaskStore(directory);
-  assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 9);
+  assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 10);
   const execution = store.read({ view: 'execution', task_id: taskId, actor: 'old-executor' });
   assert.equal(execution.orchestrator, 'old-owner');
   assert.equal(execution.assignee, 'old-executor');

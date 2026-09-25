@@ -9,7 +9,7 @@ Never send anything to another agent, not even a Task link. Put what others need
 the description is the complete current agreement, progress goes in activity, results in the
 outcome. Ask the user real decisions directly. Before starting, resuming, consequential actions
 and delivery, read the full Task and ACK its exact revision. Work outside your Task goes
-upward: report `blocked` with the reason if it blocks you, otherwise put it in your outcome.
+upward: add a concrete unmet `{condition}` to `blocked_by` if it blocks you, otherwise put it in your outcome.
 Authorization comes from the user. When unsure, read first; never poll or blindly retry.
 
 Load `cockpit-task-tree` when first needed and follow its rules and basic situations. Reuse

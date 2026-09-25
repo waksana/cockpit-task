@@ -20,15 +20,15 @@ orchestrator 管理多个独立 Task，默认 Agent Task 交给一个 assignee �
 对于已授权、可信、可重复的已知脚本，orchestrator 可显式选择 automation Task；
 服务持久单队列执行，没有 assignee、ACK 或 session 占用。登记和创建不执行，
 可选必要订阅之后才显式 start；不是把任意工作脚本化或增加工作流引擎。
-成功 done+outcome，失败/中断 blocked+outcome，不自动重跑；详见
+成功、失败或中断均以 done+outcome 结束本次执行，真实结果看 run facts，不自动重跑；详见
 [轻量自动化](task-automation.md)。以下指派、ACK 和 Agent 协作规则不套用于 automation。
 
-- Task 之间只有普通引用，没有父子关系、任务树、依赖引擎或级联调度。
+- Task 可有委派谱系与显式 `blocked_by` 关系，但没有自动调度或级联状态。
 - 一个 session 同时最多执行一项未结束 Task，完成或取消后可承接其他 Task。
 - 首次绑定后不能替换 assignee；orchestrator 或符合条件的原 assignee 可在用户明确授权返工时
   用 `task_reopen` 将 done Agent Task 重开，工作仍由原 assignee 继续；cancelled / automation 不适用。
-- orchestrator 信任 assignee 完整交付，不增加默认上游审批或逐阶段重新派单。
-  `in_review` 仅在工作约定本身需要评审时使用。
+- orchestrator 信任 assignee 完整交付，不增加默认上游审批或逐阶段重新派单；
+  review 是工作步骤，不是 lifecycle 状态。
 - 新建或 fork session 不自动隔离共享资源，也不继承额外授权。
 
 orchestrator 可以只读调查、回答问题和比较方案。实施及改变外部状态的交付默认委派，
@@ -128,17 +128,20 @@ assignee 在开工、恢复、重要阶段之间、重要外部操作前和交�
 | --- | --- |
 | 普通引用 | `[Task](task:<uuid>)` |
 | 首次派单，由 `task_assign` 发送一次 | `[Task assigned](task:<uuid>?event=assigned)` |
-| assignee 之外的调用者修改已指派未结束 Agent Task 的 description / `blocked_by`、重开或依赖变化 | `[Task updated](task:<uuid>?event=updated)`，完整正文仅为该链接 |
+| assignee 之外的调用者在 ready 时修改已指派未结束 Agent Task 的 description，或使其 ready/blocked 边界变化 | `[Task updated](task:<uuid>?event=updated)`，完整正文仅为该链接 |
 | assignee 之外的调用者取消已指派未结束 Agent Task | `[Task cancelled](task:<uuid>?event=cancelled)`，完整正文仅为该链接 |
+| assignee 为自己的 Task 新增具体 condition | `[Task blocked](task:<uuid>?event=blocked)`，发给 orchestrator |
 | 显式一次性状态订阅，由系统通知 subscriber | `[Subscribed Task status changed](task:<uuid>?event=status_changed)` |
-| 依赖方的全部 blocker 已 done，由系统通知 orchestrator | `[Subtask ready](task:<uuid>?event=ready)` |
+| 依赖方最后一个 active blocker 已解除，由系统通知 orchestrator | `[Subtask ready](task:<uuid>?event=ready)` |
 | 待派发依赖方的 blocker 被取消，由系统通知 orchestrator | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` |
 | Subtask 进入 done，由系统通知其 orchestrator（父 Task 的 assignee） | `[Subtask done](task:<uuid>?event=child_done)` |
-| Subtask 进入 blocked，由系统通知其 orchestrator（父 Task 的 assignee） | `[Subtask blocked](task:<uuid>?event=child_blocked)` |
+| 历史 Subtask blocked 事件 | `[Subtask blocked](task:<uuid>?event=child_blocked)`；仅兼容旧记录，不再产生 |
 | Subtask 进入 cancelled，由系统通知其 orchestrator（父 Task 的 assignee） | `[Subtask cancelled](task:<uuid>?event=child_cancelled)` |
 
 首次派单不复制 description，orchestrator 不重复发单。普通编辑与报告静默。
-assignee 之外的调用者对已指派未结束 Agent Task 改 description / `blocked_by`、重开、取消或依赖变化时，服务自动用
+已指派 Task 在 `ready→blocked` 或 `blocked→ready` 时通知 assignee；阻塞期间的普通
+description 更新、部分 blocker 解除保持静默。assignee 新增 condition 时只向 orchestrator
+上行一次。assignee 之外的调用者对已指派未结束 Agent Task 在 ready 时改 description、重开或取消时，服务自动用
 `mode:"immediate"` 发送固定 updated/cancelled 引用和读取/ACK 或停止工作要求。
 不整理或重放队列、不为通知中断工作；受理不等于消费或 ACK，未知效果不盲重试或手写补发。
 

@@ -164,7 +164,7 @@ export class AutomationStore {
   finish(taskId, { state, exit_code = null, signal = null, error = null, barrier = false }) {
     const write = () => {
       const run = this.run(taskId), task = this.store.row(taskId), at = now();
-      const status = task.status === 'cancelled' ? 'cancelled' : state === 'succeeded' ? 'done' : 'blocked';
+      const status = task.status === 'cancelled' ? 'cancelled' : 'done';
       const actualState = task.status === 'cancelled' ? 'cancelled' : state;
       this.db.prepare('UPDATE automation_runs SET state=?,exit_code=?,signal=?,error=?,barrier=?,finished_at=? WHERE task_id=?')
         .run(actualState, exit_code, signal, error, Number(barrier), at, taskId);

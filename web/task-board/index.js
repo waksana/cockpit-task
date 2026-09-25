@@ -3,8 +3,6 @@ import { parseTaskTarget, TASK_EVENTS } from '../../src/task-board/reference.js'
 const STATUS_LABELS = {
   todo: 'To do',
   in_progress: 'In progress',
-  blocked: 'Blocked',
-  in_review: 'In review',
   done: 'Done',
   cancelled: 'Cancelled',
 };
@@ -36,11 +34,13 @@ export function acknowledgementLabel(revision, acknowledgedRevision) {
 
 export function dependencyLabel(blockedBy, ready) {
   if (!Array.isArray(blockedBy) || !blockedBy.length) return null;
-  const done = blockedBy.filter((entry) => entry.status === 'done').length;
+  const tasks = blockedBy.filter((entry) => entry.task_id).length;
+  const conditions = blockedBy.length - tasks;
   const cancelled = blockedBy.filter((entry) => entry.status === 'cancelled').length;
-  const count = `Blocked by ${blockedBy.length} Task${blockedBy.length === 1 ? '' : 's'}`;
-  if (ready) return `${count} · all done · ready to dispatch`;
-  return `${count} · ${done} done${cancelled ? ` · ${cancelled} cancelled (orchestrator decision needed)` : ''} · not ready`;
+  const kinds = [tasks ? `${tasks} Task${tasks === 1 ? '' : 's'}` : null,
+    conditions ? `${conditions} condition${conditions === 1 ? '' : 's'}` : null].filter(Boolean).join(' + ');
+  return `Blocked by ${blockedBy.length} unmet prerequisite${blockedBy.length === 1 ? '' : 's'} (${kinds})`
+    + `${cancelled ? ` · ${cancelled} cancelled Task${cancelled === 1 ? ' needs' : 's need'} replanning` : ''}`;
 }
 
 export function delegationLabel(parentTaskId, depth) {
@@ -75,7 +75,10 @@ function validResult(input, data) {
   const nonnegative = (value) => Number.isSafeInteger(value) && value >= 0;
   const automation = (value) => object(value) && text(value.run_id) && text(value.script_id) && text(value.state);
   const dependencies = (value) => value.blocked_by === undefined || (Array.isArray(value.blocked_by) &&
-    value.blocked_by.every((entry) => object(entry) && text(entry.task_id) && text(entry.status)) && typeof value.ready === 'boolean');
+    value.blocked_by.every((entry) => object(entry) &&
+      ((text(entry.task_id) && text(entry.status) && entry.condition === undefined)
+        || (text(entry.condition) && entry.task_id === undefined && entry.status === undefined)))
+    && typeof value.ready === 'boolean' && value.ready === (value.blocked_by.length === 0));
   const lineage = (value) => (value.parent_task_id === undefined || value.parent_task_id === null || text(value.parent_task_id)) &&
     (value.depth === undefined || (Number.isSafeInteger(value.depth) && value.depth > 0));
   if (!object(data)) return false;
@@ -118,6 +121,16 @@ function validResult(input, data) {
     return entry(data) && data.revision === input.revision && text(data.reason) && text(data.description);
   }
   if (!Array.isArray(data.items) || !(data.next_cursor === null || (text(data.next_cursor) && data.next_cursor.length > 0))) return false;
+  if (input.view === 'dependencies') {
+    return data.task_id === input.task_id && data.items.every(item => object(item)
+      && text(item.dependency_id) && item.task_id === input.task_id && text(item.author) && text(item.created_at)
+      && ((item.kind === 'task' && text(item.blocker_id) && item.condition === undefined)
+        || (item.kind === 'condition' && text(item.condition) && item.blocker_id === undefined))
+      && typeof item.active === 'boolean'
+      && (item.active
+        ? item.resolved_at === null && item.resolved_by === null && item.resolution === null
+        : text(item.resolved_at) && text(item.resolved_by) && ['done', 'removed'].includes(item.resolution)));
+  }
   return data.items.every((item) => entry(item) && (input.view === 'changelog' ? text(item.reason)
     : (text(item.assignee) || (input.view === 'outcomes' && item.assignee === null &&
         item.source === 'automation' && text(item.run_id) && item.author === `automation:${item.run_id}`)) &&
@@ -339,8 +352,10 @@ export function activate(context) {
       h('dd', null, automated ? `Definition v${task.revision}` : acknowledgementLabel(task.revision, task.acknowledged_revision)),
       dependency ? h(React.Fragment, null,
         h('dt', null, 'Blocked by'),
-        h('dd', null, dependency, h('ul', { className: 'tb-references' }, task.blocked_by.map((entry) =>
-          h('li', { key: entry.task_id }, `${entry.task_id} · ${statusLabel(entry.status)}`))))) : null,
+        h('dd', null, dependency, h('ul', { className: 'tb-references' }, task.blocked_by.map((entry, index) =>
+          h('li', { key: entry.task_id ?? `condition-${index}` }, entry.task_id
+            ? `${entry.task_id} · ${statusLabel(entry.status)}`
+            : entry.condition))))) : null,
       task.parent_task_id ? h(React.Fragment, null,
         h('dt', null, 'Parent Task'),
         h('dd', null, delegationLabel(task.parent_task_id, task.depth), h(LazyTask, { taskId: task.parent_task_id }))) : null,
@@ -502,9 +517,16 @@ export function activate(context) {
       view === 'outcomes' ? h('p', { className: 'ck-text-secondary' }, 'Each outcome belongs to its recorded definition version. Older outcomes do not establish delivery of a newer definition.') : null,
       h(ReadState, { state }, (page) =>
       page.items.length ? h('ol', { className: 'tb-history' }, page.items.map((entry, index) =>
-        h('li', { key: entry.id ?? entry.revision ?? index },
-          h('p', { className: 'ck-text-secondary' }, `Definition v${entry.revision} · Reported author: ${entry.author} · ${formatTimestamp(entry.at)}`),
-          view === 'changelog'
+        h('li', { key: entry.dependency_id ?? entry.id ?? entry.revision ?? index },
+          h('p', { className: 'ck-text-secondary' }, view === 'dependencies'
+            ? `Author: ${entry.author} · ${formatTimestamp(entry.created_at)}`
+            : `Definition v${entry.revision} · Reported author: ${entry.author} · ${formatTimestamp(entry.at)}`),
+          view === 'dependencies'
+            ? h(React.Fragment, null,
+              entry.kind === 'task' ? h(LazyTask, { taskId: entry.blocker_id }) : h('p', { className: 'tb-preserve' }, entry.condition),
+              h('p', { className: 'ck-text-secondary' }, entry.active ? 'Active prerequisite'
+                : `Resolved: ${entry.resolution} · ${entry.resolved_by} · ${formatTimestamp(entry.resolved_at)}`))
+            : view === 'changelog'
             ? h(React.Fragment, null,
               h('p', { className: 'tb-preserve' }, entry.reason),
               h(RevisionDisclosure, { taskId, revision: entry.revision }))
@@ -536,7 +558,7 @@ export function activate(context) {
     const automated = kind === 'automation';
     const sections = [['execution', 'Definition'],
       ...(automated ? [['automation_log', 'Logs']] : [['activity', 'Reported activity'], ['native', 'Native session']]),
-      ['changelog', 'Definition revisions'], ['outcomes', 'Outcomes']];
+      ['changelog', 'Definition revisions'], ['outcomes', 'Outcomes'], ['dependencies', 'Prerequisite history']];
     const selected = sections.some(([view]) => view === section) ? section : 'execution';
     useLayoutEffect(() => {
       const element = dialog.current;
@@ -595,6 +617,8 @@ export function activate(context) {
         className: 'tb-card-event',
         title: event === 'status_changed'
           ? 'An explicit orchestrator subscription matched a status change of this Subtask. This is not a requirement update for its assignee; current Task data is shown below.'
+          : event === 'blocked'
+            ? 'The assignee recorded a concrete unmet condition that needs orchestrator handling. Current Task data is shown below.'
           : event === 'ready' || event === 'blocker_cancelled'
             ? 'A blocker of this Task reached a final state. Nothing was assigned or started; the orchestrator decides. Current Task data is shown below.'
             : event?.startsWith('child_')
@@ -603,6 +627,8 @@ export function activate(context) {
       }, TASK_EVENTS[event]) : null,
       event === 'status_changed' ? h('span', { className: 'tb-card-meta' },
         'Orchestrator subscription triggered · current state shown below') : null,
+      event === 'blocked' ? h('span', { className: 'tb-card-meta' },
+        'Assignee prerequisite notice to orchestrator · current state shown below') : null,
       event === 'ready' || event === 'blocker_cancelled' ? h('span', { className: 'tb-card-meta' },
         'Dependency notice to orchestrator · not assigned or started · current state shown below') : null,
       event?.startsWith('child_') ? h('span', { className: 'tb-card-meta' },

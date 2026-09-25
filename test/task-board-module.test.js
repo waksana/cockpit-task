@@ -174,9 +174,9 @@ test('HTTP selective reads preserve legacy defaults, errors, revision checks and
     assert.equal(fresh.body.definition_check.tasks[0].needs_ack, true);
     await f.write('task_ack', base);
     const text = `${'Activity '.repeat(90)}Asked the user directly.`;
-    const blocked = await f.write('task_report', { ...base, status: 'blocked', activity: { text } });
+    const blocked = await f.write('task_report', { ...base, status: 'in_progress', activity: { text } });
     const selected = await f.read(id, 'overview', { include: ['activity', 'outcome'] });
-    assert.equal(selected.body.result.status, 'blocked');
+    assert.equal(selected.body.result.status, 'in_progress');
     assert.equal(selected.body.result.activity.text, text);
     assert.equal(selected.body.result.outcome, null);
     assert.equal('retro' in selected.body.result, false);

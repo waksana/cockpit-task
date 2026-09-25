@@ -116,7 +116,7 @@ test('reference URLs allow only explicit safe protocols and no credentials', () 
 });
 
 test('status, revision and time helpers keep unknown and stale state explicit', () => {
-  assert.equal(statusLabel('in_review'), 'In review');
+  assert.match(statusLabel('in_review'), /Unknown status/);
   assert.equal(statusLabel('cancelled'), 'Cancelled');
   assert.match(statusLabel('new_status'), /Unknown status/);
   assert.match(statusLabel('__proto__'), /Unknown status/);
@@ -148,7 +148,7 @@ test('activation requires public compatibility and preserves native fallback on 
   const rendered = renderer.component({ node: { kind: 'link', target: `task:${taskId}` }, fallback });
   assert.equal(rendered.props.taskId, taskId);
   assert.equal(rendered.props.event, null);
-  for (const event of ['assigned', 'updated', 'status_changed', 'ready', 'blocker_cancelled', 'child_done', 'child_blocked', 'child_cancelled']) {
+  for (const event of ['assigned', 'updated', 'status_changed', 'blocked', 'ready', 'blocker_cancelled', 'child_done', 'child_blocked', 'child_cancelled']) {
     const node = { kind: 'link', target: `task:${taskId}?event=${event}`, label: 'An unrelated label' };
     assert.equal(renderer.matches(node), true);
     assert.equal(renderer.component({ node, fallback }).props.event, event);
@@ -206,7 +206,7 @@ test('card event headings come from the message and survive loading, failure and
   }
   assert.deepEqual(heading(render('child_done', 'As Owner: child Task done')).children, ['Subtask done']);
   snapshot = { phase: 'ready', data: { ...result, blocked_by: [{ task_id: taskId, status: 'cancelled' }], ready: false }, error: null };
-  assert.ok(render(null).children.some(child => child?.children?.includes('Blocked by 1 Task · 0 done · 1 cancelled (orchestrator decision needed) · not ready')));
+  assert.ok(render(null).children.some(child => child?.children?.includes('Blocked by 1 unmet prerequisite (1 Task) · 1 cancelled Task needs replanning')));
   snapshot = { phase: 'ready', data: { ...result, blocked_by: [], ready: true }, error: null };
   assert.equal(render(null).children.some(child => String(child?.children?.[0] ?? '').startsWith('Blocked by')), false);
   snapshot = { phase: 'missing', data: null, error: new Error('Missing Task') };
@@ -862,8 +862,28 @@ test('detail refresh preserves Agent history cursors and automation log offsets'
 test('dependency labels stay compact and never imply dispatch', () => {
   assert.equal(dependencyLabel(undefined, true), null);
   assert.equal(dependencyLabel([], true), null);
-  assert.equal(dependencyLabel([{ task_id: 'a', status: 'done' }, { task_id: 'b', status: 'done' }], true), 'Blocked by 2 Tasks · all done · ready to dispatch');
-  assert.equal(dependencyLabel([{ task_id: 'a', status: 'done' }, { task_id: 'b', status: 'in_progress' }], false), 'Blocked by 2 Tasks · 1 done · not ready');
+  assert.equal(dependencyLabel([{ task_id: 'b', status: 'in_progress' }, { condition: 'User must choose a target.' }], false),
+    'Blocked by 2 unmet prerequisites (1 Task + 1 condition)');
+});
+
+test('prerequisite history validates active conditions and permanently resolved Task rounds', async () => {
+  const entry = {
+    dependency_id: 'round-id', task_id: taskId, author: 'orchestrator', created_at: '2026-09-25T00:00:00Z',
+    kind: 'condition', condition: 'Provide the complete source.', active: true,
+    resolved_at: null, resolved_by: null, resolution: null, blocker_lifecycle: null,
+  };
+  const request = { view: 'dependencies', task_id: taskId };
+  const page = items => ({ task_id: taskId, items, next_cursor: null });
+  assert.deepEqual(await readTask({ request: async () => response(page([entry])) }, request), page([entry]));
+  const { condition, ...common } = entry;
+  const resolved = {
+    ...common, kind: 'task', blocker_id: 'blocker-id', active: false,
+    resolved_at: '2026-09-25T01:00:00Z', resolved_by: 'worker', resolution: 'done', blocker_lifecycle: 3,
+  };
+  assert.deepEqual(await readTask({ request: async () => response(page([resolved])) }, request), page([resolved]));
+  for (const invalid of [{ ...entry, active: false }, { ...resolved, resolution: null }, { ...entry, task_id: 'wrong' }]) {
+    await assert.rejects(readTask({ request: async () => response(page([invalid])) }, request), /invalid result/);
+  }
 });
 
 test('delegation lineage shows parent and lazily reads direct Subtasks without extra eager reads', async () => {

@@ -132,19 +132,19 @@ Agent 仍是默认；orchestrator 仅为可信、可重复的已知脚本选择�
 脚本化，也不亲自实施来绕过委派。按需读
 [orchestrator 脚本参考](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md)：
 发现/不可变登记 → task_create 保存配置与类型化输入快照 → 可选必要订阅 → 显式 start。
-无 assignee、ACK、session 占用、自动订阅或Subtask；服务单队列，不是工作流引擎。
-成功 done+outcome，失败/中断 blocked+outcome；取消不回滚，reconcile 仅证明终止后
+无 assignee、ACK、session 占用或自动订阅；可作为服务管理的 Subtask，单队列不是工作流引擎。
+本次执行结束均 done+真实 outcome，失败/中断由 run facts 表达；取消不回滚，reconcile 仅证明终止后
 解除队列屏障，不重跑或更改结果。通知后重读最新事实，不安排轮询或自动续订。
 
 ## 3. assignee：完整交付、同步要求
 
 automation 不属于 assignee 指派：可用现有读取工具看 kind、快照、运行事实、
 outcomes 和有界 automation_log，不能 ack/report；现有 edit/cancel 不授予 create/start。
-不为自己的已分配工作建立 automation Subtask。
+有授权的可信脚本可作为 automation Subtask；不能为绕过 Agent 交付临时造脚本。
 
 assignee 先读 execution 确认真实指派、完整 description、资料、版本与状态，
 不从名称、角色或旧聊天推断承接。内部组织步骤或 subagent，负责调查、实施、
-修正和完整交付，不建立Subtask 或向下转移责任。同一 session 只执行一项未结束 Task。
+修正和完整交付，可编排更具体的 Subtask 但须集成结果。同一 session 只执行一项未结束 Task。
 
 开工、恢复、重要阶段间、重要外部操作前和交付前读取最新定义，理解并 ACK
 精确 revision。ACK 与状态分开：确认后仍为 todo，开始时明确报告 in_progress。
@@ -175,6 +175,10 @@ activity 先写本次有意义的变化、发现、决定、阻碍和必要剩�
 outcome 先写交付结论、约定满足情况和剩余限制，再给必要依据；研究成果可详细，
 区分结论、论证和未验证点。引用不能删去支持结论或安全接续必需的精确数值。
 这些是内容取舍指导，不是必填模板、字数限制或模型行为保证。
+用户暂缓不报告 blocked 或虚构前置；in_progress 不要求持续运行。真实阻碍用具体
+`{condition}` 加入 active blocked_by，服务向 orchestrator 上行一次；由其确认解除或
+原子换成 `{task_id}`。阻塞期间普通修订/部分解除静默，最后前置满足通知一次。
+ready/通知不能覆盖完整约定中的“等我说继续”；reopen 不复活旧依赖，新问题须新建关系。
 activity 不自动改状态，outcome 不自动 done。完成最新已确认约定后，
 在同次报告提交 `status=done`、新 outcome 与显式 `retro` 文本或 null，
 保留成果引用和未执行边界。普通报告不传 retro；缺字段不当作 null。
@@ -184,7 +188,7 @@ activity 不自动改状态，outcome 不自动 done。完成最新已确认约�
 不授权改进或扩大范围；服务不新增通知、派单或完成门槛；
 有 Subtask 的节点在自己 done 前把 Subtask retro 折入自己的 retro。`task_retro_handle` 只是可选记录工具，任意调用者可用，Skill 不规定使用时机。
 服务保证提交和持久化，不保证思考或质量；automation 无 Agent 复盘。
-仅工作本身需要时使用 in_review，不等待默认 orchestrator 审批。
+评审是普通工作，不写 in_review，也不等待默认 orchestrator 审批。
 
 ## 4. 消息与一次性等待
 
@@ -198,14 +202,18 @@ activity 不自动改状态，outcome 不自动 done。完成最新已确认约�
 | `[Subtask ready](task:<uuid>?event=ready)` | `blocked_by` 全部 done 后系统通知依赖方 orchestrator；不代表已指派或启动 |
 | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` | 待派发依赖方的 blocker 取消后系统通知 orchestrator 重新评估 |
 | `[Subtask done](task:<uuid>?event=child_done)` | Subtask 每次真实进入 done 时系统通知其 orchestrator，无需订阅；仅同一转换已触发给同一 orchestrator 的订阅或父 Task 已结束时不发 |
-| `[Subtask blocked](task:<uuid>?event=child_blocked)` | Subtask 每次真实进入 blocked 时系统通知其 orchestrator，无需订阅；仅同一转换已触发给同一 orchestrator 的订阅或父 Task 已结束时不发 |
+| `[Task blocked](task:<uuid>?event=blocked)` | assignee 新增具体未满足文字条件时向 orchestrator 上行一次 |
+| `[Subtask blocked](task:<uuid>?event=child_blocked)` | 仅旧历史兼容，不再产生 |
 | `[Subtask cancelled](task:<uuid>?event=child_cancelled)` | Subtask 每次真实进入 cancelled 时系统通知其 orchestrator，无需订阅；仅同一转换已触发给同一 orchestrator 的订阅或父 Task 已结束时不发 |
 
 使用真实 UUID。event 由 URL 明确给出，只有上表小写值有效；不是 Task 类型、
 状态、命令或事件总线。卡片读取当前数据，消息原因保持不变。
 完整语法见[引用契约](task-implementation.md#read-boundaries-and-reference)。
 
-普通要求更新只改 Task；agent 不给其他 agent 发消息或补发卡片。assignee 之外的调用者改变已指派未结束 Agent Task 的 description / `blocked_by`、重开或依赖变化时，服务用 `mode:"immediate"` 单次发送固定 updated 引用和读取/ACK 要求；取消时发送 fixed cancelled 引用和停止工作要求。不复制 description、不整理或重放队列、不为通知中断工作；未知效果只作有界核对，不手写补发。接受不等于消费或当前 revision 的 ACK。
+普通要求更新只改 Task；agent 不给其他 agent 发消息或补发卡片。服务按 ready 期间更新、
+ready/blocked 边界、reopen 或取消规则发送固定引用，仍 blocked 时普通更新/部分完成静默，
+不提醒操作者本人。assignee notices 用 `mode:"immediate"`，不复制 description、
+不整理或重放队列；未知效果不盲目补发。接受不等于 ACK，不解除用户暂缓约定。
 
 **默认不订阅。** orchestrator 只有在未来状态会使自己采取具体、必要的后续行动时，
 才用 task_subscribe；无需等用户明确要求订阅，但不能为此虚构工作、拆分成果或

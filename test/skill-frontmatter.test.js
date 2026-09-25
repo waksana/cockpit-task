@@ -114,7 +114,7 @@ test('repository entrypoints describe the current Task module', () => {
   assert.deepEqual(readdirSync(join(root, 'src')), ['task-board']);
   assert.deepEqual(readdirSync(join(root, 'web')), ['task-board']);
   assert.deepEqual(readdirSync(join(root, 'roles')).sort(), ['task-node.md']);
-  assert.deepEqual(readdirSync(join(root, 'scripts')), ['package-task-board.js']);
+  assert.deepEqual(readdirSync(join(root, 'scripts')), ['migrate-task-v10.js', 'package-task-board.js']);
   assert.deepEqual(readdirSync(join(root, '.github/workflows')), ['task-board-ci.yml']);
   assert.deepEqual(manifest.roles.map(role => role.id), ['node']);
   assert.deepEqual(manifest.roles[0].skillDirectories.sort(), ['skills/cockpit-task-tree', 'skills/github-coding']);
@@ -166,7 +166,7 @@ test('Task tree Skill states the core idea and rules R1-R6 in order', () => {
     /fold your Subtasks' retros into your own retro/,
     /root.*do not follow progress/,
   ]);
-  assertSectionContains(skill, 'R4 Report work outside your Task upward', [/blocked.*state what must happen first/, /put it in your outcome/, /reports it upward/]);
+  assertSectionContains(skill, 'R4 Report work outside your Task upward', [/\{condition\}.*state what is missing/, /put it in your outcome/, /reports it upward/]);
   assertSectionContains(skill, 'R5 Authorization comes from the user', [/Discussion, research and records do not authorize/, /asking for a result does not authorize doing it yourself/, /explicit consent/]);
   assertSectionContains(skill, 'R6 Act on Task facts; when unsure, read first', [/read the Task or operation/, /safe recovery/, /Read only what the current decision needs/, /Never poll/, /Subscribe only when a future status unlocks/]);
 });
@@ -209,7 +209,7 @@ test('notices table matches TASK_EVENTS and assignee card scope', () => {
   const labels = rows.flatMap(([cards]) => [...cards.matchAll(/`\[([^\]]+)\]`/g)].map(([, label]) => label));
   assert.deepEqual(labels.sort(), Object.values(TASK_EVENTS).sort());
   const assigneeLabels = rows
-    .filter(([, receivedBy]) => /assignee/.test(receivedBy))
+    .filter(([, receivedBy]) => /^assignee/.test(receivedBy))
     .flatMap(([cards]) => [...cards.matchAll(/`\[([^\]]+)\]`/g)].map(([, label]) => label));
   assert.deepEqual(assigneeLabels.sort(), ['Task assigned', 'Task cancelled', 'Task updated']);
 });
@@ -314,7 +314,9 @@ test('module packaging carries both Skills without evaluation resources', () => 
   assert.deepEqual(entries.filter(entry => entry.startsWith('./skills/') && !entry.endsWith('/')).sort(), expectedSkills);
   assert.ok(!entries.some(entry => /^\.\/(?:docs|test)\//.test(entry)), 'No docs, tests, design or evaluation payloads');
   const topLevel = [...new Set(entries.filter(entry => entry !== './').map(entry => entry.split('/')[1]))].sort();
-  assert.deepEqual(topLevel, ['README.md', 'cockpit.module.json', 'node_modules', 'package.json', 'roles', 'skills', 'src', 'web']);
+  assert.deepEqual(topLevel, ['README.md', 'cockpit.module.json', 'node_modules', 'package.json', 'roles', 'scripts', 'skills', 'src', 'web']);
+  assert.deepEqual(entries.filter(entry => entry.startsWith('./scripts/') && !entry.endsWith('/')), ['./scripts/migrate-task-v10.js']);
+  assert.equal(execFileSync('tar', ['-xOf', archive, './scripts/migrate-task-v10.js'], { encoding: 'utf8' }), read('scripts/migrate-task-v10.js'));
   const packagedManifest = JSON.parse(execFileSync('tar', ['-xOf', archive, './cockpit.module.json'], { encoding: 'utf8' }));
   assert.deepEqual(packagedManifest.roles.map(role => role.id), ['node']);
   assert.deepEqual(packagedManifest.roles[0].skillDirectories.sort(), ['skills/cockpit-task-tree', 'skills/github-coding']);
