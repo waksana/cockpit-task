@@ -130,7 +130,7 @@ npm run package:module
 [cockpit-task-tree](skills/cockpit-task-tree/cockpit-task-tree/SKILL.md)，
 核心操作约定在 Skill 正文中，可信脚本 Task 另有 automation reference。
 节点同时通过现有装载机制发现 `github-coding` 工作 Skill，
-选择角色不等于每次都加载正文。准备包版本为 `0.2.0`；不同内容使用新版本，
+选择角色不等于每次都加载正文。准备包版本为 `0.3.0`；不同内容使用新版本，
 不覆盖同版本的既有安装。源码合并、CI 归档均不会自动升级线上。
 持久化仅使用宿主提供的模块目录，不自动导入其他数据库或修改既有安装。
 已发行 0.1.13 打包 #71/#72/#74（经 #75 合入）的按 Task 层级委派与 tree-node 模型：新增
@@ -147,6 +147,12 @@ orchestrator/assignee 公共词汇切换。v9 从宿主
 `_meta["cockpit/invocation"].sessionId` 派生调用者，删除工具输入中的
 `actor_session_id`；必须与提供该 metadata 的 Cockpit 0.4.7 联合部署。
 schema v9 只能向前滚动，0.1.13 不能打开升级后的数据库。
+Version `0.3.0` packages the incompatible schema v10 contract and requires an explicit
+reviewed plan for every existing v9 database, including those without legacy statuses.
+Released `0.2.0` cannot open v10. See the
+[migration procedure](docs/task-implementation.md#schema-v10-migration);
+version preparation does not authorize production migration or deployment.
+
 源码当前 schema v10 将 lifecycle 收敛为 `todo`、`in_progress`、`done`、`cancelled`，
 并把 Task/condition blocker 改为持久化关系轮次。v9→v10 不会猜测旧
 `blocked` / `in_review` 的含义：先运行 `node scripts/migrate-task-v10.js --data-root <dir>`

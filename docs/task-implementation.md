@@ -8,7 +8,7 @@ See the [MCP contract](task-mcp-contract.md) for input/result shapes, the
 ## Module and data
 
 The module ID and MCP server key are `cockpit-task`, display name Task, version
-`0.2.0` (source preparation; no deployment implied). Its manifest is [cockpit.module.json](../cockpit.module.json).
+`0.3.0` (source preparation; no deployment implied). Its manifest is [cockpit.module.json](../cockpit.module.json).
 `src/task-board/`, `web/task-board/` and the database filename `task-board.sqlite`
 are current internal paths. Task runs inside Cockpit, not a standalone service.
 
@@ -104,10 +104,15 @@ empty waits and waits on migrated terminal Tasks expire. Previously pending noti
 become explicit `not_sent/MIGRATION_NOTIFICATION_EXPIRED`, without replay or a wakeup storm.
 Accepted, queued, unknown and other historical records remain untouched.
 
-The migration is forward-only; older modules cannot open schema v10. Source merge,
+Version 0.3.0 packages this incompatible lifecycle/schema change; released 0.2.0
+cannot open schema v10. The migration is forward-only. Source merge,
 package creation and an isolated rehearsal do not authorize production apply, deployment,
 restart or release. Inventory again immediately before an authorized rollout; a previous
-snapshot plan is not a live-database plan.
+snapshot plan is not a live-database plan. Keep the final review/apply window free of
+all writers, including Task activity/ACK/report writes that change the fingerprint.
+Migration does not release user pauses or authorize paused work to resume. Restoring
+an older database loses later writes and requires separate authorization; retaining
+an old package alone is not a rollback strategy.
 
 Schema version 9 renames vocabulary in place: tasks.owner→orchestrator, tasks.executor→assignee; activities/outcomes/task_assignments.executor→assignee; subscriptions.owner→subscriber; dependency_notices/child_notices.owner→orchestrator; subscriptions.actor_session_id→author. It drops legacy occupancy/waiting indexes and creates `assignee_occupancy`, `task_assignments_assignee` and `subscriptions_waiting_subscriber`; it adds `operations.invocation` and creates `assignee_notices(kind)` with `assignee_notices_task` / `assignee_notices_pending`. Notification event JSON is migrated from `actor_session_id` to `actor`, and saved `task_assign` operation input/result JSON moves `executor` to `assignee`. The migration is roll-forward only; older installed modules reject user_version 9 with `SCHEMA_TOO_NEW`.
 

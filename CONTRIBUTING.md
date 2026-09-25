@@ -18,7 +18,15 @@ Synchronize `package.json`, `cockpit.module.json`, both root version entries in
 `package-lock.json`, the embedded MCP server version, tests and current-source
 documentation. Preserve historical release facts. If fresh main already prepares
 the appropriate undelivered version, reuse it rather than repeating its bump.
-The prepared version is 0.2.0, including schema v8 and v9 as described below.
+The prepared version is 0.3.0. Its incompatible four-state lifecycle and schema v10
+require a new minor version before 1.0, not a compatible patch or reuse of released
+0.2.0 bytes. It includes durable Task/text prerequisites, readiness-boundary notices,
+truthful finished automation outcomes and the reviewed, explicit v9-to-v10 migration.
+Every existing v9 database requires a reviewed plan, even without legacy statuses;
+ordinary activation refuses it. Follow the canonical
+[migration procedure](docs/task-implementation.md#schema-v10-migration).
+Installed 0.2.0 cannot open schema v10; switching packages back is not data rollback.
+Version preparation does not authorize production migration, installation or release.
 Previously released 0.1.13 packages the per-Task hierarchical delegation work from #71/#72/#74,
 merged via #75. Schema v7 is a non-destructive forward migration that adds
 nullable `tasks.parent_task_id`, `tasks.depth` default 1 and `child_notices`.
@@ -27,7 +35,7 @@ the package back is not a database rollback. Never overwrite live data with a
 historical backup. Validate migration on an isolated consistent copy before
 separately authorized deployment.
 
-The current vocabulary refactor for Issue #82 is schema v9 and a one-shot
+The vocabulary refactor packaged in 0.2.0 for Issue #82 is schema v9 and a one-shot
 switch with no aliases: `owner` becomes `orchestrator`, `executor` becomes
 `assignee`, and tool inputs/results, error codes, operation receipts, Web and
 docs move together. Schema v9 renames columns/indexes in place, adds
