@@ -132,15 +132,15 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
           }).join('\n');
         };
         const latestUser = message.messages.findLast(item => item.role === 'user');
-        const taskReference = latestUser && /\[(As Assignee: Task assigned to you|As Assignee: Task updated)\]\(task:([0-9a-f-]{36})\?event=(assigned|updated)\)/u.exec(contentText(latestUser.content));
+        const taskReference = latestUser && /\[(Task assigned|Task updated)\]\(task:([0-9a-f-]{36})\?event=(assigned|updated)\)/u.exec(contentText(latestUser.content));
         const orchestratorSubscription = latestUser && /Synthetic Orchestrator subscription for task:([0-9a-f-]{36})\./u.exec(contentText(latestUser.content));
-        const orchestratorNotice = latestUser && /\[As Orchestrator: Task status updated\]\(task:([0-9a-f-]{36})\?event=status_changed\)/u.exec(contentText(latestUser.content));
+        const orchestratorNotice = latestUser && /\[Subscribed Task status changed\]\(task:([0-9a-f-]{36})\?event=status_changed\)/u.exec(contentText(latestUser.content));
         const orchestratorPreparation = latestUser && /Synthetic Orchestrator preparation for assignee:([0-9a-f-]{36})\./u.exec(contentText(latestUser.content));
         let toolCall;
         if (taskReference) {
           const taskId = taskReference[2];
           const event = taskReference[3];
-          assert.equal(taskReference[1], event === 'assigned' ? 'As Assignee: Task assigned to you' : 'As Assignee: Task updated');
+          assert.equal(taskReference[1], event === 'assigned' ? 'Task assigned' : 'Task updated');
           const eventKey = `${event}:${taskId}`;
           const actor = /Native session ID: ([0-9a-f-]{36})/u.exec(JSON.stringify(message.messages));
           assert.ok(actor, 'Role System Prompt must supply the actual actor session ID');
@@ -574,7 +574,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       const offered = JSON.stringify(request.tools);
       for (const name of allTools) assert.ok(offered.includes(name), `Missing node tool ${name}`);
     }
-    const reference = `[As Assignee: Task assigned to you](task:${taskId}?event=assigned)`;
+    const reference = `[Task assigned](task:${taskId}?event=assigned)`;
     assert.deepEqual(nativeMessages.filter(message => message.sessionId === assigneeId), [{ sessionId: assigneeId, content: reference }]);
     assert.equal(nativeTaskReads.size, 1, 'The native Assignee must execute the advertised Task MCP tool');
     assert.ok(nativeTaskReads.has(`assigned:${taskId}`));
@@ -601,19 +601,32 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       { name: 'prompt', body: { sessionId: assigneeId, text: reference, mode: 'enqueue' } },
     ]);
 
-    stage = 'editing, acknowledging, reporting and observing without chat messages';
+    stage = 'editing sends exactly one native update, then ACK and reports stay silent';
     const messageCount = nativeMessages.length;
-    const modelCount = requests.length;
     const current = (await tool('task_read', { view: 'execution', task_id: taskId })).result;
     const description = 'Updated complete synthetic requirements.\nNo deployment, credentials, or external work.';
-    await tool('task_edit', {
+    expectedDefinitions.set(taskId, description);
+    const edited = await tool('task_edit', {
       request_id: 'integration-task-edit', actor: orchestratorId, task_id: taskId,
       revision: current.revision, write_context: current.write_context, description, reason: 'Synthetic integration revision',
     });
+    assert.equal(edited.result.acknowledged_revision, 1,
+      'The saved edit must not ACK the new revision on behalf of the Assignee');
+    const notice = `[Task updated](task:${taskId}?event=updated)`;
+    await waitFor(async () => nativeTaskAcks.has(`updated:${taskId}`) && await engine.busyCount() === 0,
+      'service-sent update and native fresh read/ACK');
+    assert.deepEqual(providerErrors, []);
+    assert.equal(nativeTaskReads.get(`updated:${taskId}`).acknowledged_revision, 1,
+      'The Assignee reads the pending revision before acknowledging it');
+    assert.deepEqual(nativeMessages.slice(messageCount), [{ sessionId: assigneeId, content: notice }]);
+    assert.deepEqual(bridgeCalls.filter(call => call.name === 'prompt').at(-1), {
+      name: 'prompt', body: { sessionId: assigneeId, text: notice, mode: 'immediate' },
+    });
+    const modelCount = requests.length;
     const updated = (await tool('task_read', { view: 'execution', task_id: taskId })).result;
     assert.equal(updated.description, description);
     assert.equal(updated.revision, 2);
-    assert.equal(updated.acknowledged_revision, 1, 'An Orchestrator edit must not ACK the new revision on behalf of the Assignee');
+    assert.equal(updated.acknowledged_revision, 2, 'Only the native Assignee acknowledged the update');
     const invalidReport = await mcp.callTool({
       name: 'task_report',
       arguments: {
@@ -624,7 +637,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     });
     assert.equal(invalidReport.isError, true);
     assert.equal(invalidReport.structuredContent.error.code, 'INVALID_INPUT');
-    assert.equal(invalidReport.structuredContent.definition_check.tasks[0].needs_ack, true);
+    assert.equal(invalidReport.structuredContent.definition_check.tasks[0].needs_ack, false);
     await tool('task_ack', {
       request_id: 'integration-task-ack', actor: assigneeId, task_id: taskId,
       revision: updated.revision, write_context: updated.write_context,
@@ -634,8 +647,8 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       revision: updated.revision, write_context: updated.write_context,
       activity: { text: 'Synthetic persisted progress, not native activity.' }, status: 'in_progress',
     });
-    assert.equal(nativeMessages.length, messageCount, 'Ordinary edits, ACK and reports never message a session');
-    assert.equal(requests.length, modelCount, 'Ordinary changes never invoke a model');
+    assert.equal(nativeMessages.length, messageCount + 1, 'ACK and same-status reports add no messages after the update');
+    assert.equal(requests.length, modelCount, 'ACK and same-status reports never invoke a model');
     const latest = (await tool('task_read', { view: 'overview', task_id: taskId })).result;
     assert.equal(latest.activity.text, 'Synthetic persisted progress, not native activity.');
     assert.equal(latest.activity.source, 'reported');
@@ -658,13 +671,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(native.json().available, true);
     assert.ok(invalidations >= 5);
 
-    stage = 'delivering an explicit updated notice without automatically sending on edit';
-    expectedDefinitions.set(taskId, description);
-    const notice = `Synthetic preserved pending context.\n\n[As Assignee: Task updated](task:${taskId}?event=updated)\nRead the current Task and acknowledge its latest revision before continuing.`;
-    await engine.prompt(assigneeId, notice, 'enqueue');
-    await waitFor(async () => nativeTaskAcks.has(`updated:${taskId}`) && await engine.busyCount() === 0,
-      'explicit updated notice and native fresh read/ACK');
-    assert.deepEqual(providerErrors, []);
+    stage = 'the service update preserves the earlier assigned event evidence';
     assert.equal(nativeTaskReads.get(`updated:${taskId}`).revision, 2);
     assert.equal(nativeTaskReads.get(`assigned:${taskId}`).revision, 1,
       'A later definition cannot relabel the earlier assigned event');
@@ -702,7 +709,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(already.structuredContent.error.code, 'ALREADY_IN_TARGET_STATUS');
     assert.deepEqual((await tool('task_read', { view: 'subscriptions', task_id: taskId })).result.items, []);
     const waiting = await tool('task_subscribe', { ...subscriptionInput, request_id: 'subscribe-cancelled', statuses: ['cancelled'] });
-    assert.equal(waiting.result.subscription.orchestrator, orchestratorId, 'Recipient comes from the Task, not the actor');
+    assert.equal(waiting.result.subscription.subscriber, unionId, 'Recipient is the actual subscriber, not the Task orchestrator');
     const unsubscriptionInput = {
       actor: orchestratorId, request_id: 'unsubscribe-cancelled', task_id: taskId,
       subscription_id: waiting.result.subscription.subscription_id,
@@ -716,7 +723,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const orchestratorRegistration = nativeOrchestratorWorkflows.get(`subscribe:${taskId}`);
     assert.ok(orchestratorRegistration, 'Native Orchestrator must complete its read and subscription tool calls');
     assert.equal(orchestratorRegistration.subscription.subscription.state, 'waiting');
-    assert.equal(orchestratorRegistration.subscription.subscription.orchestrator, orchestratorId);
+    assert.equal(orchestratorRegistration.subscription.subscription.subscriber, orchestratorId);
     assert.deepEqual(nativeOrchestratorCalls.filter(call => call.key === `subscribe:${taskId}`).map(call => call.name),
       ['task_read', 'task_subscribe']);
     const beforeStatusMessages = nativeMessages.length;
@@ -730,7 +737,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(complete.result.task_status.value, 'done');
     assert.equal(complete.notifications[0].subscription_id, orchestratorRegistration.subscription.subscription.subscription_id);
     assert.ok(['accepted', 'queued'].includes(complete.notifications[0].notification.status));
-    const statusCard = `[As Orchestrator: Task status updated](task:${taskId}?event=status_changed)`;
+    const statusCard = `[Subscribed Task status changed](task:${taskId}?event=status_changed)`;
     await waitFor(async () => nativeMessages.some(message => message.sessionId === orchestratorId && message.content === statusCard)
       && nativeOrchestratorWorkflows.has(`status_changed:${taskId}`)
       && await engine.busyCount() === 0, 'one-shot Orchestrator notification native completion');
@@ -763,15 +770,15 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const seed = new PackagedTaskStore(dataRoot);
     const seedCrashGap = label => {
       const task = seed.executeLocal('task_create', {
-        actor: unionId, request_id: `cold-create-${label}`, orchestrator: orchestratorId,
+        actor: orchestratorId, request_id: `cold-create-${label}`,
         title: `Synthetic ${label} recovery`, description: 'Synthetic cold-recovery fixture only.',
       });
       const subscription = seed.executeLocal('task_subscribe', {
-        actor: unionId, request_id: `cold-subscribe-${label}`, task_id: task.task_id,
+        actor: orchestratorId, request_id: `cold-subscribe-${label}`, task_id: task.task_id,
         write_context: task.write_context, statuses: ['cancelled'],
       }).subscription;
       seed.executeLocal('task_cancel', {
-        actor: unionId, request_id: `cold-cancel-${label}`, task_id: task.task_id,
+        actor: 'user', request_id: `cold-cancel-${label}`, task_id: task.task_id,
         write_context: task.write_context, reason: 'Synthetic gap between durable transition and external send',
       });
       return subscription;
@@ -798,7 +805,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(bridgeCalls.length, beforeColdCalls, 'Runtime up alone cannot recover before HTTP listen');
     await app.listen({ host: '127.0.0.1', port });
     assert.deepEqual(moduleRequests, []);
-    const recoveredCard = `[As Orchestrator: Task status updated](task:${pending.task_id}?event=status_changed)`;
+    const recoveredCard = `[Subscribed Task status changed](task:${pending.task_id}?event=status_changed)`;
     expectedStartupNotification = { sessionId: orchestratorId, text: recoveredCard, mode: 'enqueue' };
     assert.equal(moduleHost.ready(), undefined, 'Service-ready dispatch must be nonblocking');
     moduleHost.ready();
