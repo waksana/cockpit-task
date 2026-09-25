@@ -45,16 +45,13 @@ determines write authority; a subagent acts for its session:
   decides.
 - Follow project instructions and relevant work Skills for methods; use `github-coding`
   when changing repository files. Methods never widen authorization or change communication.
-- When the agreement changes, for example the user changes their mind or you agree a new
-  scope with them, revise your own Task.
-- Record meaningful activity, report status truthfully, and never call partial work complete.
+- Let the current agreement guide when you work as well as what you do. When it changes,
+  revise your own Task. A user's instruction to wait is not a blocker to escalate;
+  notices and ready prerequisites do not lift it.
+- Record meaningful activity and report status truthfully: a Task's delivery state is
+  not live session or tool activity. Never call partial work complete.
 - Mark done with a new outcome (result, evidence, limits) and a retro (evidence-based
   findings, or `null` when there are none).
-- Lifecycle is `todo`, `in_progress`, `done` or `cancelled`. `in_progress` means started,
-  not continuously running. Review is work, not a lifecycle state.
-- A user's temporary pause is not a blocker or an escalation. Keep any explicit
-  "wait until I say continue" in the agreement; a notice or ready prerequisite cannot
-  override it. Task records do not stop native sessions or running tools.
 
 **R3 Do it yourself, or split it.**
 - Work yourself or split by independently deliverable result, not by stage or trade.
@@ -63,15 +60,15 @@ determines write authority; a subagent acts for its session:
 - Before dispatching, check all unfinished Tasks for conflicting work on the same thing and
   order them with `blocked_by`.
 - When things change, revise, reorder or cancel obsolete Subtasks.
-- Verify each result against your Task's requirements. Errors and empty results are not
-  results; revise or add a Subtask for gaps. Integrate, fold your Subtasks' retros into your
-  own retro, and only then complete your Task.
+- Verify each result against your Task's requirements; revise or add a Subtask for errors,
+  empty results or other gaps. Integrate, fold your Subtasks' retros into your own retro,
+  and only then complete your Task.
 - Without a Task (the root), you dispatch this way but do not follow progress, so give work
   that needs integration to one top-level Task and let its assignee split it.
 
 **R4 Report work outside your Task upward.**
 - If it blocks you, atomically add a concrete `{condition}` to `blocked_by`: state what is
-  missing and what satisfies it. The service notifies your orchestrator once.
+  missing and what satisfies it.
 - If it does not block you, put it in your outcome.
 - An orchestrator reading this handles it within its own scope (create a Task, set
   `blocked_by`, atomically replace the condition with `{task_id}`, revise the definition),
@@ -107,32 +104,30 @@ determines write authority; a subagent acts for its session:
 Cards are `task:` links with fixed text and never carry free-form notes. Older labels, such
 as `[Task assigned to you]` or an `As Owner:` prefix, mean the same card. A top-level
 Task's lifecycle transitions reach the root only through its own subscription;
-a new assignee-recorded unmet condition also sends `[Task blocked]`.
+a new assignee-recorded unmet condition also sends `[Task blocked]` once.
 
 ## Basic situations
 
-- **F1 The root receives a request.** Discussion stays discussion. When the user wants a
-  result: create a Task with complete requirements, check conflicts and order (R3), create a
+- **F1 The root receives a request.** When the user wants a result: create a Task with
+  complete requirements, check conflicts and order (R3), create a
   node (preparing explicitly needed existing Skills or MCP servers; readiness is not
   authorization), assign, then stop and stay available.
-- **F2 `[Task assigned]`.** Read the full Task and ACK. Do it or split it (R3). Ask the user
-  real decisions and revise your Task (R1, R2). Report status; finish with outcome and retro.
+- **F2 `[Task assigned]`.** Read the full Task and ACK. Do it or split it (R3).
+  Handle decisions under R1; revisions, reporting and completion under R2.
 - **F3 `[Task updated]`.** Read the full Task, ACK the latest revision, and act within the
   current agreement and prerequisites. Address every changed requirement in your outcome,
   including why one does not apply.
 - **F4 `[Task cancelled]`.** Read the cancellation, stop affected work, report nothing more.
 - **F5 Dependency/Subtask cards.** `done`: read the outcome, verify and integrate; for
-  automation, inspect run facts and any barrier, not just Task status (F7).
+  automation, also inspect run facts and any barrier (F7).
   `Task blocked` or legacy `Subtask blocked`: read current requirements and blocking
   evidence, then handle unmet needs (R4). `cancelled` or `blocker cancelled`: re-plan.
   `ready`: the orchestrator reads current facts and dispatches an unassigned Task when
   authorized (R3, R5); for an assigned Task, its assignee reads/ACKs the latest agreement
   and continues permitted work (R2).
 - **F6 Cancel or reopen.** With the user's consent, cancel with a reason, or reopen a done
-  Task with a complete description and reason; the service notifies the assignee.
-  Reopen never revives resolved dependencies. A dependent with a new gap records a new
-  condition; its orchestrator explicitly replaces it with a new Task reference after
-  authorized, eligible rework is arranged. Other old dependents are unaffected.
+  Task with a complete description and reason.
+  Reopening does not revive resolved dependencies. Handle newly discovered gaps through R4.
 - **F7 Trusted scripts.** Agent work is the default. Only an existing, trusted, repeatable
   script within the user's authorization runs as automation; never create a script to
   bypass Agent delivery, and registration does not authorize running it. See

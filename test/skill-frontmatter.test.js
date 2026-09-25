@@ -153,7 +153,11 @@ test('Task tree Skill states the core idea and rules R1-R6 in order', () => {
     /read the full current Task.*ACK its exact revision/,
     /github-coding.*changing repository files/,
     /revise your own Task/,
+    /agreement guide when you work as well as what you do/,
+    /instruction to wait is not a blocker to escalate/,
+    /notices and ready prerequisites do not lift it/,
     /report status truthfully/,
+    /delivery state is not live session or tool activity/,
     /Mark done with a new outcome.*retro.*null/,
   ]);
   assertSectionContains(skill, 'R3 Do it yourself, or split it', [
@@ -214,15 +218,17 @@ test('notices table matches TASK_EVENTS and assignee card scope', () => {
   assert.deepEqual(assigneeLabels.sort(), ['Task assigned', 'Task cancelled', 'Task updated']);
 });
 
-test('ready and legacy blocked guidance preserves actionable routing without duplicating pause rules', () => {
+test('ready, legacy blocked and rework guidance routes actions through the shared rules', () => {
   const skill = prose(read(treeDirectory, 'SKILL.md'));
   const situations = skill.split('**F5 Dependency/Subtask cards.**')[1].split('**F6')[0];
   assert.match(situations, /orchestrator reads current facts and dispatches an unassigned Task when authorized/);
   assert.match(situations, /assigned Task, its assignee reads\/ACKs the latest agreement and continues permitted work/);
   assert.match(situations, /legacy `Subtask blocked`: read current requirements and blocking evidence/);
-  assert.match(situations, /automation, inspect run facts and any barrier/);
-  assert.equal((skill.match(/temporary pause/g) ?? []).length, 1);
-  assert.equal((skill.match(/wait until I say continue/g) ?? []).length, 1);
+  assert.match(situations, /automation, also inspect run facts and any barrier/);
+  const rework = skill.split('**F6 Cancel or reopen.**')[1].split('**F7')[0];
+  assert.match(rework, /With the user's consent/);
+  assert.match(rework, /Reopening does not revive resolved dependencies/);
+  assert.match(rework, /Handle newly discovered gaps through R4/);
   assert.match(prose(read(treeDirectory, 'references/automation.md')),
     /`done` unless explicitly cancelled; neither status proves success or process-group exit/);
 });
