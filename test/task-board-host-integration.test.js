@@ -8,6 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const hostWorktree = process.env.TASK_BOARD_HOST_WORKTREE;
+const fixtureModel = 'gpt-6-astra';
 const orchestratorTools = ['task_read', 'task_create', 'task_script_register', 'task_script_read', 'task_automation_start', 'task_automation_reconcile', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe', 'task_retro_handle'];
 const assigneeTools = ['task_read', 'task_edit', 'task_ack', 'task_reopen', 'task_report', 'task_cancel'];
 const allTools = [...new Set([...orchestratorTools, ...assigneeTools])].sort();
@@ -40,7 +41,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     }),
   ));
   const env = {
-    HOME: dirs.home, USERPROFILE: dirs.home, COCKPIT_HOME: dirs.host,
+    HOME: dirs.home, USERPROFILE: dirs.home, COPILOT_HOME: dirs.state, COCKPIT_HOME: dirs.host,
     XDG_CONFIG_HOME: dirs.config, XDG_CACHE_HOME: dirs.cache, XDG_STATE_HOME: dirs.state,
     XDG_RUNTIME_DIR: dirs.run, TMPDIR: dirs.scratch, TMP: dirs.scratch, TEMP: dirs.scratch,
     PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', COPILOT_DISABLE_KEYTAR: '1',
@@ -121,6 +122,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
         let text = '';
         for await (const chunk of request) text += chunk;
         const message = JSON.parse(text);
+        assert.equal(message.model, fixtureModel, 'Native requests must use the synthetic default model');
         requests.push(message);
         const completion = { id: 'synthetic-task-integration', created: 1, model: message.model };
         const contentText = content => {
@@ -286,11 +288,18 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       clientOptions: {
         connection: RuntimeConnection.forStdio({ env }), mode: 'empty', baseDirectory: dirs.state,
         workingDirectory: dirs.work, builtinPluginDirectories: [], useLoggedInUser: false,
-        enableRemoteSessions: false, logLevel: 'error', onListModels: () => [],
+        enableRemoteSessions: false, logLevel: 'error',
+        onListModels: () => [{
+          id: fixtureModel, name: 'Synthetic default model',
+          capabilities: {
+            supports: { vision: false, reasoningEffort: false },
+            limits: { max_context_window_tokens: 128000 },
+          },
+        }],
       },
       sessionConfig: {
-        model: 'gpt-4.1',
-        provider: { type: 'openai', wireApi: 'completions', baseUrl: `${providerUrl}/v1`, modelId: 'gpt-4.1' },
+        model: fixtureModel,
+        provider: { type: 'openai', wireApi: 'completions', baseUrl: `${providerUrl}/v1`, modelId: fixtureModel },
         configDirectory: dirs.state, enableFileHooks: false, enableHostGitOperations: false,
         enableSessionStore: false, enableSkills: true, pluginDirectories: [], instructionDirectories: [], customAgents: [],
         enableManagedSettings: false, skipEmbeddingRetrieval: true, embeddingCacheStorage: 'in-memory',
@@ -409,6 +418,8 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       if (event.type === 'user.message') nativeMessages.push({ sessionId, content: event.data.content });
     });
     await engine.start();
+    assert.deepEqual((await runtime.models()).map(model => model.modelId), [fixtureModel],
+      'The real default-model validator must receive the explicit synthetic catalog');
     runtimeReady = true;
     moduleHost.ready();
     const orchestratorId = await engine.newSession(dirs.work, [node]);
@@ -419,6 +430,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal((await engine.roleReadiness(unionId, [node])).ready, true);
     const orchestratorMeta = await engine.getMeta(orchestratorId);
     assert.ok(orchestratorMeta);
+    assert.equal(orchestratorMeta.currentModelId, fixtureModel);
     assert.deepEqual(orchestratorMeta.roles.map(role => role.roleId), ['node']);
     assert.equal(Object.hasOwn(orchestratorMeta, 'roleReadiness'), false,
       'Ordinary session metadata must not project capability readiness');
