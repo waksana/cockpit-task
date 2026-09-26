@@ -114,7 +114,7 @@ test('repository entrypoints describe the current Task module', () => {
   assert.deepEqual(readdirSync(join(root, 'src')), ['task-board']);
   assert.deepEqual(readdirSync(join(root, 'web')), ['task-board']);
   assert.deepEqual(readdirSync(join(root, 'roles')).sort(), ['task-node.md']);
-  assert.deepEqual(readdirSync(join(root, 'scripts')), ['migrate-task-v10.js', 'package-task-board.js', 'prompt-quotas.js', 'quotas.js']);
+  assert.deepEqual(readdirSync(join(root, 'scripts')), ['migrate-task-v10.js', 'migrate-task-v11.js', 'package-task-board.js', 'prompt-quotas.js', 'quotas.js']);
   assert.deepEqual(readdirSync(join(root, '.github/workflows')), ['task-board-ci.yml']);
   assert.deepEqual(manifest.roles.map(role => role.id), ['node']);
   assert.deepEqual(manifest.roles[0].skillDirectories.sort(), ['skills/cockpit-task-tree', 'skills/github-coding']);
@@ -405,8 +405,9 @@ test('module packaging carries both Skills without evaluation resources', () => 
   assert.ok(!entries.some(entry => /^\.\/(?:docs|test)\//.test(entry)), 'No docs, tests, design or evaluation payloads');
   const topLevel = [...new Set(entries.filter(entry => entry !== './').map(entry => entry.split('/')[1]))].sort();
   assert.deepEqual(topLevel, ['README.md', 'cockpit.module.json', 'node_modules', 'package.json', 'roles', 'scripts', 'skills', 'src', 'web']);
-  assert.deepEqual(entries.filter(entry => entry.startsWith('./scripts/') && !entry.endsWith('/')), ['./scripts/migrate-task-v10.js']);
+  assert.deepEqual(entries.filter(entry => entry.startsWith('./scripts/') && !entry.endsWith('/')), ['./scripts/migrate-task-v10.js', './scripts/migrate-task-v11.js']);
   assert.equal(execFileSync('tar', ['-xOf', archive, './scripts/migrate-task-v10.js'], { encoding: 'utf8' }), read('scripts/migrate-task-v10.js'));
+  assert.equal(execFileSync('tar', ['-xOf', archive, './scripts/migrate-task-v11.js'], { encoding: 'utf8' }), read('scripts/migrate-task-v11.js'));
   assert.equal(execFileSync('tar', ['-xOf', archive, './src/task-board/tool-descriptions.js'], { encoding: 'utf8' }),
     read('src/task-board/tool-descriptions.js'));
   assert.equal(execFileSync('tar', ['-xOf', archive, './src/task-board/tool-names.js'], { encoding: 'utf8' }),

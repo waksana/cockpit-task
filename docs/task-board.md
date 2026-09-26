@@ -70,6 +70,13 @@ CLI reports its final schema as 11. See
 [receipt migration](https://github.com/waksana/cockpit-task/blob/main/docs/task-implementation.md#caller-scoped-receipts-and-schema-v11).
 Source preparation is not production migration or deployment authorization.
 
+Existing v10 databases can use the packaged explicit migration entry:
+`node scripts/migrate-task-v11.js --data-root <directory> --preflight` rehearses
+on a temporary WAL-consistent copy without modifying the source. After backup,
+authorization and stopping all writers, replace `--preflight` with `--apply`.
+Apply is atomic, rejects schemas other than v10 and never replays operations.
+See the [explicit migration procedure](https://github.com/waksana/cockpit-task/blob/main/docs/task-implementation.md#explicit-schema-v10-to-v11-migration).
+
 ## Roles and records
 
 Every session is a Task tree node and receives the single `node` role (Node)
