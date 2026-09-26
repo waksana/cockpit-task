@@ -175,7 +175,8 @@ test('failed-operation reads retain their Task and check its current definition 
     });
     assert.equal(failed.error.code, 'ACK_REQUIRED');
     assert.equal(failed.result, null);
-    const read = { view: 'operation', request_id: 'report-before-ack', actor: 'orchestrator' };
+    const read = { view: 'operation', request_id: 'report-before-ack', actor: 'assignee' };
+    assert.equal((await f.service.execute('task_read', { ...read, actor: 'orchestrator' })).error.code, 'OPERATION_NOT_FOUND');
     const operation = await f.service.execute('task_read', read);
     assert.equal(operation.error, null);
     assert.equal(operation.result.task_id, task.id);
@@ -238,7 +239,7 @@ test('module close drains admitted external calls, persists their outcome and re
     const completed = await pending;
     assert.equal(completed.result.operation.creation, 'created');
     const reopened = new TaskStore(f.directory);
-    try { assert.equal(reopened.operation('request-1').result.operation.creation, 'created'); }
+    try { assert.equal(reopened.operation({ actor: 'orchestrator', request_id: 'request-1' }).result.operation.creation, 'created'); }
     finally { reopened.close(); }
   } finally { f.close(); }
 });
@@ -249,11 +250,11 @@ test('Task storage is private and a newer schema is rejected rather than overwri
     assert.equal(statSync(join(f.directory, 'task-board.sqlite')).mode & 0o777, 0o600);
     f.service.close();
     const future = new DatabaseSync(join(f.directory, 'task-board.sqlite'));
-    future.exec('PRAGMA user_version=11');
+    future.exec('PRAGMA user_version=12');
     future.close();
     assert.throws(() => new TaskStore(f.directory), error => error.code === 'SCHEMA_TOO_NEW');
     const unchanged = new DatabaseSync(join(f.directory, 'task-board.sqlite'));
-    try { assert.equal(unchanged.prepare('PRAGMA user_version').get().user_version, 11); }
+    try { assert.equal(unchanged.prepare('PRAGMA user_version').get().user_version, 12); }
     finally { unchanged.close(); }
   } finally { f.close(); }
 });
@@ -273,10 +274,11 @@ test('subagent invocations attribute to the containing session and replay by ses
     });
     assert.deepEqual(replay.result, created.result);
     assert.equal(replay.error, null);
-    const conflict = await service.execute('task_create', input, {
+    const independent = await service.execute('task_create', input, {
       invocation: { sessionId: 'other-container', runtimeSessionId: 'subagent-c', subagent: true, agentName: 'worker-c' },
     });
-    assert.equal(conflict.error.code, 'REQUEST_ID_CONFLICT');
+    assert.equal(independent.error, null);
+    assert.notEqual(independent.result.task_id, created.result.task_id);
     const operation = await service.execute('task_read', { view: 'operation', request_id: input.request_id }, { actor: 'container' });
     assert.equal(operation.result.actor, 'container');
     assert.deepEqual(operation.result.invocation, invocation);

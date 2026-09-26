@@ -19,7 +19,7 @@ export const definitionFits = ({ description, references = [], metadata = {} }) 
   JSON.stringify({ description, references, metadata }).length <= LIMITS.definitionPayload;
 const text = max => z.string().min(1).max(max).refine(value => value.trim().length > 0, 'Must not be blank');
 const session = text(200);
-const request = text(200);
+const request = text(200).describe('Stable request ID within the trusted calling session; main and subagents share it. Different sessions may reuse IDs, but changed input in one session conflicts. Unattributable legacy IDs remain reserved.');
 const id = z.uuid();
 const revision = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 const reference = z.strictObject({ label: text(200), target: text(2000) });
@@ -137,7 +137,7 @@ export const schemas = {
   task_session_prepare: z.strictObject({ ...mutation, session_id: session, ...resources }),
   task_assign: z.strictObject({
     ...existing, revision, assignee: session,
-    resume_request_id: request.optional().describe('Only to finish a dispatch whose finalized operation shows assignment=applied and message=not_sent: the earlier request_id, same Task and assignee. Pending, queued, accepted or unknown sends cannot resume'),
+    resume_request_id: request.optional().describe('Only to finish a dispatch whose finalized operation in the same calling session shows assignment=applied and message=not_sent: the earlier request_id, same Task and assignee. Pending, queued, accepted, unknown or unattributable legacy sends cannot resume'),
   }),
   task_edit: z.strictObject({
     ...existing, revision, reason: text(2000), title: text(240).optional(),
@@ -182,7 +182,7 @@ const readToolSchema = z.strictObject({
   view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'dependencies', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices', 'automation_log', 'operation']),
   task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes, dependencies, retro_handlings, subscriptions, dependency_notices, child_notices, assignee_notices and automation_log'),
   include: readInclude.optional(),
-  request_id: request.optional().describe('Required only for the operation view'),
+  request_id: request.optional().describe('Required only for the operation view; resolves within the trusted calling session, shared by its main and subagents, never another session. Unattributable legacy IDs return LEGACY_OPERATION_UNSCOPED.'),
   orchestrator: session.optional().describe('List filter only: Tasks this session orchestrates'),
   assignee: session.optional().describe('List filter only: Tasks assigned to this session'),
   parent_task_id: id.optional().describe('List filter only: direct Subtasks of this parent Task'),

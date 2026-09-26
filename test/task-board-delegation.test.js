@@ -113,7 +113,7 @@ test('schema keeps existing top-level Tasks without inventing lineage', t => {
   store.close();
   store = new TaskStore(root);
   try {
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 10);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 11);
     assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
     assert.equal(store.db.prepare('PRAGMA foreign_key_check').all().length, 0);
     assert.deepEqual(store.db.prepare('SELECT * FROM operations').all(), receipts);

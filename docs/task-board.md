@@ -1,7 +1,7 @@
 # Task
 
 Task is a Cockpit module for independent work records shared by orchestrator and assignee.
-Its module ID and HTTP MCP key are `cockpit-task`, version `0.3.0` (source preparation; no deployment implied).
+Its module ID and HTTP MCP key are `cockpit-task`, version `0.3.1` (source preparation; no deployment implied).
 It runs in Cockpit, not a standalone daemon or dashboard.
 
 Version 0.1.13 packaged per-Task hierarchical delegation and the tree-node model
@@ -52,7 +52,7 @@ the paired host's `_meta["cockpit/invocation"].sessionId`; callers no longer
 supply `actor_session_id`. Schema v9 is roll-forward only and requires Cockpit
 0.4.7 or a compatible source containing waksana/cockpit#205.
 
-Version 0.3.0 prepares schema v10: four lifecycle statuses (`todo`,
+Version 0.3.0 packaged schema v10: four lifecycle statuses (`todo`,
 `in_progress`, `done`, `cancelled`), durable Task/text prerequisites, boundary-only
 readiness notices and finished automation as done with truthful run facts. The
 incompatible lifecycle/schema contract requires a new pre-1.0 minor version; released
@@ -61,6 +61,14 @@ explicit reviewed plan, including those with no blocked/in_review Tasks. No prod
 migration, installation or release is implied. The packaged migration CLI defaults
 to read-only inventory; see the
 [reviewed migration procedure](https://github.com/waksana/cockpit-task/blob/main/docs/task-implementation.md#schema-v10-migration).
+
+Version 0.3.1 prepares caller-scoped request idempotency and schema v11.
+The v10-to-v11 migration preserves all receipt fields and reserves unattributable
+legacy IDs with an explicit error instead of guessing a caller or repeating effects.
+Released 0.3.0 cannot open v11. The v9 lifecycle review remains required; the current
+CLI reports its final schema as 11. See
+[receipt migration](https://github.com/waksana/cockpit-task/blob/main/docs/task-implementation.md#caller-scoped-receipts-and-schema-v11).
+Source preparation is not production migration or deployment authorization.
 
 ## Roles and records
 
@@ -259,8 +267,10 @@ reflection. Legacy history is never backfilled as no findings.
 
 ## Writes, failures and recovery
 
-Every write requires a stable request_id. Exact-input replay preserves original
-effects; the same ID with changed input conflicts. Existing-Task writes also
+Every write requires a stable request_id within its trusted calling session.
+The main session and its subagents share this namespace; different sessions may
+reuse IDs independently. Exact-input replay preserves original effects; changed
+input in the same session conflicts. Existing-Task writes also
 send back the read's opaque write_context, except unsubscribe, which checks the
 specified subscription's waiting state. Description revision is not a general
 lifecycle concurrency token.
@@ -277,7 +287,11 @@ not a list/detail badge; native busy/queue/decisions/background work are checked
 separately. The check and enqueue send are not atomic, so a race can produce
 queued or unknown results. Neither is safe to resend.
 
-Inspect `task_read(view=operation,request_id)` for durable step results.
+Inspect `task_read(view=operation,request_id)` for the calling session's durable step
+results, not another session's receipts. Web HTTP uses its fixed `user` namespace.
+Unattributable historical IDs return `LEGACY_OPERATION_UNSCOPED` and stay reserved;
+inspect retained evidence before any separately authorized remediation, never
+change the ID just to repeat an uncertain action.
 Failure-time `availability_reasons` and `observed_at` explain an observation,
 not live status; receipt reads/replay do not refresh them.
 Preserve created or bound resources after partial failures.
@@ -288,7 +302,7 @@ justify blind retry or replacement. Preparation rejects pending role reload and
 any unfinished Task binding; it is not a repair mode for an assigned assignee.
 Only an unused final assignment receipt proving `assignment=applied` and
 `message=not_sent` supports explicit resume_request_id recovery with a new request
-ID, fresh context/revision and the same Task/assignee. Unknown, queued, accepted
+ID in the same caller namespace, fresh context/revision and the same Task/assignee. Unknown, queued, accepted
 or pending sends do not. Cancellation does not stop native work or undo external effects.
 
 ## Collaboration and references
@@ -409,7 +423,7 @@ npm test
 npm run package:module
 ```
 
-`dist/cockpit-task-0.3.0.tgz` contains runtime dependencies, backend/frontend assets,
+`dist/cockpit-task-0.3.1.tgz` contains runtime dependencies, backend/frontend assets,
 the node role prompt, the tree Skill and the shared coding Skill. Its `.sha256` sidecar identifies the
 archive. [Task CI](https://github.com/waksana/cockpit-task/blob/main/.github/workflows/task-board-ci.yml) retains these as the
 `cockpit-task-module` artifact; an artifact is not an installation or deployment.
@@ -418,7 +432,7 @@ Installation is an explicit operator action on a compatible host. From the host
 checkout, stage the local artifact using the host's module installer:
 
 ```sh
-pnpm module install /absolute/path/to/cockpit-task-0.3.0.tgz --trust-local-code
+pnpm module install /absolute/path/to/cockpit-task-0.3.1.tgz --trust-local-code
 ```
 
 This command deliberately omits automatic enablement. Follow that host's documented

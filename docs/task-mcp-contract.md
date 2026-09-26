@@ -85,7 +85,7 @@ assignee 只应接收三类 Task 卡：`[Task assigned]`、`[Task updated]` 和
 | `task_id` | 已存在 Task 的 UUID；不是完整 `task:` URI，不含 query |
 | `_meta["cockpit/invocation"].sessionId` | MCP 宿主注入的调用 session；服务由此派生 `actor`，不是工具输入字段 |
 | `revision` | agent 实际读取或执行所依据的 description 版本，正整数 |
-| `request_id` | 每次明确变更的稳定请求标识；同请求重试保持不变 |
+| `request_id` | Stable ID for one mutation within the trusted calling session; keep it unchanged on replay. Main and subagents share the namespace; different sessions may reuse IDs |
 | `write_context` | 从读取或写入结果取得的不透明并发上下文；原样回传，不自行构造 |
 | `reason` | 变更原因；涉及用户澄清或取消时记录相应来源说明 |
 
@@ -98,6 +98,15 @@ assignee 只应接收三类 Task 卡：`[Task assigned]`、`[Task updated]` 和
 - session ID 可表示编排者、执行者或作者等业务上下文，不作为访问权限凭据。作者来源由宿主 invocation 或 HTTP `user` 归因，不接受工具参数伪造。
 
 所有变更工具都带 `request_id`；对已有 Task 的变更还带 `task_id` 和对应的 `write_context`，但 `task_unsubscribe` 直接以 `subscription_id` 检查等待状态，不接受 Task 上下文。`task_create`、`task_script_register`、`task_session_create` 和 `task_session_prepare` 不要求已有 Task 上下文。重复请求不重复产生副作用；同 ID 换输入明确冲突。重放原结果时仍重新进行 definition_check，不因结果缓存而漏掉新修订。
+
+Idempotency is keyed by `(trusted caller, request_id)`, not request ID alone.
+The main session and its subagents share receipts even across MCP connections;
+`runtimeSessionId` and other invocation details are audit, not replay identity.
+Changed input conflicts only within that caller namespace. The internal HTTP
+`user` path has its existing fixed namespace, with no caller-selection parameter.
+Every mutation, including script registration and automation, uses this contract.
+Unattributable historical IDs remain reserved and return `LEGACY_OPERATION_UNSCOPED`
+instead of being guessed, discarded or made executable again.
 
 通用引用形状为 `{label, target}`，两项均为字符串；`references` 为该形状的数组。`metadata` 为开放 JSON 对象，不存放凭据，不覆盖固定字段。编辑时提供的 references / metadata 整体替换该字段，省略则保持不变，空数组 / 空对象用于显式清空。description、title、reason 及文本成果不能为空。
 
@@ -112,7 +121,7 @@ activity.text 最长 4,000，outcome.summary 最长 8,000；每个 activity/outc
 `view` 必须明确指定。orchestrator 查找任务用 `list` 并显式指定 `orchestrator=自己的 session ID`；派出前的冲突检查用不带 orchestrator/assignee/parent 过滤的 `list` + `status=unfinished`（按需分页）。
 单项按目的用 `overview` 的 `include` 一次选择所需内容；省略 include 保持原视图响应。
 assignee 开始、恢复及执行要求同步仍读完整 `execution`，不能以选择输出代替。
-这些是信息选择，不限制任何持有工具者的读取范围。
+Task 视图仍是信息选择；operation 视图则只解析当前可信调用者命名空间中的 request_id。
 列表筛选使用显式 `orchestrator` / `assignee` / `parent_task_id`；调用者身份只提供归因和定义提醒，不自动筛选列表。
 
 | `view` | 其他输入 | 返回内容 |
@@ -131,7 +140,7 @@ assignee 开始、恢复及执行要求同步仍读完整 `execution`，不能�
 | `child_notices` | 子 `task_id`、`limit?`、`cursor?` | child_done / child_cancelled 通知及旧 child_blocked 历史，分页同 subscriptions |
 | `assignee_notices` | `task_id`、`limit?`、`cursor?` | 该 Task 的 assignee updated/cancelled 通知及投递事实，分页同 subscriptions；条目含 `notice_id,task_id,assignee,kind:"updated"|"cancelled",revision,event,created_at,notification` |
 | `automation_log` | `task_id`、`offset?`、`limit?` | automation 合并 stdout/stderr 的有界保留页与明确遗漏计数 |
-| `operation` | `request_id` | 某次明确操作的结果，特别是指派步骤 |
+| `operation` | `request_id` | The current caller's durable operation receipt, especially assignment steps; another caller's ID is not selected |
 
 列表默认只看未结束记录；可显式查询 done / cancelled。orchestrator 列表侧重各任务的执行者、状态、最新活动摘录、确认差异和成果可用性；assignee 列表侧重本人承接关系、状态与待确认版本。摘要使用现有字段和活动摘录，不生成另一份“进度总结”；摘录标明截断，正文通过专门视图读取，完整 description 不静默截断。
 
@@ -179,7 +188,17 @@ task_read(view=overview, task_id, include=["outcome","retro"])     → 确有交
 同一次选择可处理 done、blocked 或尚无 outcome，不必先猜 outcomes 再补 activity。
 无需某组就不选择；通知也不自动授权验收、复订或转述 assignee 已直接问用户的问题。
 
-operation 视图返回 `{request_id,tool,status,task_id?,result,error,created_at,updated_at}`；这里 status 是回执的 `pending|final`，与其内部 `result.operation.status` 及 Task 业务 status 不同。已有 Task 的操作从持久输入提供 `task_id`，失败且 `result:null` 时也保留关联，不返回整份输入。外部步骤保存在内部 operation，本地操作保存其原 effects/错误；definition_check 每次响应重新读取，不保存在回执里，也不能因原操作失败而漏掉相关 Task。
+The operation view returns `{request_id,tool,status,task_id?,result,error,actor,invocation?,created_at,updated_at}`.
+Its `pending|final` status is distinct from `result.operation.status` and Task
+lifecycle. `task_id` comes from the retained input even when a failed operation's
+result is null; the whole input is not returned. Reads resolve only in the calling
+session (or internal HTTP `user`) namespace, with no actor override.
+`OPERATION_NOT_FOUND` means no receipt in that namespace, not that the ID is unused
+everywhere. Unattributable historical IDs instead return `LEGACY_OPERATION_UNSCOPED`
+with `result.legacy_operation:{request_id,tool,status,legacy_reason}`; the complete
+original record stays in storage for separately authorized inspection.
+Local effects/errors and external steps remain unchanged. Every response recomputes
+`definition_check`; it is not a cached conclusion in the receipt.
 
 execution/definition 另含独立 `retro`，outcomes 每项含其对应 retro，原成果正文不变。
 完整形状为 `{status:'recorded',text:string|null,revision,assignee,author,source:'reported',at,outcome_id,current,has_findings}`；
@@ -514,7 +533,13 @@ observed_at            该次观察完成的 ISO 时间；回执重放不刷新�
 
 若检查后的竞态使宿主返回 queued，保留真实排队事实并明确报错，不映射为派单成功或“未发送”，也不盲目重发。这是非原子检查/发送的异常结果，不是首次派单主动选择的排队策略。
 
-恢复使用新的 request_id、最新 write_context/revision、相同 Task/assignee，并以 `resume_request_id` 指向原指派回执。原回执必须已 final、assignment=applied、message=not_sent 且未被其他恢复消费；仅接受同一固定 assignee。unknown/queued/accepted 或 pending 都不能授权重发。恢复不撤销归属、不替换 assignee，不恢复 done/cancelled。
+Recovery uses a new `request_id`, fresh write_context/revision and the same
+Task/assignee, with `resume_request_id` naming the original receipt in the same
+trusted caller namespace. Web authority on a Task does not expose another session's
+receipt. The original must be final, unused, `assignment=applied` and
+`message=not_sent`. Pending, unknown, queued, accepted or unattributable legacy
+receipts never authorize resending. Recovery does not rebind, replace the assignee,
+reopen a terminal Task or clear historical consumed markers.
 
 ### task_edit
 
@@ -586,8 +611,8 @@ activity/status/outcome 至少有一项；retro 仅可随 done 提交且此时�
 
 各部分都是显式输入：只写 activity 不改状态；只改状态不凭空生成一条 activity；提交 outcome 本身不隐式进入 done。Agent 完成时同次明确提交 `status=done`、新 outcome 与 `retro`，三者原子保存。不借旧版或前次 outcome 代替；省略 retro 明确拒绝，不默认成 null；非 done 即使传 null 也拒绝。
 所有传入 done 请求缺少 retro 时，均在任何写入前返回 `INVALID_INPUT`，包括同次
-activity 和旧格式历史请求的重放。旧 operations 保持原样，可用无副作用的
-`task_read(view=operation,request_id=原ID)` 读取已保存结果；不自动补 null，
+activity 和旧格式历史请求的重放。旧 operations 保持原样；可归属回执由原调用者以无副作用的
+`task_read(view=operation,request_id=原ID)` 读取，无法归属的旧 ID 返回 `LEGACY_OPERATION_UNSCOPED`；不自动补 null，
 不以相同 request_id 改输入重试。符合当前契约的新请求精确重放保留原保存结果，
 不重复副作用；请求 ID 和完整输入均须保持不变。
 assignee 先交付再轻量复盘，内容为有证据的可行动观察，不代替 outcome 或 blockers。
@@ -765,8 +790,9 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 | `RESOURCE_PREPARATION_FAILED` | 读取资源回执及当前状态，保留已经生效的步骤 |
 | `PREPARATION_UNCONFIRMED` | 未得到可靠资源回执，不盲重试或创建替代者 |
 | `SESSION_NOT_READY` | 当次检查不满足可接单条件，未发送；检查是否已绑定，不自动重试或擅自中断 |
-| `REQUEST_ID_CONFLICT` | 不用同一请求标识提交不同内容；v9 后旧请求因指纹包含 caller 可能冲突 |
-| `TASK_NOT_FOUND` / `OPERATION_NOT_FOUND` / `REVISION_NOT_FOUND` | 指定 Task、操作或修订不存在（404），不编造空记录 |
+| `REQUEST_ID_CONFLICT` | Different input reused an ID in the same caller namespace; original fingerprints are retained, including incompatible historical ones |
+| `LEGACY_OPERATION_UNSCOPED` | A retained legacy receipt lacks reliable caller identity (409); the ID stays reserved globally, and reads/reuse/resume fail. Inspect retained evidence before separately authorized remediation; never bypass uncertainty with a new ID |
+| `TASK_NOT_FOUND` / `OPERATION_NOT_FOUND` / `REVISION_NOT_FOUND` | 指定 Task、操作或修订不存在（404），不编造空记录；operation 只查当前调用者命名空间 |
 | `OPERATION_UNCONFIRMED` | 读取原操作及可靠证据，不自动重发或换人 |
 | `INVOCATION_REQUIRED` | 宿主未提供 `_meta["cockpit/invocation"].sessionId`；读取和写入都拒绝且不写入 |
 | `INVALID_INPUT` / `INVALID_CURSOR` / `INVALID_WRITE_CONTEXT` | 修正格式或读取有效上下文（400），未知字段也不被忽略 |

@@ -6,9 +6,11 @@ import { LIMITS, TaskError, parseInternal, definitionFits } from './contracts.js
 import { AutomationStore } from './automation-store.js';
 import { groupAlive } from './automation-runner.js';
 import { validateLifecyclePlan } from './lifecycle-migration.js';
+import { migrateOperationScopes, operationActor } from './operation-scopes.js';
 
 export { TaskError } from './contracts.js';
 export { inspectLifecycleMigration } from './lifecycle-migration.js';
+export const SCHEMA_VERSION = 11;
 const terminal = status => status === 'done' || status === 'cancelled';
 const now = () => new Date().toISOString();
 const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -42,7 +44,7 @@ export class TaskStore {
     this.db = new DatabaseSync(file);
     try {
       const version = this.db.prepare('PRAGMA user_version').get().user_version;
-      if (version > 10) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
+      if (version > SCHEMA_VERSION) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
       if (version === 9 && migrationPlan === null) {
         fail('MIGRATION_REVIEW_REQUIRED', 'Every existing schema v9 database requires a reviewed lifecycle plan, including an empty legacy Task set');
       }
@@ -206,7 +208,8 @@ export class TaskStore {
       `);
       if (version < 9) this.migrateVocabulary();
       if (version < 10) this.migrateLifecycle(migrationPlan?.tasks);
-      this.db.exec('PRAGMA user_version=10; COMMIT;');
+      if (version < 11) migrateOperationScopes(this.db);
+      this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}; COMMIT;`);
       this.automation = new AutomationStore(this, { platform });
     } catch (error) {
       this.db.close();
@@ -621,23 +624,34 @@ export class TaskStore {
       kind: row.kind, ...(row.kind === 'automation' ? { automation: this.automation.project(this.automation.run(row.id)) } : {}),
     };
   }
-  operation(requestId) {
-    const row = this.db.prepare('SELECT * FROM operations WHERE request_id=?').get(requestId);
-    if (!row) fail('OPERATION_NOT_FOUND', 'Operation does not exist', 404);
-    const input = JSON.parse(row.input);
+  operationRow(input) {
+    const actor = operationActor(input);
+    const legacy = this.db.prepare(`SELECT request_id,tool,status,legacy_reason FROM operations
+      WHERE actor IS NULL AND request_id=?`).get(input.request_id);
+    if (legacy) {
+      fail('LEGACY_OPERATION_UNSCOPED',
+        'A retained legacy receipt has no reliable caller. This request_id cannot be reused or resumed; inspect the retained history before any new operation',
+        409, { legacy_operation: { ...legacy } });
+    }
+    return this.db.prepare('SELECT * FROM operations WHERE actor=? AND request_id=?').get(actor, input.request_id);
+  }
+  operation(input) {
+    const row = this.operationRow(input);
+    if (!row) fail('OPERATION_NOT_FOUND', 'Operation does not exist in the calling session', 404);
+    const savedInput = JSON.parse(row.input);
     return {
       request_id: row.request_id, tool: row.tool, status: row.status,
-      ...(typeof input.task_id === 'string' ? { task_id: input.task_id } : {}),
+      ...(typeof savedInput.task_id === 'string' ? { task_id: savedInput.task_id } : {}),
       result: row.result ? JSON.parse(row.result) : null, error: row.error ? JSON.parse(row.error) : null,
-      ...(typeof input.actor === 'string' ? { actor: input.actor } : {}),
+      actor: row.actor,
       ...(row.invocation ? { invocation: JSON.parse(row.invocation) } : {}),
       created_at: row.created_at, updated_at: row.updated_at,
     };
   }
   receipt(name, input) {
-    const existing = this.db.prepare('SELECT * FROM operations WHERE request_id=?').get(input.request_id);
+    const existing = this.operationRow(input);
     if (existing && existing.fingerprint !== fingerprint(name, input)) {
-      fail('REQUEST_ID_CONFLICT', 'request_id was already used with different input or by a different session');
+      fail('REQUEST_ID_CONFLICT', 'request_id was already used with different input in the calling session');
     }
     return existing;
   }
@@ -645,13 +659,13 @@ export class TaskStore {
     const at = now();
     const { invocation, ...fields } = input;
     // The invocation records which agent (main or subagent) inside the actor session made the call.
-    this.db.prepare('INSERT INTO operations(request_id,tool,fingerprint,input,status,result,created_at,updated_at,invocation) VALUES(?,?,?,?,?,?,?,?,?)')
-      .run(input.request_id, name, fingerprint(name, input), JSON.stringify(fields), 'pending', JSON.stringify(result), at, at,
+    this.db.prepare('INSERT INTO operations(actor,request_id,tool,fingerprint,input,status,result,created_at,updated_at,invocation) VALUES(?,?,?,?,?,?,?,?,?,?)')
+      .run(operationActor(input), input.request_id, name, fingerprint(name, input), JSON.stringify(fields), 'pending', JSON.stringify(result), at, at,
         invocation ? JSON.stringify(invocation) : null);
   }
-  saveReceipt(requestId, result, error, final = true) {
-    const changed = this.db.prepare('UPDATE operations SET status=?,result=?,error=?,updated_at=? WHERE request_id=?')
-      .run(final ? 'final' : 'pending', JSON.stringify(result), error ? JSON.stringify(error) : null, now(), requestId);
+  saveReceipt(input, result, error, final = true) {
+    const changed = this.db.prepare('UPDATE operations SET status=?,result=?,error=?,updated_at=? WHERE actor=? AND request_id=?')
+      .run(final ? 'final' : 'pending', JSON.stringify(result), error ? JSON.stringify(error) : null, now(), operationActor(input), input.request_id);
     if (!changed.changes) fail('OPERATION_NOT_FOUND', 'Operation does not exist', 404);
   }
   reserveOperation(name, rawInput) {
@@ -659,7 +673,7 @@ export class TaskStore {
     if (!['task_assign', 'task_session_create', 'task_session_prepare'].includes(name)) fail('INVALID_OPERATION', 'Only external operations require reservation', 400);
     return this.transaction(() => {
       if (this.receipt(name, input)) {
-        const receipt = this.operation(input.request_id);
+        const receipt = this.operation(input);
         return {
           replay: true, ...receipt,
           error: receipt.status === 'pending'
@@ -669,20 +683,20 @@ export class TaskStore {
       }
       const operation = { request_id: input.request_id, status: 'unconfirmed', ...(input.task_id ? { task_id: input.task_id } : {}), message: 'External operation reserved; do not repeat an unconfirmed host call' };
       this.insertReceipt(name, input, { operation });
-      return { replay: false, ...this.operation(input.request_id) };
+      return { replay: false, ...this.operation(input) };
     });
   }
-  saveOperation(requestId, { result, error = null }, { final = result?.operation?.status !== 'running' } = {}) {
+  saveOperation(input, { result, error = null }, { final = result?.operation?.status !== 'running' } = {}) {
     return this.transaction(() => {
-      const receipt = this.operation(requestId);
+      const receipt = this.operation(input);
       if (receipt.status === 'final') {
         if (canonical(receipt.result) !== canonical(result) || canonical(receipt.error) !== canonical(error)) {
           fail('OPERATION_FINALIZED', 'A finalized operation cannot be overwritten');
         }
         return receipt;
       }
-      this.saveReceipt(requestId, result, error, final);
-      return this.operation(requestId);
+      this.saveReceipt(input, result, error, final);
+      return this.operation(input);
     });
   }
   executeLocal(name, rawInput, { validate = () => {} } = {}) {
@@ -697,7 +711,7 @@ export class TaskStore {
     };
     if (!handlers[name]) fail('EXTERNAL_OPERATION_REQUIRED', 'This tool requires the host operation service', 400);
     const receipt = this.transaction(() => {
-      if (this.receipt(name, input)) return this.operation(input.request_id);
+      if (this.receipt(name, input)) return this.operation(input);
       this.insertReceipt(name, input);
       // A savepoint prevents all business failures except explicitly returned stale-field results.
       this.db.exec('SAVEPOINT mutation');
@@ -705,13 +719,13 @@ export class TaskStore {
         validate();
         const { result, error = null } = this[handlers[name]](input);
         this.db.exec('RELEASE mutation');
-        this.saveReceipt(input.request_id, result, error);
+        this.saveReceipt(input, result, error);
       } catch (error) {
         this.db.exec('ROLLBACK TO mutation; RELEASE mutation');
         if (!(error instanceof TaskError)) throw error;
-        this.saveReceipt(input.request_id, error.result, { code: error.code, message: error.message, status: error.status });
+        this.saveReceipt(input, error.result, { code: error.code, message: error.message, status: error.status });
       }
-      return this.operation(input.request_id);
+      return this.operation(input);
     });
     if (receipt.error) throw new TaskError(receipt.error.code, receipt.error.message, receipt.error.status || 409, receipt.result);
     return receipt.result;
@@ -1153,15 +1167,16 @@ export class TaskStore {
       this.currentRevision(row, input);
       if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Terminal Tasks cannot be assigned');
       if (input.resume_request_id) {
-        const old = this.db.prepare('SELECT * FROM operations WHERE request_id=?').get(input.resume_request_id);
+        const old = this.operationRow({ actor: input.actor, request_id: input.resume_request_id });
         const prior = old?.result ? JSON.parse(old.result)?.operation : null;
         const oldInput = old ? JSON.parse(old.input) : null;
         if (!old || old.tool !== 'task_assign' || old.status !== 'final' || old.resumed_by
           || oldInput.task_id !== input.task_id || oldInput.assignee !== input.assignee
           || prior?.message !== 'not_sent' || prior.assignment !== 'applied' || row.assignee !== input.assignee) {
-          fail('UNSAFE_DISPATCH_RECOVERY', 'Recovery requires an unused finalized receipt proving this fixed assignment was not sent');
+          fail('UNSAFE_DISPATCH_RECOVERY', 'Recovery requires an unused finalized receipt in the calling session proving this fixed assignment was not sent');
         }
-        this.db.prepare('UPDATE operations SET resumed_by=? WHERE request_id=?').run(input.request_id, input.resume_request_id);
+        this.db.prepare('UPDATE operations SET resumed_by=? WHERE actor=? AND request_id=?')
+          .run(input.request_id, input.actor, input.resume_request_id);
       } else {
         if (row.assignee || row.status !== 'todo') fail('ASSIGNMENT_CONFLICT', 'Only an unassigned todo can be assigned');
         this.assertAssignable(row, input.assignee);
@@ -1179,17 +1194,17 @@ export class TaskStore {
           .run(row.id, input.assignee, input.actor, now());
       }
       const task = this.row(row.id);
-      this.db.prepare('UPDATE operations SET binding_context=?,result=?,updated_at=? WHERE request_id=?')
-        .run(this.context(task), JSON.stringify({ operation: { request_id: input.request_id, status: 'running', task_id: task.id, assignee: task.assignee, assignment: 'applied', message: 'not_sent', write_context: this.context(task) } }), now(), input.request_id);
+      this.db.prepare('UPDATE operations SET binding_context=?,result=?,updated_at=? WHERE actor=? AND request_id=?')
+        .run(this.context(task), JSON.stringify({ operation: { request_id: input.request_id, status: 'running', task_id: task.id, assignee: task.assignee, assignment: 'applied', message: 'not_sent', write_context: this.context(task) } }), now(), input.actor, input.request_id);
       return this.summary(task);
     });
   }
-  moduleSessionTitle(sessionId, excludeRequestId) {
+  moduleSessionTitle(sessionId, input) {
     // Only this module's own confirmed rename counts as module-set; the latest one wins.
     const row = this.db.prepare(`SELECT json_extract(result,'$.operation.session_title.title') AS title FROM operations
-      WHERE tool='task_assign' AND request_id<>? AND json_extract(result,'$.operation.assignee')=?
+      WHERE tool='task_assign' AND (actor IS NOT ? OR request_id<>?) AND json_extract(result,'$.operation.assignee')=?
         AND json_extract(result,'$.operation.session_title.status')='renamed'
-      ORDER BY updated_at DESC, rowid DESC LIMIT 1`).get(excludeRequestId, sessionId);
+      ORDER BY updated_at DESC, seq DESC LIMIT 1`).get(operationActor(input), input.request_id, sessionId);
     return typeof row?.title === 'string' ? row.title : null;
   }
   preparationPreflight(sessionId) {
@@ -1341,7 +1356,7 @@ export class TaskStore {
     // Role is derived from Task facts relative to the reading session, never from memory.
     const withRole = item => actor && item?.orchestrator !== undefined ? { ...item, actor_role: this.actorRole(item, actor) } : item;
     if (input.include) return withRole(this.transaction(() => this.selected(input), { readOnly: true }));
-    if (input.view === 'operation') return this.operation(input.request_id);
+    if (input.view === 'operation') return this.operation(input);
     if (input.view === 'list') {
       const { orchestrator, assignee, parent_task_id: parent, query, retro } = input;
       const status = input.status ?? (retro ? 'all' : 'unfinished');

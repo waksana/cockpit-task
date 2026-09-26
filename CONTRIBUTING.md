@@ -18,8 +18,15 @@ Synchronize `package.json`, `cockpit.module.json`, both root version entries in
 `package-lock.json`, the embedded MCP server version, tests and current-source
 documentation. Preserve historical release facts. If fresh main already prepares
 the appropriate undelivered version, reuse it rather than repeating its bump.
-The prepared version is 0.3.0. Its incompatible four-state lifecycle and schema v10
-require a new minor version before 1.0, not a compatible patch or reuse of released
+The prepared version is 0.3.1, a caller-scoped idempotency fix with schema v11.
+The v10-to-v11 migration preserves original receipts, fingerprints and uncertainty;
+unattributable legacy IDs remain reserved and fail with `LEGACY_OPERATION_UNSCOPED`.
+See [caller-scoped receipts](docs/task-implementation.md#caller-scoped-receipts-and-schema-v11).
+Released 0.3.0 cannot open v11; this forward-only source preparation does not authorize
+data migration or deployment, and the released 0.3.0 identity remains immutable.
+
+Released 0.3.0 introduced the incompatible four-state lifecycle and schema v10,
+requiring a new minor version before 1.0 rather than a patch or reuse of released
 0.2.0 bytes. It includes durable Task/text prerequisites, readiness-boundary notices,
 truthful finished automation outcomes and the reviewed, explicit v9-to-v10 migration.
 Every existing v9 database requires a reviewed plan, even without legacy statuses;

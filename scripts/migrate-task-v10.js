@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { inspectLifecycleMigration, TaskStore } from '../src/task-board/store.js';
+import { inspectLifecycleMigration, SCHEMA_VERSION, TaskStore } from '../src/task-board/store.js';
 
 function value(flag) {
   const index = process.argv.indexOf(flag);
@@ -16,9 +16,10 @@ const plan = apply || preflight ? JSON.parse(readFileSync(resolve(value('--plan'
 const inventory = inspectLifecycleMigration(dataRoot, { plan });
 
 if (!apply) {
-  process.stdout.write(`${JSON.stringify(preflight
+  const result = preflight
     ? { status: 'ready', schema: inventory.schema, target_schema: 10, source_fingerprint: inventory.source_fingerprint }
-    : inventory, null, 2)}\n`);
+    : inventory;
+  process.stdout.write(`${JSON.stringify({ ...result, final_schema: SCHEMA_VERSION }, null, 2)}\n`);
 } else {
   const store = new TaskStore(dataRoot, { migrationPlan: plan });
   try {

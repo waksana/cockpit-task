@@ -129,6 +129,29 @@ test('HTTP tool calls reject body identity fields and create Tasks as the signed
   } finally { f.close(); }
 });
 
+test('HTTP user receipts replay durably without colliding with or reading native-session receipts', async () => {
+  const f = fixture();
+  try {
+    const input = { request_id: 'shared-http-id', title: 'Web and native', description: 'Independent requests' };
+    const store = new TaskStore(f.root);
+    let native;
+    try {
+      native = store.executeLocal('task_create', { ...input, actor: 'native-session' });
+      store.executeLocal('task_create', { ...input, actor: 'native-session', request_id: 'native-only' });
+    } finally { store.close(); }
+    const web = await f.write('task_create', input);
+    assert.equal(web.status, 200);
+    assert.notEqual(web.body.result.task_id, native.task_id);
+    f.restart();
+    assert.deepEqual((await f.write('task_create', input)).body.result, web.body.result);
+    const receipt = await f.write('task_read', { view: 'operation', request_id: input.request_id });
+    assert.equal(receipt.body.result.actor, 'user');
+    assert.deepEqual(receipt.body.result.result, web.body.result);
+    assert.equal((await f.write('task_read', { view: 'operation', request_id: 'native-only' })).body.error.code, 'OPERATION_NOT_FOUND');
+    assert.equal((await f.write('task_create', { ...input, title: 'Changed' })).body.error.code, 'REQUEST_ID_CONFLICT');
+  } finally { f.close(); }
+});
+
 test('HTTP reopen checks real host readiness while the Assignee is running and does not dispatch', async () => {
   const f = fixture();
   try {

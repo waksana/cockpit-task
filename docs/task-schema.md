@@ -77,6 +77,18 @@ queued/starting/running 禁止编辑定义和资料；脚本选择及输入永�
 done 不代表成功或进程组退出；重做需要新授权和新 Task。
 
 调用者身份来自 MCP `_meta["cockpit/invocation"].sessionId`，不是工具参数；HTTP 路由固定为 `user`。输出中的 `actor` 标为 `reported`，是归因而非认证身份。缺少 MCP invocation 的调用（包括读取）返回 `INVOCATION_REQUIRED` 且不写入。subagent 调用归因到 containing session，并在 operation 的 `invocation` 中记录。
+
+Schema v11 keys operation receipts by `(actor, request_id)`: one trusted main
+session and its subagents share IDs, while different sessions may reuse them.
+Operation reads and `resume_request_id` select only that caller namespace; HTTP
+retains the internal `user` namespace. Invocation runtime details remain audit,
+not part of the replay fingerprint. The migration preserves every original v10
+receipt field and uses only reliable service-derived identity. Unattributable rows
+keep `actor=NULL`, an explicit `legacy_reason` and a globally reserved request ID;
+querying, reusing or resuming them returns `LEGACY_OPERATION_UNSCOPED`. No effects
+are discarded or retried. See
+[migration details](task-implementation.md#caller-scoped-receipts-and-schema-v11).
+
 ACK 表示对固定 assignee 的确认声明，不验证实际阅读。跨 Task ACK 可调用,
 但 Skill 不允许代 assignee 虚报已读。用户决定来源可以记入原因，
 却不能把“用户同意”文本当成技术授权证明，也不扫描聊天制造证明。

@@ -231,6 +231,14 @@ MCP `POST /mcp` 的每个 tool call 必须携带 host-injected `_meta["cockpit/i
 
 transport 按 MCP session 隔离，后续 POST 的 cancellation 能关联原在途调用。
 HTTP request ID、协议 session ID 与持久 request_id 的业务幂等是不同层次。
+Business idempotency uses `(trusted sessionId, request_id)`, not the runtime
+session ID, JSON-RPC ID or MCP connection ID. Reconnecting or retrying from another
+subagent in the same main session reuses its receipt; a different main session can
+use the same request ID independently. Operation reads and `resume_request_id`
+remain in that caller namespace. Module HTTP keeps its internal `user` namespace,
+without an actor-selection input. Unattributable historical IDs remain reserved
+with `LEGACY_OPERATION_UNSCOPED`; the host must not turn this into a fresh retry.
+
 取消在下一次 Task 到宿主调用前检查，不回滚已经创建、准备、绑定或发送的效果，
 也不保证中断已提交准备调用内的原生步骤。
 
