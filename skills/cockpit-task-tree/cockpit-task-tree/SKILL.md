@@ -138,8 +138,8 @@ a new assignee-recorded unmet condition also sends `[Task blocked]` once.
 
 ## Service guarantees
 
-You do not check or perform these yourself:
-- **Rejected writes**: the service rejects, saving nothing:
+The service enforces these protections; inspect actual effects under R6.
+- **Rejected changes**: the service rejects:
   - self-assignment, assignment up the lineage, more than 3 levels, a second unfinished Task
     for a node, and dispatch or done while prerequisites are unmet;
   - a Task blocker on an ancestor or in a cycle, and an assignee trying to resolve a
