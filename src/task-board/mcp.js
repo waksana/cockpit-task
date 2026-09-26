@@ -6,6 +6,7 @@ import { CallToolRequestSchema, CancelledNotificationSchema, ErrorCode, JSONRPCM
 import { z } from 'zod/v4';
 import { invocationFromMeta } from './contracts.js';
 import { toolDescriptions } from './tool-descriptions.js';
+import { developmentVersion } from './version.js';
 
 export function createMcpRoutes({ execute, schemas, signal, report }) {
   const connections = new Set();
@@ -20,7 +21,7 @@ export function createMcpRoutes({ execute, schemas, signal, report }) {
   let stopped = false;
 
   async function connection() {
-    const server = new Server({ name: 'cockpit-task', version: '0.3.2' }, { capabilities: { tools: {} } });
+    const server = new Server({ name: 'cockpit-task', version: developmentVersion() }, { capabilities: { tools: {} } });
     const lifetime = new AbortController();
     const pending = new Map();
     const state = {
