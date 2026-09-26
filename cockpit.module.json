@@ -2,7 +2,7 @@
   "apiVersion": 1,
   "id": "cockpit-task",
   "name": "Task",
-  "version": "0.3.2",
+  "version": "0.0.0-dev",
   "backend": "src/task-board/module.js",
   "frontend": {
     "entry": "web/task-board/index.js",

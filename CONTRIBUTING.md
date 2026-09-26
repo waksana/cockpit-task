@@ -12,18 +12,15 @@ and remaining capacity; exceeding a limit exits nonzero.
 
 ## Immutable installation versions
 
-Do not bump versions for every commit. Before packaging changed content for
-installation or deployment, compare against already delivered versions: changed
-package bytes require a fresh semantic version, normally the next patch for a
-compatible fix. The same module ID and version may only reproduce the same
-bytes/digest. A source SHA or digest does not replace the version or permit an
-installed identity to be overwritten.
+Keep `package.json`, `cockpit.module.json` and both root lockfile versions at
+`0.0.0-dev`. Every actual main PR merge automatically attempts an immutable Rolling
+Release for that exact merge SHA; this includes fixes, docs and chores. Packaging
+injects the run-number version into an isolated stage, never main. Read the
+[release procedure](docs/releases.md) before merging. PR-only/no-merge boundaries
+prevent this publication side effect. Local dev packages are not installable
+immutable release identities; never replace installed bytes under the same version.
 
-Synchronize `package.json`, `cockpit.module.json`, both root version entries in
-`package-lock.json`, the embedded MCP server version, tests and current-source
-documentation. Preserve historical release facts. If fresh main already prepares
-the appropriate undelivered version, reuse it rather than repeating its bump.
-The prepared version is 0.3.2, packaging compact Task cards, progressive details,
+Released 0.3.2 packages compact Task cards, progressive details,
 identity-scoped refresh and their declared browser assets. It retains schema v11
 without a new persistent migration. Released 0.3.1 introduced caller-scoped idempotency.
 The v10-to-v11 migration preserves original receipts, fingerprints and uncertainty;
@@ -91,10 +88,7 @@ Do not infer a deployed capability or minimum host release from a source merge.
 Legacy creation without resource selections remains compatible with older hosts.
 Verify the final merged
 CI artifact before authorized installation. Never delete installed directories
-or force installer bypasses to reuse a version. Merge does not authorize tags,
-Releases, deployment or restart; those require separate authorization.
-
-Follow the canonical [release procedure](docs/releases.md#automated-release-procedure)
-for separately authorized publication. After a joint deployment with the host,
-tag and release the accepted commit per Cockpit's
-[release-after-acceptance policy](https://github.com/waksana/cockpit/blob/main/docs/releasing.md#release-after-acceptance).
+or force installer bypasses to reuse a version. An authorized main merge includes
+its automatic Rolling attempt, not Milestone selection, deployment or restart.
+Follow the canonical [release procedure](docs/releases.md#automated-release-procedure);
+do not manually tag or create a release-only version PR.

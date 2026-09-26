@@ -3,12 +3,18 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { moduleProduct, rollingIdentity } from './deployment-manifest.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = resolve(root, 'dist');
 mkdirSync(output, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(root, 'cockpit.module.json'), 'utf8'));
 if (manifest.id !== 'cockpit-task' || manifest.apiVersion !== 1) throw new Error('Unexpected module manifest');
+if (manifest.version !== '0.0.0-dev') throw new Error('Main product version must remain 0.0.0-dev');
+const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+const deployment = process.env.ROLLING_SEQUENCE
+  ? { ...rollingIdentity(process.env.ROLLING_SEQUENCE, sourceSha), product: moduleProduct(root) } : null;
+if (deployment) manifest.version = deployment.version;
 const stage = mkdtempSync(join(output, 'cockpit-task-package-'));
 const pending = `${stage}.tgz`;
 try {
@@ -23,11 +29,18 @@ try {
       filter: source => source !== join(root, 'node_modules', '.bin'),
     });
   }
+  writeFileSync(join(stage, 'cockpit.module.json'), JSON.stringify(manifest, null, 2) + '\n');
+  if (deployment) {
+    const bytes = JSON.stringify(deployment, null, 2) + '\n';
+    writeFileSync(join(stage, 'cockpit-deployment.json'), bytes);
+    writeFileSync(join(output, 'cockpit-deployment.json'), bytes);
+    writeFileSync(join(output, 'cockpit-deployment.json.sha256'),
+      `${createHash('sha256').update(bytes).digest('hex')}  cockpit-deployment.json\n`);
+  }
   writeFileSync(join(stage, 'package.json'), JSON.stringify({
     name: 'cockpit-task', version: manifest.version, private: true, type: 'module',
     engines: { node: '>=24.0.0' },
   }, null, 2) + '\n');
-  const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const host = JSON.parse(readFileSync(join(root, 'tooling/host-compatibility.json'), 'utf8'));
   writeFileSync(join(stage, 'module-build.json'), JSON.stringify({
     format: 1,

@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { moduleProduct, rollingIdentity } from './deployment-manifest.js';
 
 export function verifyPackage(root, archive, sourceSha) {
   assert.match(sourceSha, /^[a-f0-9]{40}$/, 'Package source must be an exact commit');
@@ -25,10 +26,22 @@ export function verifyPackage(root, archive, sourceSha) {
   const build = JSON.parse(read('module-build.json'));
   const sourceManifest = JSON.parse(readFileSync(join(root, 'cockpit.module.json'), 'utf8'));
   const sourceMetadata = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  assert.equal(sourceMetadata.version, '0.0.0-dev');
+  assert.equal(sourceManifest.version, '0.0.0-dev');
+  const deployment = process.env.ROLLING_SEQUENCE
+    ? { ...rollingIdentity(process.env.ROLLING_SEQUENCE, sourceSha), product: moduleProduct(root) } : null;
+  if (deployment) {
+    sourceManifest.version = deployment.version;
+    const sidecar = readFileSync(join(resolve(archive, '..'), 'cockpit-deployment.json'), 'utf8');
+    assert.equal(read('cockpit-deployment.json'), sidecar);
+    assert.deepEqual(JSON.parse(sidecar), deployment);
+    assert.equal(readFileSync(join(resolve(archive, '..'), 'cockpit-deployment.json.sha256'), 'utf8'),
+      `${createHash('sha256').update(sidecar).digest('hex')}  cockpit-deployment.json\n`);
+  }
   const host = JSON.parse(readFileSync(join(root, 'tooling/host-compatibility.json'), 'utf8'));
   assert.deepEqual(manifest, sourceManifest);
   assert.equal(metadata.name, 'cockpit-task');
-  assert.equal(metadata.version, sourceMetadata.version);
+  assert.equal(metadata.version, deployment?.version ?? sourceMetadata.version);
   assert.equal(manifest.version, metadata.version);
   assert.equal(name, `cockpit-task-${manifest.version}.tgz`);
   assert.equal(build.format, 1);

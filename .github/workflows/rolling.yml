@@ -1,0 +1,38 @@
+name: Rolling
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+permissions:
+  contents: read
+# Do not rename/reset this workflow: run_number is the repository release order.
+# No shared concurrency group: even a third consecutive merge must keep its run.
+jobs:
+  rolling:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    env:
+      ROLLING_SEQUENCE: ${{ github.run_number }}
+      SOURCE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+      - run: npm run package:module
+      - name: Verify isolated injected package
+        run: node scripts/verify-package.js "dist/cockpit-task-0.0.0-rolling.$ROLLING_SEQUENCE.tgz" "$SOURCE_SHA"
+      - name: Publish verified immutable Rolling
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/rolling-release.js publish

@@ -11,6 +11,7 @@ import { z } from 'zod/v4';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { assignTask } from '../src/task-board/operations.js';
 import { createMcpRoutes } from '../src/task-board/mcp.js';
+import { developmentVersion } from '../src/task-board/version.js';
 import { toolSchemas, READ_GROUPS } from '../src/task-board/contracts.js';
 import { TaskService } from '../src/task-board/service.js';
 import { TaskStore } from '../src/task-board/store.js';
@@ -73,7 +74,7 @@ test('Task HTTP MCP speaks the official protocol and retains structured failures
   const f = fixture(async (name, input) => { calls.push({ name, input }); return expected; });
   try {
     await f.connect();
-    assert.deepEqual(f.client.getServerVersion(), { name: manifest.id, version: manifest.version });
+    assert.deepEqual(f.client.getServerVersion(), { name: manifest.id, version: developmentVersion() });
     const listed = await f.client.listTools();
     assert.deepEqual(listed.tools.map(tool => tool.name), ['task_read']);
     const response = await f.client.callTool({ name: 'task_read', arguments: { task_id: 'one' } });

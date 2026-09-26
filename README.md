@@ -149,8 +149,10 @@ counted unchanged. The fixed limits and counting rules live in
 [cockpit-task-tree](skills/cockpit-task-tree/cockpit-task-tree/SKILL.md)，
 核心操作约定在 Skill 正文中，可信脚本 Task 另有 automation reference。
 节点同时通过现有装载机制发现 `github-coding` 工作 Skill，
-选择角色不等于每次都加载正文。准备包版本为 `0.3.2`；不同内容使用新版本，
-不覆盖同版本的既有安装。源码合并、CI 归档均不会自动升级线上。
+Selecting a role does not load every Skill body. Main remains `0.0.0-dev`;
+each merged main PR automatically attempts its own immutable Rolling Release.
+See [Releases](docs/releases.md) for version injection, verified assets and explicit
+Milestone promotion. Neither source merges nor CI archives automatically deploy.
 持久化仅使用宿主提供的模块目录，不自动导入其他数据库或修改既有安装。
 已发行 0.1.13 打包 #71/#72/#74（经 #75 合入）的按 Task 层级委派与 tree-node 模型：新增
 schema v7（`tasks.parent_task_id`、`tasks.depth`，最多 3 层，超出返回

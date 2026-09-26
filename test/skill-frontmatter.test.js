@@ -114,8 +114,8 @@ test('repository entrypoints describe the current Task module', () => {
   assert.deepEqual(readdirSync(join(root, 'src')), ['task-board']);
   assert.deepEqual(readdirSync(join(root, 'web')), ['task-board']);
   assert.deepEqual(readdirSync(join(root, 'roles')).sort(), ['task-node.md']);
-  assert.deepEqual(readdirSync(join(root, 'scripts')), ['check-release.js', 'migrate-task-v10.js', 'migrate-task-v11.js', 'package-task-board.js', 'prompt-quotas.js', 'quotas.js', 'release-state.js', 'release-write.js', 'verify-package.js']);
-  assert.deepEqual(readdirSync(join(root, '.github/workflows')).sort(), ['release.yml', 'task-board-ci.yml']);
+  assert.deepEqual(readdirSync(join(root, 'scripts')), ['check-release.js', 'deployment-manifest.js', 'migrate-task-v10.js', 'migrate-task-v11.js', 'package-task-board.js', 'prompt-quotas.js', 'quotas.js', 'release-state.js', 'release-write.js', 'rolling-release.js', 'verify-package.js']);
+  assert.deepEqual(readdirSync(join(root, '.github/workflows')).sort(), ['milestone.yml', 'release.yml', 'rolling.yml', 'task-board-ci.yml']);
   assert.deepEqual(manifest.roles.map(role => role.id), ['node']);
   assert.deepEqual(manifest.roles[0].skillDirectories.sort(), ['skills/cockpit-task-tree', 'skills/github-coding']);
 });
@@ -395,7 +395,8 @@ test('module packaging carries both Skills without evaluation resources', () => 
   const packaged = spawnSync('npm', ['run', 'package:module'], { cwd: root, encoding: 'utf8' });
   assert.equal(packaged.status, 0, packaged.error?.message ?? `${packaged.stdout}\n${packaged.stderr}`);
   const manifest = JSON.parse(read('cockpit.module.json'));
-  const archive = join(root, 'dist', `cockpit-task-${manifest.version}.tgz`);
+  const version = process.env.ROLLING_SEQUENCE ? `0.0.0-rolling.${process.env.ROLLING_SEQUENCE}` : manifest.version;
+  const archive = join(root, 'dist', `cockpit-task-${version}.tgz`);
   const entries = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n');
   assert.ok(entries.includes('./module-build.json'));
   const expectedSkills = [
@@ -408,7 +409,8 @@ test('module packaging carries both Skills without evaluation resources', () => 
 
   assert.ok(!entries.some(entry => /^\.\/(?:docs|test)\//.test(entry)), 'No docs, tests, design or evaluation payloads');
   const topLevel = [...new Set(entries.filter(entry => entry !== './').map(entry => entry.split('/')[1]))].sort();
-  assert.deepEqual(topLevel, ['README.md', 'cockpit.module.json', 'module-build.json', 'node_modules', 'package.json', 'roles', 'scripts', 'skills', 'src', 'web']);
+  assert.deepEqual(topLevel, ['README.md', ...(process.env.ROLLING_SEQUENCE ? ['cockpit-deployment.json'] : []),
+    'cockpit.module.json', 'module-build.json', 'node_modules', 'package.json', 'roles', 'scripts', 'skills', 'src', 'web']);
   assert.deepEqual(entries.filter(entry => entry.startsWith('./scripts/') && !entry.endsWith('/')), ['./scripts/migrate-task-v10.js', './scripts/migrate-task-v11.js']);
   assert.equal(execFileSync('tar', ['-xOf', archive, './scripts/migrate-task-v10.js'], { encoding: 'utf8' }), read('scripts/migrate-task-v10.js'));
   assert.equal(execFileSync('tar', ['-xOf', archive, './scripts/migrate-task-v11.js'], { encoding: 'utf8' }), read('scripts/migrate-task-v11.js'));
