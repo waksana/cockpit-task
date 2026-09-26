@@ -4,7 +4,7 @@ Read this only when considering or handling an automation Task. Agent work stays
 default for anything needing judgment. Use automation only for an existing, reviewed,
 trusted and repeatable script within the user's authorization; registration never
 authorizes running it, and never create a script, command template or workflow to bypass
-Agent delivery. Automation needs a Linux (or WSL2) host; elsewhere use an Agent Task.
+Agent delivery. Automation needs a Linux (or WSL2) host.
 
 1. **Select or register.** Inspect an existing registration with `task_script_read`, or
    register an existing script with `task_script_register` (it does not run it). A
@@ -28,5 +28,5 @@ Agent delivery. Automation needs a Linux (or WSL2) host; elsewhere use an Agent 
 
 This is a same-user trust boundary, not a sandbox. Scripts must not daemonize, detach or
 escape their process group, and the fingerprint covers only the script bytes, not the
-interpreter, dependencies or external state. When these constraints do not fit, use an
-Agent Task or ask the user.
+interpreter, dependencies or external state. When these constraints do not fit, use Agent
+work under R3 without changing existing authorization or responsibility.

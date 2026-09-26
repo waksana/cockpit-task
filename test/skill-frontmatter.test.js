@@ -243,10 +243,12 @@ test('basic situations F1-F7 and service guarantees preserve the core contract',
   regexInOrder(skill, ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7'].map(id => new RegExp(`\\*\\*${id} `)));
   const guarantees = prose(skill.split('## Service guarantees')[1]);
   for (const requirement of [
-    /Rejected writes/, /service rejects, saving nothing/, /Idempotent writes/, /request_id/, /write_context/,
+    /Rejected changes/, /service rejects/, /inspect actual effects under R6/,
+    /Idempotent writes/, /request_id/, /write_context/,
     /every notice above is sent by the service/, /never retried/, /never clear or rewrite queued session messages/,
     /definition_check/,
   ]) assert.match(guarantees, requirement);
+  assert.doesNotMatch(guarantees, /saving nothing/);
 });
 
 test('guidance forbids manual Task notices and deleted references stay removed from Skills and roles', () => {
@@ -280,6 +282,8 @@ test('automation reference keeps trusted-script boundaries', () => {
     /existing, reviewed, trusted and repeatable script within the user's authorization/,
     /registration never authorizes running it/,
     /never create a script, command template or workflow to bypass Agent delivery/,
+    /Automation needs a Linux \(or WSL2\) host/,
+    /use Agent work under R3 without changing existing authorization or responsibility/,
     /no assignee: never assign, ACK or report it/,
     /subscribe before `task_automation_start`/,
     /replaying the same request never reruns it/,
@@ -289,6 +293,20 @@ test('automation reference keeps trusted-script boundaries', () => {
     /same-user trust boundary, not a sandbox/,
     /must not daemonize, detach or escape/,
   ]) assert.match(automation, requirement);
+  assert.doesNotMatch(automation, /elsewhere use an Agent Task|use an Agent Task or ask the user/);
+});
+
+test('current coding exercises use R3 rather than requiring delegation for ordinary work', () => {
+  const source = read('docs/task-lifecycle-testing.md');
+  const rows = source.split('\n');
+  for (const id of ['G1', 'G4']) {
+    const row = rows.find(line => line.startsWith(`| ${id}:`));
+    assert.ok(row, `${id} remains a current exercise`);
+    assert.match(row, /under R3/);
+    assert.match(row, /implementing node/);
+    assert.doesNotMatch(row, /creates the assignee|no personal implementation|delegates to one capable assignee/);
+  }
+  assert.match(rows.find(line => line.startsWith('| G1:')), /If delegated.*eligible existing or new session/);
 });
 
 test('fixed notice labels contain no pronouns or role prefixes', () => {
