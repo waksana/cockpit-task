@@ -123,6 +123,7 @@ async function find(client, tag) {
 async function readRelease(client, id) {
   const release = await client.read(`/releases/${id}`);
   assert.ok(release, 'Release disappeared');
+  assert.equal(release.id, id, 'Release ID readback differs');
   return { ...release, assets: await client.list(`/releases/${id}/assets`) };
 }
 async function verifyRemote(client, id, expected, directory, pinned = null, sealed = true) {
@@ -172,11 +173,16 @@ export async function publish(client, event, sequence, sourceSha, directory = 'd
       tag_name: expected.tag, target_commitish: sourceSha, name: `Cockpit Task ${expected.tag}`,
       body: notes, draft: true, prerelease: true, make_latest: 'false',
     }, 'POST', false, () => find(client, expected.tag));
-    const discovered = await find(client, expected.tag);
-    assert.equal(discovered?.id, release.id);
+    assert.ok(Number.isSafeInteger(release.id) && release.id > 0);
+    // Collection reads may omit a newly created draft. Its returned ID is authoritative.
+    const discovered = await readRelease(client, release.id);
+    assert.equal(discovered.tag_name, expected.tag);
+    assert.equal(discovered.target_commitish, sourceSha);
+    assert.equal(discovered.name, `Cockpit Task ${expected.tag}`);
+    assert.equal(discovered.body, notes);
     assert.equal(discovered.draft, true);
     assert.equal(discovered.prerelease, true);
-    assert.deepEqual(await client.list(`/releases/${release.id}/assets`), []);
+    assert.deepEqual(discovered.assets, []);
     for (const name of assetNames(expected)) {
       const current = await client.read(`/releases/${release.id}`);
       assert.equal(current.draft, true);

@@ -94,6 +94,9 @@ descriptor's channel remains `rolling`: a Milestone is the same tested artifact.
 
 All tag, release, asset and status mutations reuse the single-attempt HTTPS
 transport in `release-write.js`: fixed content length, no redirects or retry.
+Once draft creation returns an ID, readback uses `GET /releases/{id}` and verifies
+the ID, tag, source, notes and assets directly. A collection omitting a new draft
+does not establish that it disappeared and never triggers another creation.
 An uncertain response triggers readback for diagnosis and stops all later writes,
 even if the write may have succeeded. Never blindly rerun, clobber, replace assets,
 move tags or publish changed bytes under an existing version.

@@ -112,6 +112,37 @@ test('failed attempt does not block next sequence; unknown write stops immediate
   await publish(client, event, 2, sha, next.directory);
   assert.equal(client.releases[0].tag_name, next.expected.tag);
 });
+test('known draft ID is read directly when collection listing omits newly created drafts', async t => {
+  const client = fake();
+  const { directory } = fixture(t);
+  const original = client.list;
+  let collectionReads = 0;
+  client.list = async path => {
+    if (path === '/releases') {
+      collectionReads++;
+      return (await original(path)).filter(release => !release.draft);
+    }
+    return original(path);
+  };
+  await publish(client, event, 1, sha, directory);
+  assert.equal(collectionReads, 1, 'After creation, read by ID rather than rediscovering through a collection');
+  assert.equal(client.writes.filter(write => write.path === '/releases').length, 1);
+  assert.equal(client.releases[0].draft, false);
+});
+for (const field of ['id', 'tag_name', 'target_commitish']) {
+  test(`direct draft readback rejects changed ${field} before upload`, async t => {
+    const client = fake();
+    const { directory } = fixture(t);
+    const original = client.read;
+    client.read = async (path, binary) => {
+      const value = await original(path, binary);
+      if (/^\/releases\/\d+$/.test(path)) value[field] = field === 'id' ? 999 : 'conflicting';
+      return value;
+    };
+    await assert.rejects(publish(client, event, 1, sha, directory));
+    assert.equal(client.writes.length, 2, 'Only tag and draft creation were attempted');
+  });
+}
 test('rerun retains tag/version/assets and completed release; complete draft reuse does not upload', async t => {
   const client = fake();
   const { directory } = fixture(t);
