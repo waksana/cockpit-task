@@ -190,24 +190,27 @@ export async function publish(client, event, sequence, sourceSha, directory = 'd
         () => client.list(`/releases/${release.id}/assets`));
     }
   }
-  let verified = await verifyRemote(client, release.id, expected, resolve(directory, 'remote-verification'), null, false);
+  const verified = await verifyRemote(client, release.id, expected, resolve(directory, 'remote-verification'), null, false);
   // A rerun may reuse only the exact original bytes, including notes; no replacement uploads.
   assert.equal(verified.release.name, `Cockpit Task ${expected.tag}`);
   for (const name of assetNames(expected)) assert.deepEqual(verified.bytes[name], bytes[name]);
   const sealedNotes = notes + seal(verified.snapshot);
-  if (verified.release.body === notes && verified.release.draft) {
-    assert.equal(verified.release.prerelease, true);
-    await mutate(client, `/releases/${release.id}`, { body: sealedNotes }, 'PATCH', false,
-      () => readRelease(client, release.id));
-    verified = await verifyRemote(client, release.id, expected, resolve(directory, 'sealed-verification'));
+  if (!verified.release.draft) {
+    assert.equal(verified.release.body, sealedNotes, 'Original PR notes or publication identity changed');
+    verifySeal(verified.snapshot);
+    return verified.snapshot;
   }
-  assert.equal(verified.release.body, sealedNotes, 'Original PR notes or publication identity changed');
-  verifySeal(verified.snapshot);
-  if (!verified.release.draft) return verified.snapshot;
+  assert.ok(verified.release.body === notes || verified.release.body === sealedNotes,
+    'Original PR notes or publication identity changed');
   assert.equal(verified.release.prerelease, true);
-  await mutate(client, `/releases/${release.id}`, { draft: false, prerelease: true, make_latest: 'false' }, 'PATCH', false,
+  // A body-only draft PATCH can reset its tag to an untagged placeholder.
+  // Seal the verified identities in the same single request that publishes.
+  await mutate(client, `/releases/${release.id}`, {
+    body: sealedNotes, draft: false, prerelease: true, make_latest: 'false',
+  }, 'PATCH', false,
     () => readRelease(client, release.id));
-  const final = await verifyRemote(client, release.id, expected, resolve(directory, 'published-verification'), verified.snapshot);
+  const final = await verifyRemote(client, release.id, expected, resolve(directory, 'published-verification'),
+    { ...verified.snapshot, body: sealedNotes });
   assert.equal(final.release.draft, false);
   assert.equal(final.release.prerelease, true);
   return final.snapshot;

@@ -46,9 +46,12 @@ PR URL, source, tag, version, sequence and all four asset digests.
 
 Publication creates a draft prerelease, uploads once, downloads every asset by ID,
 verifies its API digest and byte checksum, checks embedded identity and exact asset
-set, seals original release/asset IDs, sizes and digests into the draft notes,
-and then publishes that same draft with `prerelease: true` and
-`make_latest: false`. It repeats the identity/byte verification after publication.
+set, and publishes that same draft with one PATCH containing the original
+release/asset ID, size and digest seal in its notes, `draft: false`,
+`prerelease: true` and `make_latest: false`. There is no intermediate body-only
+draft edit: such an edit can reset GitHub's selected tag to an `untagged-*`
+placeholder. Publication readback permits only the expected sealed body/status
+transition; tag, source and all asset identities/bytes must remain unchanged.
 Rolling never takes Latest from an explicitly selected Milestone.
 
 ### Deployment contract and Task data
