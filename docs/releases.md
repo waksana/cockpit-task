@@ -39,7 +39,10 @@ assets by ID, verifies their API and byte identities against the tagged source,
 and only then publishes that same draft. A missing, duplicate, conflicting,
 partial or already-published Release fails closed. If a create or publish request
 has an unknown result, the workflow rereads authoritative state and never retries
-the mutation automatically.
+the mutation automatically. Draft creation, each asset upload and publication use
+one explicit HTTPS request with a fixed content length, no redirect following and
+no transport retry. An uncertain write stops after readback instead of continuing
+with another mutation.
 
 After a joint deployment with the host, follow Cockpit's
 [release-after-acceptance policy](https://github.com/waksana/cockpit/blob/main/docs/releasing.md#release-after-acceptance).

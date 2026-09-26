@@ -95,10 +95,8 @@ jobs:
             "$RELEASE_TAG" draft-release.json)"
           if [ "$STATE" = absent ]; then
             set +e
-            gh release create "$RELEASE_TAG" \
-              "release-artifact/$ARCHIVE" "release-artifact/$ARCHIVE.sha256" \
-              --verify-tag --draft --title "Cockpit Task $RELEASE_TAG" \
-              --notes-file docs/release-notes.md --generate-notes
+            node scripts/release-write.js create "$RELEASE_TAG" "$GITHUB_SHA" \
+              >create-response.json 2>create.err
             CREATE_STATUS=$?
             set -e
             gh api --paginate --slurp \
@@ -109,6 +107,43 @@ jobs:
               echo "Draft creation returned $CREATE_STATUS and no exact-tag draft is visible; not retrying." >&2
               exit 1
             fi
+            if [ "$CREATE_STATUS" -ne 0 ]; then
+              cat create.err >&2
+              echo "Draft creation had an unknown result; exact-tag state was read back and no write will continue." >&2
+              exit 1
+            fi
+            if [ "$STATE" != draft ]; then
+              echo "Created Release is already $STATE; refusing to upload." >&2
+              exit 1
+            fi
+            CREATED_ID="$(jq -er .id create-response.json)"
+            test "$(jq -r .id draft-release.json)" = "$CREATED_ID"
+            test "$(gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/releases/$CREATED_ID/assets?per_page=100" | jq 'add | length')" -eq 0
+            for FILE in "$ARCHIVE" "$ARCHIVE.sha256"; do
+              gh api --paginate --slurp \
+                "repos/$GITHUB_REPOSITORY/releases?per_page=100" >release-pages.json
+              test "$(node scripts/release-state.js select release-pages.json \
+                "$RELEASE_TAG" draft-release.json)" = draft
+              test "$(jq -r .id draft-release.json)" = "$CREATED_ID"
+              set +e
+              node scripts/release-write.js upload "$CREATED_ID" \
+                "release-artifact/$FILE" >upload-response.json 2>upload.err
+              UPLOAD_STATUS=$?
+              set -e
+              if [ "$UPLOAD_STATUS" -ne 0 ]; then
+                cat upload.err >&2
+                gh api --paginate --slurp \
+                  "repos/$GITHUB_REPOSITORY/releases/$CREATED_ID/assets?per_page=100" \
+                  >upload-readback.json || true
+                echo "Upload of $FILE had an unknown result; assets were read back and no write will continue." >&2
+                exit 1
+              fi
+            done
+            gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100" >release-pages.json
+            STATE="$(node scripts/release-state.js select release-pages.json \
+              "$RELEASE_TAG" draft-release.json)"
           fi
           if [ "$STATE" != draft ]; then
             echo "Exact-tag Release is $STATE, not a recoverable draft." >&2
@@ -151,8 +186,7 @@ jobs:
         run: |
           ARCHIVE="cockpit-task-${RELEASE_TAG#v}.tgz"
           set +e
-          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
-            -F draft=false -F prerelease=false -f make_latest=true \
+          node scripts/release-write.js publish "$RELEASE_ID" \
             >publish-response.json 2>publish.err
           PUBLISH_STATUS=$?
           set -e
@@ -249,8 +283,7 @@ jobs:
         run: |
           ARCHIVE="cockpit-task-${RELEASE_TAG#v}.tgz"
           set +e
-          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
-            -F draft=false -F prerelease=false -f make_latest=true \
+          node workflow/scripts/release-write.js publish "$RELEASE_ID" \
             >publish-response.json 2>publish.err
           PUBLISH_STATUS=$?
           set -e

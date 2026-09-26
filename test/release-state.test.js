@@ -70,7 +70,7 @@ test('release workflow recovers drafts without tag-based draft reads or asset re
     'release-state.js select',
     'releases/assets/$ARCHIVE_ID',
     'releases/assets/$ARCHIVE_ASSET_ID',
-    'gh api --method PATCH',
+    'release-write.js publish',
     'authoritative readback proves it completed',
     'node-version: ${{ steps.recovery.outputs.node_version }}',
   ]) {
