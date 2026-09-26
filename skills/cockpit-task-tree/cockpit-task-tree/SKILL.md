@@ -1,6 +1,6 @@
 ---
 name: cockpit-task-tree
-description: "Operating manual for every Task tree node: Task is the only channel between nodes. With a Task, complete it yourself or through Subtasks you orchestrate; without one, stay available and delegate through Tasks. The service sends every notice. Load when first needed; reuse guidance still in context."
+description: "Operating manual for Task nodes: keep work-specific records and choose direct work, internal subagents or Task delegation as needed. Coordinate formal Task nodes through Tasks; retain responsibility and user authorization. Load when first needed; reuse guidance still in context."
 ---
 
 # Task tree
@@ -10,10 +10,10 @@ this Skill guides decisions.
 
 ## Core idea
 
-Task is the only channel between nodes. Every session is a node: with a Task, it owns
-completing it; when the work is too big, it splits it into Subtasks and orchestrates them.
-Nodes only read and write Tasks, and the service sends every notice. Decisions come from
-the user, asked directly.
+Every session is a node. With an assigned Task, you own its delivery. Internal subagents
+are helpers whose results you integrate; launching one does not transfer Task responsibility.
+Task is the only channel between formal Task nodes, and the service sends every notice.
+Decisions come from the user, asked directly.
 
 ## Relations
 
@@ -30,11 +30,13 @@ determines write authority; a subagent acts for its session:
 
 ## Rules
 
-**R1 Communicate only through Task.**
-- Never send anything to another agent, not even a Task link.
-- Put what others need in the Task. The description is the complete current agreement: goal,
-  scope, key decisions, authorization boundaries and completion conditions. References,
-  metadata and Issues only supplement it. Progress goes in activity, results in the outcome.
+**R1 Coordinate Task nodes through Task.**
+- Do not message another Task node, even with a Task link or through a helper.
+- Keep the description to work-specific goals, decisions, boundaries and completion
+  requirements. Reference external material instead of copying common knowledge, existing
+  rules, procedures, unnecessary implementation detail or history.
+- Record important changes in activity; put actual delivery, remaining work and evidence
+  links in the outcome.
 - The node facing a decision asks the user directly (ask_user where available). Do not ask
   a question someone is already asking, or ask for facts you can check yourself.
 - Keep secrets out of Tasks.
@@ -45,26 +47,27 @@ determines write authority; a subagent acts for its session:
   decides.
 - Follow project instructions and relevant work Skills for methods; use `github-coding`
   when changing repository files. Methods never widen authorization or change communication.
-- Let the current agreement guide when you work as well as what you do. When it changes,
-  revise your own Task. A user's instruction to wait is not a blocker to escalate;
-  notices and ready prerequisites do not lift it.
-- Record meaningful activity and report status truthfully: a Task's delivery state is
+- When the agreement changes, revise your own Task. A notice or ready prerequisite is not
+  permission to resume work the user paused.
+- Report status truthfully: a Task's delivery state is
   not live session or tool activity. Never call partial work complete.
-- Mark done with a new outcome (result, evidence, limits) and a retro (evidence-based
+- Mark done with a new outcome and a retro (evidence-based
   findings, or `null` when there are none).
 
-**R3 Do it yourself, or split it.**
-- Work yourself or split by independently deliverable result, not by stage or trade.
-  Each Subtask description carries every requirement applicable to it or deeper levels.
-  Assign a new node; do not take over delegated work.
+**R3 Choose how to do the work.**
+- Work directly when the relevant context is already in hand and direct handling fits.
+- Use internal subagents for parallel work, context separation or independent judgment;
+  integrate their results yourself. Independent review need not create a Task or session.
+- Delegate a Task when work needs an independent owner to keep it moving, deliver separately
+  or coordinate dependencies. Give it the work-specific requirements and references it needs
+  (R1); do not take over assigned work.
+- These are judgment criteria, not a fixed priority or per-use approval gate. Choose a
+  suitable existing or new session for a Task; neither new sessions nor fewer Tasks are goals.
 - Before dispatching, check all unfinished Tasks for conflicting work on the same thing and
   order them with `blocked_by`.
 - When things change, revise, reorder or cancel obsolete Subtasks.
-- Verify each result against your Task's requirements; revise or add a Subtask for errors,
-  empty results or other gaps. Integrate, fold your Subtasks' retros into your own retro,
-  and only then complete your Task.
-- Without a Task (the root), you dispatch this way but do not follow progress, so give work
-  that needs integration to one top-level Task and let its assignee split it.
+- Verify each result against the agreed requirements and have errors or gaps corrected.
+  Integrate results and fold Subtask retros into your own before completing your Task.
 
 **R4 Report work outside your Task upward.**
 - If it blocks you, atomically add a concrete `{condition}` to `blocked_by`: state what is
@@ -75,8 +78,8 @@ determines write authority; a subagent acts for its session:
   explicitly resolves the condition, or reports it upward the same way.
 
 **R5 Authorization comes from the user.**
-- Discussion, research and records do not authorize changes, dispatch or implementation;
-  asking for a result does not authorize doing it yourself.
+- Discussion, research and records do not authorize changes, dispatch or implementation.
+  Choosing a helper or Task does not widen authorization or transfer an existing assignment.
 - Scope changes, trade-offs, cancellation and reopening need the user's explicit consent.
 
 **R6 Act on Task facts; when unsure, read first.**
@@ -108,10 +111,10 @@ a new assignee-recorded unmet condition also sends `[Task blocked]` once.
 
 ## Basic situations
 
-- **F1 The root receives a request.** When the user wants a result: create a Task with
-  complete requirements, check conflicts and order (R3), create a
-  node (preparing explicitly needed existing Skills or MCP servers; readiness is not
-  authorization), assign, then stop and stay available.
+- **F1 The root receives a request.** Clarify the authorized result and choose how to do it
+  (R3). For Task delegation, record the requirements and references, check conflicts, select
+  or prepare a capable existing or new node, and assign. Then stay available without
+  following progress; the assignee owns delivery.
 - **F2 `[Task assigned]`.** Read the full Task and ACK. Do it or split it (R3).
   Handle decisions under R1; revisions, reporting and completion under R2.
 - **F3 `[Task updated]`.** Read the full Task, ACK the latest revision, and act within the

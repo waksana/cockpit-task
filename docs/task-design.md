@@ -13,9 +13,10 @@ Task 是 Cockpit 内的独立任务协作模块。模块 ID 与 MCP key 为 `coc
 用户可以先与 orchestrator 讨论想法、澄清范围，再明确登记或授权执行。讨论、调查、
 记录想法和启动交付是不同决定；不为闲聊自动建 Task，也不把登记等同于派单。
 
-orchestrator 管理多个独立 Task，默认 Agent Task 交给一个 assignee 完整负责，包括调查、
-实施、修正和交付。独立成果可分别建 Task；紧密关联的步骤、资源和专业分工
-由同一 assignee 内部组织，可使用 subagent，不转移整体责任。
+上下文已在手且直接处理合适时自己做；并行、分担上下文或独立判断可用内部 subagent，
+结果由当前负责人整合；需要独立负责人持续推进、独立交付或依赖协调时派 Task。
+这些是判断依据，不设固定优先级、逐次审批或 Task 数量目标，也不偏向新建 session。
+正式 Agent Task 由 assignee 完整负责；独立 review 可用内部 helper，不强制另建 Task/session。
 
 对于已授权、可信、可重复的已知脚本，orchestrator 可显式选择 automation Task；
 服务持久单队列执行，没有 assignee、ACK 或 session 占用。登记和创建不执行，
@@ -31,28 +32,25 @@ orchestrator 管理多个独立 Task，默认 Agent Task 交给一个 assignee �
   review 是工作步骤，不是 lifecycle 状态。
 - 新建或 fork session 不自动隔离共享资源，也不继承额外授权。
 
-orchestrator 可以只读调查、回答问题和比较方案。实施及改变外部状态的交付默认委派，
-不亲自实施或用自己的 subagent 代替独立 assignee。用户要求一个结果不等于要求
-orchestrator 本人执行；明确要求本人执行，或实际以具备能力的 assignee 身份承接 Task，
-才是个人执行例外。上述 automation 是另一条显式服务执行路径，不允许静默接管任意工作。
-无法委派且不符合可信脚本边界时应说明阻塞。
-编码工作中 orchestrator 只说明要求并引用现有 Issue；assignee 自行建立独立 worktree 并在合并后
-安全清理，orchestrator 不准备或清理环境；独立 [github-coding Skill](../skills/github-coding/github-coding/SKILL.md)
-定义这条工作流程，不改变角色分工或为非编码 Task 增加步骤。
+协作选择不扩大授权或接管已指派的工作。内部 helper 向当前节点交回结果；
+正式 Task 节点之间只通过 Task 记录协作，不能直接或借 helper 传话。
+使用 Task 委派编码时，orchestrator 说明本项要求并引用 Issue，assignee 自行建立和清理 worktree；
+直接实施也遵循独立 [github-coding Skill](../skills/github-coding/github-coding/SKILL.md)
+的隔离、独立审查及授权交付要求，不为非编码工作增加步骤。
 
 ## 2. Task 是共同工作记录
 
-Task 保存完整当前约定、资料、修订、执行动态和成果。聊天与通知只提供交流
-或引用，不维护第二份要求或进度账。用户可以直接与 assignee 澄清；
+Task 保存本项工作特有且影响交付的当前约定；外部资料引用即可，不复制通用规则、
+流程、无必要的实现细节或历史。聊天与通知不维护第二份要求或进度账。用户可以直接与 assignee 澄清；
 影响范围、约束或交付条件的结论应写回 Task，不要求 orchestrator 转述。
 
 | 记录 | 职责 |
 | --- | --- |
-| `description` | 完整当前工作说明，包括背景、目标、约束和完成条件 |
+| `description` | 本项工作的当前目标、决定、边界和完成要求 |
 | `revision` / `changelog` | 仅对 description 版本化；保留每版正文、作者、时间与原因 |
 | `acknowledged_revision` | 固定 assignee 已确认的 description 版本；逐版确认另有记录 |
-| `activity` | assignee 报告的执行事实，指向实际依据且已确认过的 revision |
-| `status` / `outcome` | 明确的工作状态与成果；不从 activity 文本或 session 状态推断 |
+| `activity` | assignee 报告的重要变化，保留实际依据与已确认的 revision |
+| `status` / `outcome` | 明确的工作状态、实际交付、遗留和证据入口；不从 activity 或 session 状态推断 |
 | `retro` | Agent 交付后的轻量复盘，独立于成果，随同次完成记录保存 |
 | `references` / `metadata` | 补充资料；不形成依赖或新的 Task 子类型，不隐藏工作要求 |
 

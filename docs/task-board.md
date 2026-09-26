@@ -92,20 +92,25 @@ orchestrator and assignee are per-Task facts, not session roles:
 | assignee (`assignee` field) | Deliver one entire assigned outcome, organizing internal steps, subagents or Subtasks |
 
 Reads return `actor_role` (`assignee`, `orchestrator` or `none`; legacy rows may show `orchestrator_and_assignee`). Card labels are not prefixed; `Task ...` cards concern the assignee relation and `Subtask ...` cards concern the orchestrator relation. A node with an
-assignment owns completing it; a node without one delegates delivery as root.
+assignment owns completing it and integrates helper and Subtask results.
 
 Agent Tasks remain the default. orchestrator may explicitly choose a trusted repeatable
 known script instead, using a service-managed automation Task—not arbitrary work,
 a fake assignee or a Subtask workflow. See
 [lightweight automation](https://github.com/waksana/cockpit-task/blob/main/docs/task-automation.md).
 
-orchestrator may investigate read-only and answer questions, but delegates implementation
-and state-changing delivery by default. An outcome request is not a request for
-personal execution. Explicit personal-execution instruction or a real assignment
-as a capable assignee is an exception; holding the node role alone is not.
-Unavailable delegation is a blocker, not permission to take over.
-For coding, orchestrator states requirements and references any existing Issue; it does
-not prepare or clean up branches/worktrees and does not implement code.
+Choose direct work when the context is in hand and direct handling fits, internal subagents
+for parallel work, context separation or independent judgment, and Tasks for continuing
+independent responsibility, delivery or dependency coordination. These are criteria, not a
+fixed priority, approval gate or Task-count goal; neither new nor reused sessions are preferred.
+Internal helpers return results to the current responsible node. Formal Task nodes coordinate
+only through Task records, never direct or helper-relayed messages. Choices do not widen
+authorization or transfer an existing assignment.
+
+Keep descriptions to work-specific goals, decisions, boundaries and completion requirements.
+Reference external material rather than copying general rules, procedures, unnecessary
+implementation details or history. Activity records important changes; outcomes record actual
+delivery, remaining work and evidence links.
 
 One session can execute at most one unfinished Task, then be reused after
 completion/cancellation. Roles are per Task: a session is assignee for its own
@@ -126,8 +131,8 @@ subscription for that transition already notified the same orchestrator or the p
 level, a lazy parent link and a lazy Subtask list. There is no workflow engine or
 reassignment; `blocked_by` is only a readiness gate and lineage does not gate readiness. The orchestrator or original assignee may reopen an eligible
 done Agent Task for explicitly user-authorized rework; the work still continues with that original assignee, while cancelled and automation
-Tasks never reopen. Review is optional unless the Task's
-requirements demand it; assignee can complete without a default orchestrator approval gate.
+Tasks never reopen. Review requirements come from the agreement and relevant work guidance;
+independent review need not create a separate Task or session, and there is no default orchestrator approval gate.
 Work methods remain separate from role collaboration.
 
 Reopen requires a tracked assignment after schema v5 upgrade, no later Task
@@ -151,19 +156,20 @@ The node role also discovers the self-contained
 its declared discovery roots.
 Applicability depends on changes intended for commit to version-controlled repository
 files, not GitHub mentions. Deployment of existing verified artifacts and runtime
-configuration use Task without this Skill requiring Issue/PR/branch/worktree;
+configuration do not require Issue/PR/branch/worktree under this Skill;
 project policies, immutable installation requirements and separate deployment
-authorization still apply. orchestrator's default delegation responsibility is unchanged.
-Mixed delivery stays one Task with Issue/PR only for necessary repository changes.
-orchestrator creates the assignee session with cwd at a target repository's shared main
+authorization still apply. The collaboration choice does not change those boundaries.
+Delegated mixed delivery stays one Task with Issue/PR only for necessary repository changes.
+For Task delegation, orchestrator states work-specific requirements and selects a capable
+existing or new assignee. A new session's cwd is a target repository's shared main
 checkout (any involved one for cross-repository work) so repository instructions load.
-That checkout is read-only for the assignee. Its first coding step is to reuse or create
+That checkout is read-only for the implementing node. Its first coding step is to reuse or create
 the Issue and create its own branch and isolated worktree from freshly fetched mainline,
-recording them in Task; afterwards it works only there, targeting worktree paths
+recording them in its Task when present; afterwards it works only there, targeting worktree paths
 explicitly because tools default to cwd. This applies to every involved repository.
 If changes outside the agreed scope emerge, assignee asks the user first; once authorized
 it sets up that Issue and worktree within the same Task, not a new deployment Issue or
-stage Task. assignee owns implementation, checks, independent review and authorized PR merge.
+stage Task. The implementing node owns implementation, checks, independent review and authorized PR merge.
 After merge it verifies delivery and that nobody still uses the worktree, then removes
 only its own worktree and local/remote branches (except those kept by repository policy),
 recording the result; uncertain use or merge keeps them with the reason recorded.
@@ -182,7 +188,7 @@ create a newly reviewed follow-up PR as needed and normally merge within scope.
 Repurposed or conflicting worktrees require explicit resolution, not takeover.
 orchestrator should not replace a Task whose eligible original assignee can continue.
 
-Description contains the full current agreement. Revision/changelog version only
+Description contains the current work-specific agreement. Revision/changelog version only
 that description. Activity records reported execution against an actually ACKed
 revision, not live native progress. ACK never starts work or adds activity.
 Only the assigned assignee's actual changed-description edit on an unfinished
@@ -212,7 +218,7 @@ Task auto-ACKs the new revision. Terminal definitions can be edited without reop
 
 The single `node` role receives all seventeen tools. The service authorizes writes by the caller's relation to each Task: `ack`/`report` require assignee; `edit`/`cancel`/`reopen` require orchestrator or assignee; `assign`/automation start/reconcile require orchestrator; reads, create/session/script helpers, subscribe/unsubscribe and retro handling are open to any caller. Rejections are 403 and save nothing. `actor` is reported provenance, not verified identity.
 
-The following is the default Agent flow. Automation uses discover/register → create
+The following applies after choosing formal Agent Task delegation. Automation uses discover/register → create
 snapshot → optional necessary subscription → explicit start. No assign/ACK/report,
 session slot or auto-subscription; a persistent single service queue executes it.
 Read the latest Task/outcome on a notice, not a monitoring loop. Queued/starting/running

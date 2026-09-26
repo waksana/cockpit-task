@@ -52,7 +52,7 @@ cancelled / automation 不恢复执行。
 
 ### Assignee notices are automatic service messages
 
-普通要求更新只写 Task；agent 不给其他 agent 手写通知或补发 Task 卡。
+正式 Task 节点间的要求更新只写 Task，不直接或经内部 helper 手写通知、补发 Task 卡。
 对已指派、未结束 Agent Task，仅 ready 状态的普通 description 更新、ready/blocked
 边界转换、reopen 或 blocker cancelled 触发通知；不提醒操作者本人。
 仍有前置未满足时，普通更新与部分解除静默，不排队等候重放。服务记录一条
@@ -249,6 +249,8 @@ Web/HTTP 读取固定以 `user` 归因，不伪造 human session ID；定向读�
 ### task_create
 
 输入：`request_id, title, description, references?, metadata?, automation?, blocked_by?`。服务把调用 session 记录为 `orchestrator`；`task_create` 不接受 `orchestrator` 字段，也没有 creator 字段，revision 1 的 author 记录创建者。
+
+description 写本项工作特有的目标、决定、边界和完成要求；外部资料放 references，不复制通用规则、流程或历史。内容取舍见[记录原则](task-tools-skills.md#2-选择协作与正式-task-委派)，不改变输入权限或保存方式。
 
 输出：Task ID、初始状态/版本与 `write_context`，不重复回传输入的完整正文。状态为 todo，assignee 和 acknowledged_revision 为 null。description 初始为 v1，保留初始定义记录。
 
@@ -776,7 +778,7 @@ automation 未启动时阻止 launch；运行时请求终止进程组，不证�
 | `TASK_STATE_CONFLICT` | 读取当前生命周期状态，不用普通报告恢复已结束任务 |
 | `ASSIGNEE_OCCUPIED` | 由 orchestrator 选择其他安排，不抢占或自动新建 |
 | `DELEGATION_DEPTH_EXCEEDED` | orchestrator 正执行的父 Task 已达 3 层委派上限，未保存；直接交付本层或询问用户如何重构 |
-| `SELF_ASSIGNMENT` | assignee 与 orchestrator 相同，未指派；指派给其他 session。仅已持有 Task 的节点或用户明确要求时才亲自完成，根节点仍默认委派 |
+| `SELF_ASSIGNMENT` | assignee 与 orchestrator 相同，未指派；正式 Task 须指派给其他 session。自己做、内部 helper 或 Task 的选择由 Skill 按上下文与责任需要判断，不改变已有归属 |
 | `DELEGATION_CYCLE` | assignee 是祖先 Task 的 orchestrator 或 assignee，未指派；选择谱系外的 session |
 | `TASK_NOT_READY` | 尚有未满足前置；拒绝指派、启动或 done，等就绪或明确修订，不绕过 |
 | `CONDITION_RESOLUTION_REQUIRED` | assignee 不能独自解除/替换文字条件，由 orchestrator/user 处理 |
