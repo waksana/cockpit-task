@@ -27,6 +27,18 @@ try {
     name: 'cockpit-task', version: manifest.version, private: true, type: 'module',
     engines: { node: '>=24.0.0' },
   }, null, 2) + '\n');
+  const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  const host = JSON.parse(readFileSync(join(root, 'tooling/host-compatibility.json'), 'utf8'));
+  writeFileSync(join(stage, 'module-build.json'), JSON.stringify({
+    format: 1,
+    product: manifest.id,
+    version: manifest.version,
+    sourceSha,
+    node: process.versions.node,
+    platform: process.platform,
+    arch: process.arch,
+    host,
+  }, null, 2) + '\n');
   writeFileSync(join(stage, 'README.md'),
     readFileSync(join(root, 'docs/task-board.md'), 'utf8').replaceAll('../skills/', 'skills/'));
   const verifyFiles = directory => {

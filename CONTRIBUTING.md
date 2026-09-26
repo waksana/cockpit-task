@@ -92,4 +92,7 @@ CI artifact before authorized installation. Never delete installed directories
 or force installer bypasses to reuse a version. Merge does not authorize tags,
 Releases, deployment or restart; those require separate authorization.
 
-After a joint deployment with the host, tag and release the accepted commit per Cockpit's [release after a joint deployment](https://github.com/waksana/cockpit/blob/main/docs/releasing.md#release-after-acceptance) policy.
+Follow the canonical [release procedure](docs/releases.md#automated-release-procedure)
+for separately authorized publication. After a joint deployment with the host,
+tag and release the accepted commit per Cockpit's
+[release-after-acceptance policy](https://github.com/waksana/cockpit/blob/main/docs/releasing.md#release-after-acceptance).

@@ -114,8 +114,8 @@ test('repository entrypoints describe the current Task module', () => {
   assert.deepEqual(readdirSync(join(root, 'src')), ['task-board']);
   assert.deepEqual(readdirSync(join(root, 'web')), ['task-board']);
   assert.deepEqual(readdirSync(join(root, 'roles')).sort(), ['task-node.md']);
-  assert.deepEqual(readdirSync(join(root, 'scripts')), ['migrate-task-v10.js', 'migrate-task-v11.js', 'package-task-board.js', 'prompt-quotas.js', 'quotas.js']);
-  assert.deepEqual(readdirSync(join(root, '.github/workflows')), ['task-board-ci.yml']);
+  assert.deepEqual(readdirSync(join(root, 'scripts')), ['check-release.js', 'migrate-task-v10.js', 'migrate-task-v11.js', 'package-task-board.js', 'prompt-quotas.js', 'quotas.js', 'verify-package.js']);
+  assert.deepEqual(readdirSync(join(root, '.github/workflows')).sort(), ['release.yml', 'task-board-ci.yml']);
   assert.deepEqual(manifest.roles.map(role => role.id), ['node']);
   assert.deepEqual(manifest.roles[0].skillDirectories.sort(), ['skills/cockpit-task-tree', 'skills/github-coding']);
 });
@@ -397,14 +397,18 @@ test('module packaging carries both Skills without evaluation resources', () => 
   const manifest = JSON.parse(read('cockpit.module.json'));
   const archive = join(root, 'dist', `cockpit-task-${manifest.version}.tgz`);
   const entries = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n');
+  assert.ok(entries.includes('./module-build.json'));
   const expectedSkills = [
     ...treeFiles.map(file => `./${treeDirectory}/${file}`),
     `./${codingDirectory}/SKILL.md`,
   ].sort();
   assert.deepEqual(entries.filter(entry => entry.startsWith('./skills/') && !entry.endsWith('/')).sort(), expectedSkills);
+  const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  execFileSync(process.execPath, ['scripts/verify-package.js', archive, sourceSha], { cwd: root, stdio: 'pipe' });
+
   assert.ok(!entries.some(entry => /^\.\/(?:docs|test)\//.test(entry)), 'No docs, tests, design or evaluation payloads');
   const topLevel = [...new Set(entries.filter(entry => entry !== './').map(entry => entry.split('/')[1]))].sort();
-  assert.deepEqual(topLevel, ['README.md', 'cockpit.module.json', 'node_modules', 'package.json', 'roles', 'scripts', 'skills', 'src', 'web']);
+  assert.deepEqual(topLevel, ['README.md', 'cockpit.module.json', 'module-build.json', 'node_modules', 'package.json', 'roles', 'scripts', 'skills', 'src', 'web']);
   assert.deepEqual(entries.filter(entry => entry.startsWith('./scripts/') && !entry.endsWith('/')), ['./scripts/migrate-task-v10.js', './scripts/migrate-task-v11.js']);
   assert.equal(execFileSync('tar', ['-xOf', archive, './scripts/migrate-task-v10.js'], { encoding: 'utf8' }), read('scripts/migrate-task-v10.js'));
   assert.equal(execFileSync('tar', ['-xOf', archive, './scripts/migrate-task-v11.js'], { encoding: 'utf8' }), read('scripts/migrate-task-v11.js'));
@@ -418,6 +422,19 @@ test('module packaging carries both Skills without evaluation resources', () => 
   for (const entry of expectedSkills) {
     assert.equal(execFileSync('tar', ['-xOf', archive, entry], { encoding: 'utf8' }),
       readFileSync(join(root, entry), 'utf8'), `Archive must contain the current resource: ${entry}`);
+  }
+});
+
+test('release publishes only the checked archive after the draft gate', () => {
+  const workflow = read('.github/workflows/release.yml');
+  for (const text of ['uses: ./.github/workflows/task-board-ci.yml', 'actions: read', 'check-release.js',
+    '--verify-tag --draft', 'gh release download', 'gh release edit "$RELEASE_TAG" --draft=false --prerelease=false --latest']) {
+    assert.ok(workflow.includes(text), text);
+  }
+  assert.ok(workflow.indexOf('gh release download') < workflow.indexOf('gh release edit'));
+  assert.doesNotMatch(workflow, /--clobber|npm run package:module|pull_request_target|secrets\./);
+  for (const [, use] of workflow.matchAll(/uses:\s+([^\s]+)/g)) {
+    if (!use.startsWith('./')) assert.match(use, /^[\w/-]+@[a-f0-9]{40}$/);
   }
 });
 

@@ -1,16 +1,27 @@
 name: Task CI
 on:
   pull_request:
+    branches: [main]
   push:
     branches: [main]
+  workflow_call:
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   module:
     name: Task module
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
@@ -18,9 +29,13 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm test
       - run: npm run package:module
+      - name: Verify the exact module archive
+        run: |
+          ARCHIVE=$(node -p '"dist/cockpit-task-" + require("./cockpit.module.json").version + ".tgz"')
+          node scripts/verify-package.js "$ARCHIVE" "$SOURCE_SHA"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: cockpit-task-module
+          name: cockpit-task-${{ env.SOURCE_SHA }}-linux-x64
           path: |
             dist/cockpit-task-*.tgz
             dist/cockpit-task-*.tgz.sha256
