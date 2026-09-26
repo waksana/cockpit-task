@@ -68,6 +68,10 @@ function fake() {
         const asset = { id: nextId++, name: decodeURIComponent(path.split('?name=')[1]), size: data.length, digest: digest(data), state: 'uploaded' };
         release.assets.push(asset); blobs.set(asset.id, data); return asset;
       }
+      // Observed GitHub behavior: editing only a draft body loses its selected tag.
+      if (release.draft && data.body !== undefined && data.draft !== false) {
+        release.tag_name = 'untagged-synthetic-draft';
+      }
       Object.assign(release, data);
       if (data.make_latest === 'true') latest = release.id;
       return structuredClone(release);
@@ -128,6 +132,32 @@ test('known draft ID is read directly when collection listing omits newly create
   assert.equal(collectionReads, 1, 'After creation, read by ID rather than rediscovering through a collection');
   assert.equal(client.writes.filter(write => write.path === '/releases').length, 1);
   assert.equal(client.releases[0].draft, false);
+});
+test('publication seals original identity atomically without a tag-resetting draft-body edit', async t => {
+  const client = fake();
+  const { directory, expected } = fixture(t);
+  const published = await publish(client, event, 1, sha, directory);
+  const patches = client.writes.filter(write => write.method === 'PATCH');
+  assert.equal(patches.length, 1);
+  assert.deepEqual(patches[0].data, {
+    body: published.body, draft: false, prerelease: true, make_latest: 'false',
+  });
+  assert.ok(published.body.includes('<!-- cockpit-rolling-publication'));
+  assert.equal(client.releases[0].tag_name, expected.tag);
+  assert.equal(client.tags.get(expected.tag), sha);
+});
+test('post-publication identity changes fail closed without a compensating mutation', async t => {
+  const client = fake();
+  const { directory, expected } = fixture(t);
+  const original = client.write;
+  client.write = async (path, data, method, binary) => {
+    const result = await original(path, data, method, binary);
+    if (method === 'PATCH') client.releases[0].tag_name = 'untagged-unexpected-server-change';
+    return result;
+  };
+  await assert.rejects(publish(client, event, 1, sha, directory));
+  assert.equal(client.writes.filter(write => write.method === 'PATCH').length, 1);
+  assert.equal(client.tags.get(expected.tag), sha);
 });
 for (const field of ['id', 'tag_name', 'target_commitish']) {
   test(`direct draft readback rejects changed ${field} before upload`, async t => {
@@ -202,7 +232,7 @@ test('promotion rejects assets replaced before invocation even when replacement 
   await assert.rejects(promote(client, expected.tag, expected.tag, directory), /Original publication asset identity changed/);
   assert.equal(client.writes.length, count);
 });
-for (const failure of ['tag', 'create', 'upload', 'seal', 'publish']) {
+for (const failure of ['tag', 'create', 'upload', 'publish']) {
   test(`unknown accepted ${failure} write is not retried and no later mutation follows`, async t => {
     const client = fake();
     const { directory } = fixture(t);
@@ -213,7 +243,6 @@ for (const failure of ['tag', 'create', 'upload', 'seal', 'publish']) {
       if ((failure === 'tag' && path === '/git/refs') ||
           (failure === 'create' && path === '/releases') ||
           (failure === 'upload' && binary) ||
-          (failure === 'seal' && method === 'PATCH' && data.body) ||
           (failure === 'publish' && method === 'PATCH' && data.draft === false)) {
         failedIndex = client.writes.length;
         throw new Error('accepted but response lost');
