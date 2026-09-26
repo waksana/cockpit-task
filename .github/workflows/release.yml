@@ -2,21 +2,49 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing immutable vX.Y.Z tag
+        required: true
+        type: string
+      release_id:
+        description: Existing draft Release ID
+        required: true
+        type: string
+      archive_asset_id:
+        description: Existing tgz asset ID
+        required: true
+        type: string
+      archive_digest:
+        description: Existing tgz API digest (sha256:...)
+        required: true
+        type: string
+      checksum_asset_id:
+        description: Existing checksum asset ID
+        required: true
+        type: string
+      checksum_digest:
+        description: Existing checksum API digest (sha256:...)
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event_name == 'push' && github.ref || inputs.tag }}
   cancel-in-progress: false
 
 jobs:
   checks:
+    if: github.event_name == 'push'
     uses: ./.github/workflows/task-board-ci.yml
     permissions:
       contents: read
 
   publish:
+    if: github.event_name == 'push'
     needs: checks
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -40,47 +68,199 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: node scripts/check-release.js "$RELEASE_TAG" "$GITHUB_SHA" release-artifact
-      - name: Stage and verify the checked archive
+      - name: Stage or recover and verify the checked archive
+        id: draft
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           ARCHIVE="cockpit-task-${RELEASE_TAG#v}.tgz"
-          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
-            >existing-release.json 2>release-lookup.err; then
-            echo "Release $RELEASE_TAG already exists; refusing to replace it." >&2
+          set +e
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            >published-release.json 2>release-lookup.err
+          LOOKUP_STATUS=$?
+          set -e
+          if [ "$LOOKUP_STATUS" -eq 0 ]; then
+            echo "Published Release $RELEASE_TAG already exists; refusing to replace it." >&2
             exit 1
           elif ! grep -Fq 'HTTP 404' release-lookup.err; then
             cat release-lookup.err >&2
-            echo "Could not prove that $RELEASE_TAG is unused." >&2
+            echo "Could not prove whether a published $RELEASE_TAG Release exists." >&2
             exit 1
           fi
-          gh release create "$RELEASE_TAG" \
-            "release-artifact/$ARCHIVE" "release-artifact/$ARCHIVE.sha256" \
-            --verify-tag --draft --title "Cockpit Task $RELEASE_TAG" \
-            --notes-file docs/release-notes.md --generate-notes
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" >draft-release.json
-          jq -e --arg tag "$RELEASE_TAG" --arg archive "$ARCHIVE" '
-            .tag_name == $tag and .draft == true and .prerelease == false and
-            ([.assets[].name] | sort) ==
-              ([$archive, ($archive + ".sha256")] | sort) and
-            all(.assets[]; .size > 0)
-          ' draft-release.json
+
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" >release-pages.json
+          STATE="$(node scripts/release-state.js select release-pages.json \
+            "$RELEASE_TAG" draft-release.json)"
+          if [ "$STATE" = absent ]; then
+            set +e
+            gh release create "$RELEASE_TAG" \
+              "release-artifact/$ARCHIVE" "release-artifact/$ARCHIVE.sha256" \
+              --verify-tag --draft --title "Cockpit Task $RELEASE_TAG" \
+              --notes-file docs/release-notes.md --generate-notes
+            CREATE_STATUS=$?
+            set -e
+            gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100" >release-pages.json
+            STATE="$(node scripts/release-state.js select release-pages.json \
+              "$RELEASE_TAG" draft-release.json)"
+            if [ "$STATE" = absent ]; then
+              echo "Draft creation returned $CREATE_STATUS and no exact-tag draft is visible; not retrying." >&2
+              exit 1
+            fi
+          fi
+          if [ "$STATE" != draft ]; then
+            echo "Exact-tag Release is $STATE, not a recoverable draft." >&2
+            exit 1
+          fi
+
+          node scripts/release-state.js verify draft-release.json draft \
+            "$RELEASE_TAG" "$ARCHIVE" >release-identity.json
+          RELEASE_ID="$(jq -r .releaseId release-identity.json)"
+          ARCHIVE_ID="$(jq -r .archiveAssetId release-identity.json)"
+          CHECKSUM_ID="$(jq -r .checksumAssetId release-identity.json)"
+          ARCHIVE_DIGEST="$(jq -r .archiveDigest release-identity.json)"
+          CHECKSUM_DIGEST="$(jq -r .checksumDigest release-identity.json)"
           mkdir published-artifact
-          gh release download "$RELEASE_TAG" --dir published-artifact \
-            --pattern "$ARCHIVE" --pattern "$ARCHIVE.sha256"
+          gh api -H 'Accept: application/octet-stream' \
+            "repos/$GITHUB_REPOSITORY/releases/assets/$ARCHIVE_ID" \
+            >"published-artifact/$ARCHIVE"
+          gh api -H 'Accept: application/octet-stream' \
+            "repos/$GITHUB_REPOSITORY/releases/assets/$CHECKSUM_ID" \
+            >"published-artifact/$ARCHIVE.sha256"
+          test "sha256:$(sha256sum "published-artifact/$ARCHIVE" | cut -d' ' -f1)" = "$ARCHIVE_DIGEST"
+          test "sha256:$(sha256sum "published-artifact/$ARCHIVE.sha256" | cut -d' ' -f1)" = "$CHECKSUM_DIGEST"
           node scripts/check-release.js "$RELEASE_TAG" "$GITHUB_SHA" published-artifact
+          {
+            echo "release_id=$RELEASE_ID"
+            echo "archive_asset_id=$ARCHIVE_ID"
+            echo "archive_digest=$ARCHIVE_DIGEST"
+            echo "checksum_asset_id=$CHECKSUM_ID"
+            echo "checksum_digest=$CHECKSUM_DIGEST"
+          } >>"$GITHUB_OUTPUT"
       - name: Publish the complete draft
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+          ARCHIVE_ASSET_ID: ${{ steps.draft.outputs.archive_asset_id }}
+          ARCHIVE_DIGEST: ${{ steps.draft.outputs.archive_digest }}
+          CHECKSUM_ASSET_ID: ${{ steps.draft.outputs.checksum_asset_id }}
+          CHECKSUM_DIGEST: ${{ steps.draft.outputs.checksum_digest }}
         run: |
           ARCHIVE="cockpit-task-${RELEASE_TAG#v}.tgz"
-          gh release edit "$RELEASE_TAG" --draft=false --prerelease=false --latest
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" >published-release.json
-          jq -e --arg tag "$RELEASE_TAG" --arg archive "$ARCHIVE" '
-            .tag_name == $tag and .draft == false and .prerelease == false and
-            ([.assets[].name] | sort) ==
-              ([$archive, ($archive + ".sha256")] | sort) and
-            all(.assets[]; .size > 0)
-          ' published-release.json
+          set +e
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false -F prerelease=false -f make_latest=true \
+            >publish-response.json 2>publish.err
+          PUBLISH_STATUS=$?
+          set -e
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" >published-release.json
+          node scripts/release-state.js verify published-release.json published \
+            "$RELEASE_TAG" "$ARCHIVE" "$RELEASE_ID" \
+            "$ARCHIVE_ASSET_ID" "$ARCHIVE_DIGEST" \
+            "$CHECKSUM_ASSET_ID" "$CHECKSUM_DIGEST"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" >tag-release.json
+          test "$(jq -r .id tag-release.json)" = "$RELEASE_ID"
+          if [ "$PUBLISH_STATUS" -ne 0 ]; then
+            echo "Publish returned $PUBLISH_STATUS, but authoritative readback proves it completed." >&2
+          fi
+
+  recover:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          path: workflow
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Verify the identified draft and download original assets
+        id: recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_ID: ${{ inputs.release_id }}
+          ARCHIVE_ASSET_ID: ${{ inputs.archive_asset_id }}
+          ARCHIVE_DIGEST: ${{ inputs.archive_digest }}
+          CHECKSUM_ASSET_ID: ${{ inputs.checksum_asset_id }}
+          CHECKSUM_DIGEST: ${{ inputs.checksum_digest }}
+        run: |
+          SOURCE_SHA="$(git -C source rev-parse HEAD)"
+          ARCHIVE="cockpit-task-${RELEASE_TAG#v}.tgz"
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" >release-pages.json
+          test "$(node workflow/scripts/release-state.js select release-pages.json \
+            "$RELEASE_TAG" selected-release.json)" = draft
+          test "$(jq -r .id selected-release.json)" = "$RELEASE_ID"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" >draft-release.json
+          node workflow/scripts/release-state.js verify draft-release.json draft \
+            "$RELEASE_TAG" "$ARCHIVE" "$RELEASE_ID" \
+            "$ARCHIVE_ASSET_ID" "$ARCHIVE_DIGEST" \
+            "$CHECKSUM_ASSET_ID" "$CHECKSUM_DIGEST"
+          mkdir published-artifact
+          gh api -H 'Accept: application/octet-stream' \
+            "repos/$GITHUB_REPOSITORY/releases/assets/$ARCHIVE_ASSET_ID" \
+            >"published-artifact/$ARCHIVE"
+          gh api -H 'Accept: application/octet-stream' \
+            "repos/$GITHUB_REPOSITORY/releases/assets/$CHECKSUM_ASSET_ID" \
+            >"published-artifact/$ARCHIVE.sha256"
+          test "sha256:$(sha256sum "published-artifact/$ARCHIVE" | cut -d' ' -f1)" = "$ARCHIVE_DIGEST"
+          test "sha256:$(sha256sum "published-artifact/$ARCHIVE.sha256" | cut -d' ' -f1)" = "$CHECKSUM_DIGEST"
+          BUILD_NODE="$(tar -xOf "published-artifact/$ARCHIVE" ./module-build.json | jq -er .node)"
+          if ! [[ "$BUILD_NODE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Archive build Node version is invalid." >&2
+            exit 1
+          fi
+          echo "node_version=$BUILD_NODE" >>"$GITHUB_OUTPUT"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: ${{ steps.recovery.outputs.node_version }}
+      - name: Verify original assets against the tagged source
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          SOURCE_SHA="$(git -C source rev-parse HEAD)"
+          ARCHIVE="cockpit-task-${RELEASE_TAG#v}.tgz"
+          node source/scripts/check-release.js "$RELEASE_TAG" "$SOURCE_SHA" \
+            "$GITHUB_WORKSPACE/published-artifact"
+      - name: Publish the complete identified draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_ID: ${{ inputs.release_id }}
+          ARCHIVE_ASSET_ID: ${{ inputs.archive_asset_id }}
+          ARCHIVE_DIGEST: ${{ inputs.archive_digest }}
+          CHECKSUM_ASSET_ID: ${{ inputs.checksum_asset_id }}
+          CHECKSUM_DIGEST: ${{ inputs.checksum_digest }}
+        run: |
+          ARCHIVE="cockpit-task-${RELEASE_TAG#v}.tgz"
+          set +e
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false -F prerelease=false -f make_latest=true \
+            >publish-response.json 2>publish.err
+          PUBLISH_STATUS=$?
+          set -e
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" >published-release.json
+          node workflow/scripts/release-state.js verify published-release.json published \
+            "$RELEASE_TAG" "$ARCHIVE" "$RELEASE_ID" \
+            "$ARCHIVE_ASSET_ID" "$ARCHIVE_DIGEST" \
+            "$CHECKSUM_ASSET_ID" "$CHECKSUM_DIGEST"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" >tag-release.json
+          test "$(jq -r .id tag-release.json)" = "$RELEASE_ID"
+          if [ "$PUBLISH_STATUS" -ne 0 ]; then
+            echo "Publish returned $PUBLISH_STATUS, but authoritative readback proves it completed." >&2
+          fi
