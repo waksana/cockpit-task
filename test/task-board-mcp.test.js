@@ -14,6 +14,8 @@ import { createMcpRoutes } from '../src/task-board/mcp.js';
 import { toolSchemas, READ_GROUPS } from '../src/task-board/contracts.js';
 import { TaskService } from '../src/task-board/service.js';
 import { TaskStore } from '../src/task-board/store.js';
+import { toolDescriptions } from '../src/task-board/tool-descriptions.js';
+import { formatQuotaReport, measureToolDescriptionQuota } from '../scripts/prompt-quotas.js';
 
 const manifest = JSON.parse(readFileSync(new URL('../cockpit.module.json', import.meta.url), 'utf8'));
 
@@ -89,10 +91,13 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     await f.connect();
     const { tools } = await f.client.listTools();
     assert.deepEqual(tools.map(tool => tool.name).sort(), Object.keys(toolSchemas).sort());
+    assert.deepEqual(Object.keys(toolDescriptions).sort(), tools.map(tool => tool.name).sort());
     const descriptions = Object.fromEntries(tools.map(tool => [tool.name, tool.description]));
     for (const tool of tools) {
       assert.deepEqual(tool.inputSchema, z.toJSONSchema(toolSchemas[tool.name], { target: 'draft-7' }));
-      assert.ok(tool.description.length < 1400, `${tool.name}: keep workflow detail in Skills`);
+      assert.equal(tool.description, toolDescriptions[tool.name]);
+      const usage = measureToolDescriptionQuota(tool);
+      assert.equal(usage.exceeded, false, formatQuotaReport([usage]));
       if (tool.inputSchema.properties.request_id) {
         assert.match(tool.inputSchema.properties.request_id.description, /trusted calling session/);
       }

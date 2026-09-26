@@ -70,6 +70,10 @@ switch, pull into, reset or stash it, and never touch another worker's worktree.
 Tools default to the session cwd, so after creating your worktree direct every edit,
 build, test and Git command at worktree paths explicitly.
 
+New checkouts do not inherit untracked or ignored local environment files. Follow
+the project guide to prepare the environment needed for the current work; another
+worktree being runnable does not establish that this one is ready.
+
 Before editing repository files, reuse or create the Issue describing goal, scope and
 completion conditions, then create a dedicated branch and isolated worktree from
 freshly fetched remote mainline. Reuse an existing environment only after verifying it
