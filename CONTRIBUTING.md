@@ -23,7 +23,9 @@ Synchronize `package.json`, `cockpit.module.json`, both root version entries in
 `package-lock.json`, the embedded MCP server version, tests and current-source
 documentation. Preserve historical release facts. If fresh main already prepares
 the appropriate undelivered version, reuse it rather than repeating its bump.
-The prepared version is 0.3.1, a caller-scoped idempotency fix with schema v11.
+The prepared version is 0.3.2, packaging compact Task cards, progressive details,
+identity-scoped refresh and their declared browser assets. It retains schema v11
+without a new persistent migration. Released 0.3.1 introduced caller-scoped idempotency.
 The v10-to-v11 migration preserves original receipts, fingerprints and uncertainty;
 unattributable legacy IDs remain reserved and fail with `LEGACY_OPERATION_UNSCOPED`.
 See [caller-scoped receipts](docs/task-implementation.md#caller-scoped-receipts-and-schema-v11).
