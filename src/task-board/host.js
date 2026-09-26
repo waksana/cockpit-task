@@ -74,6 +74,21 @@ export function createHostAdapter(host) {
       return { name: meta.nativeName, userSet: meta.nativeNameUserSet };
     },
     rename: (sessionId, name) => host.call('session/rename', { sessionId, name }),
+    async display(sessionId) {
+      const unavailable = (code, message) => ({
+        session_id: sessionId, title: null, available: false, error: { code, message },
+      });
+      try {
+        const meta = await get(sessionId);
+        if (!meta) return unavailable('SESSION_NOT_FOUND', 'The session is no longer known to the host');
+        if (typeof meta.title !== 'string' || !meta.title.trim()) {
+          return unavailable('SESSION_TITLE_UNAVAILABLE', 'The host did not provide a session title');
+        }
+        return { session_id: sessionId, title: meta.title, available: true };
+      } catch {
+        return unavailable('SESSION_DISPLAY_UNAVAILABLE', 'The host could not confirm the session title');
+      }
+    },
     async observe(sessionId) {
       const meta = await get(sessionId);
       if (!meta) return {

@@ -4,10 +4,22 @@ import { deliverNotification } from './notifications.js';
 import { AutomationRunner } from './automation-runner.js';
 
 export class TaskService {
-  constructor(store, host, { invalidate = () => {}, report = () => {} } = {}) {
+  constructor(store, host, { invalidate = () => {}, publish, report = () => {} } = {}) {
     this.store = store;
     this.host = host;
-    this.invalidate = invalidate;
+    this.invalidate = () => {
+      if (publish) {
+        try {
+          for (let pending = store.readVersions.pending(); pending.length; pending = store.readVersions.pending()) {
+            for (const change of pending) {
+              publish({ type: 'task/changed', task_id: change.task_id, data_version: store.readVersions.token(change.task_id) });
+              store.readVersions.acknowledge(change);
+            }
+          }
+        } catch (error) { report(error); }
+      }
+      invalidate();
+    };
     this.report = report;
     this.active = 0;
     this.closing = false;

@@ -128,7 +128,7 @@ Task 视图仍是信息选择；operation 视图则只解析当前可信调用�
 | --- | --- | --- |
 | `list` | `orchestrator?`、`assignee?`、`parent_task_id?`、`retro?`、`status?`、`query?`、`limit?`、`cursor?` | 按显式筛选的轻量任务摘要页；不含完整说明、资料和历史 |
 | `overview` | `task_id`、`include?` | 省略 include 保持原摘要；提供时只返回当前上下文和所选完整内容组，见下文 |
-| `execution` | `task_id` | assignee 默认视图：标题、归属、状态、完整当前 description、revision / ack、当前 references / metadata、write_context；不夹带活动、修订或成果历史 |
+| `execution` | `task_id` | assignee 默认视图：标题、归属、状态、完整当前 description、revision / ack、当前 references / metadata、write_context、最新活动摘录/总数与最新完整 outcome；不夹带历史列表 |
 | `definition` | `task_id` | 双方按需读取完整当前 description、revision、资料和 write_context；orchestrator 修订前使用 |
 | `changelog` | `task_id`、`limit?`、`cursor?`，或 `task_id,revision` | 默认修订摘要页；指定 revision 返回该版完整 description，不得同时传 limit/cursor |
 | `activity` | `task_id`、`limit?`、`cursor?` | assignee 活动页，每条保留其 revision 和作者 |
@@ -144,7 +144,13 @@ Task 视图仍是信息选择；operation 视图则只解析当前可信调用�
 
 列表默认只看未结束记录；可显式查询 done / cancelled。orchestrator 列表侧重各任务的执行者、状态、最新活动摘录、确认差异和成果可用性；assignee 列表侧重本人承接关系、状态与待确认版本。摘要使用现有字段和活动摘录，不生成另一份“进度总结”；摘录标明截断，正文通过专门视图读取，完整 description 不静默截断。
 
-列表 `status` 可为业务状态、`unfinished`（默认）或 `all`；`query` 只匹配标题。`retro=unhandled` 只返回最新已记录 retro 有发现（非 null）且尚无处理记录的 Agent Task，`retro=watching` 只返回该 retro 最新处理为 watching 的 Task；带 retro 筛选时 `status` 默认 `all`，游标与筛选绑定。overview/execution/definition 返回扁平字段，不包在 `task` 中；列表为 `{items,next_cursor}`，历史为 `{task_id,items,next_cursor}`。未提供 include 的 overview，其 `activity` 为可空摘录，`outcome` 为 `{available:false}` 或带 `id,revision,at,current` 的可用性记录，不附成果全文。execution/definition 返回当前 `description,references,metadata`，不附 activity/outcome。changelog 摘要带 `description_available,description_length`；选择单版返回 `task_id,revision,description,reason,author,at,source`。
+列表 `status` 可为业务状态、`unfinished`（默认）或 `all`；`query` 只匹配标题。`retro=unhandled` 只返回最新已记录 retro 有发现（非 null）且尚无处理记录的 Agent Task，`retro=watching` 只返回该 retro 最新处理为 watching 的 Task；带 retro 筛选时 `status` 默认 `all`，游标与筛选绑定。overview/execution/definition 返回扁平字段，不包在 `task` 中；列表为 `{items,next_cursor}`，历史为 `{task_id,items,next_cursor}`。未提供 include 的 overview，其 `activity` 为可空摘录，`outcome` 为 `{available:false}` 或带 `id,revision,at,current,source,summary,truncated` 的摘要记录，summary 最多 320 字符。execution 返回当前 `description,references,metadata`、可空最新 activity 摘录、`activity_count` 和可空最新完整 outcome（含 references/current）；旧版本记录不冒充当前交付。definition 仍只读定义，不附 activity/outcome。changelog 摘要带 `description_available,description_length`；选择单版返回 `task_id,revision,description,reason,author,at,source`。
+
+默认 overview、execution 与 list 条目含 `activity_count` 和不透明 `data_version`。前者统计该 Task
+全部持久 activity，不包含聊天、读取和自动化日志；后者只用于读取缓存相等比较，不是 revision、
+write_context 或可排序的业务版本。模块重启改变版本域；断线必须重新对账。HTTP `/read` 另按需附加
+被动读取的 `sessions` 名称观察，不写入 Task，也不进入 MCP 返回。
+已取消 Task 的 execution 同时返回 `cancellation` 原因与归因，和其余字段使用同一读取快照。
 
 #### 单项按需组合
 
@@ -155,7 +161,7 @@ Task 视图仍是信息选择；operation 视图则只解析当前可信调用�
 | 组名 | 选择后的字段/语义 |
 | --- | --- |
 | `context` | 顶层 `id,task_id,title,orchestrator,assignee,status,revision,acknowledged_revision,created_at,updated_at,write_context,kind,parent_task_id,depth,blocked_by,ready`；`include=["context"]` 只取这些字段 |
-| `activity` | 最新一条完整记录 `{id,task_id,revision,assignee,author,text,at,source:"reported",current}`，无记录为 null；不是 overview 摘录 |
+| `activity` | `activity_count` 总数及最新一条完整记录 `{id,task_id,revision,assignee,author,text,at,source:"reported",current}`，无记录为 null；不是 overview 摘录 |
 | `outcome` | 最新一条完整记录 `{id,task_id,revision,assignee,author,summary,references,at,run_id,source,current}`，无记录为 null；不附未选的 retro |
 | `retro` | 最新已记录复盘的完整对象，沿用 recorded/not_recorded/not_applicable；recorded 的 text=null 明确表示无发现 |
 | `definition` | 当前 `{revision,author,at,source:"reported",current:true,description,references,metadata}`；作者/时间属于 description 修订，资料为当前值 |

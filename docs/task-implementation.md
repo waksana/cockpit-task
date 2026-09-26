@@ -605,10 +605,26 @@ event, not label or current Task status. Event metadata is immutable to the mess
 not a Task field/type/status, command or event bus. Generic references remain
 eventless. A delayed status_changed card need not show its triggering state.
 
-The frontend renders an inline card with title, status, assignee, latest reported
-activity and revision/ACK. An accessible detail dialog reads current definition
-and independently paged histories on demand. Host invalidation refreshes visible
-reads; reconnect refetches, and superseded reads cannot overwrite current results.
+The frontend renders a compact three-row inline card: title/status, current summary,
+then assignee, authoritative activity count, definition/ACK and an inline refresh
+button. Unknown counts are not zero. Session names are single-line with full names
+and IDs available in detail. Lucide 1.46.0 SVG nodes and their complete license ship
+with the module. Background refresh uses only the refresh icon's busy state, not
+replacement loading copy.
+
+Read resources are shared by identity and query within one module activation.
+Repeated references, rerenders, remounts and closing detail reuse retained data and
+in-flight reads. Generic host invalidation is not Task invalidation. Targeted
+`task/changed` events invalidate affected resources; reconnect reconciles missed
+events because the public transport has no replay. Superseded replies cannot
+overwrite newer reads. Refresh failures/offline retain visibly unconfirmed data.
+The bounded inactive cache and its subscriptions are disposed on module abort.
+
+The accessible portal dialog separates Overview, Activity, Relations and History.
+Definition, current summary and responsibility are readable up front; native
+observations, technical fields, relationships, revisions, outcomes, retrospective
+and immutable automation snapshots are progressively disclosed. Histories/logs
+remain independently paged, with the current content mounted during refresh.
 On-demand native observations use session/get only, are labelled separately, and
 do not load sessions, poll, scan chat or fabricate live progress.
 
