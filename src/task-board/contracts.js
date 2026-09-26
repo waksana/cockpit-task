@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { completeToolEntries } from './tool-names.js';
 
 export class TaskError extends Error {
   constructor(code, message, status = 409, result = null) {
@@ -197,8 +198,8 @@ const readToolSchema = z.strictObject({
   const parsed = schemas.task_read.safeParse(input);
   if (!parsed.success) for (const issue of parsed.error.issues) context.addIssue(issue);
 });
-export const toolSchemas = { ...schemas, task_read: readToolSchema };
-export const TOOL_NAMES = Object.freeze(Object.keys(schemas));
+export const toolSchemas = Object.fromEntries(completeToolEntries({ ...schemas, task_read: readToolSchema }, 'MCP schemas'));
+export { TOOL_NAMES } from './tool-names.js';
 
 export function parseInput(name, input) {
   const schema = schemas[name];

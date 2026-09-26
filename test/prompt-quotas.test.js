@@ -9,12 +9,14 @@ import {
   measureMarkdownQuota, measureToolDescriptionQuota, readMarkdownQuotas,
 } from '../scripts/prompt-quotas.js';
 import { toolDescriptions } from '../src/task-board/tool-descriptions.js';
+import { TOOL_NAMES, completeToolEntries } from '../src/task-board/tool-names.js';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'task-prompt-quotas-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const file of [
-    'package.json', 'scripts/quotas.js', 'scripts/prompt-quotas.js', 'src/task-board/tool-descriptions.js',
+    'package.json', 'scripts/quotas.js', 'scripts/prompt-quotas.js',
+    'src/task-board/tool-descriptions.js', 'src/task-board/tool-names.js',
     ...MARKDOWN_QUOTAS.map(quota => quota.path),
   ]) {
     const target = join(root, file);
@@ -22,6 +24,11 @@ function fixture(t) {
     cpSync(new URL(`../${file}`, import.meta.url), target);
   }
   return root;
+}
+
+function writeDescriptions(root, descriptions) {
+  writeFileSync(join(root, 'src/task-board/tool-descriptions.js'),
+    `export const toolDescriptions = ${JSON.stringify(descriptions)};\n`);
 }
 
 const runScript = root => spawnSync(process.execPath, [join(root, 'scripts/quotas.js')], {
@@ -105,10 +112,13 @@ test('npm run quotas reports every object without installed dependencies', t => 
   assert.equal(result.status, 0, result.error?.message ?? `${result.stdout}\n${result.stderr}`);
   const usages = [
     ...readMarkdownQuotas(root),
-    ...Object.entries(toolDescriptions).map(([name, description]) => measureToolDescriptionQuota({ name, description })),
+    ...completeToolEntries(toolDescriptions, 'MCP descriptions')
+      .map(([name, description]) => measureToolDescriptionQuota({ name, description })),
   ];
   assert.ok(result.stdout.endsWith(`${formatQuotaReport(usages)}\n`));
   assert.equal(result.stdout.split('\n').filter(line => line.includes(' | ')).length, usages.length + 1);
+  assert.deepEqual(result.stdout.split('\n').filter(line => line.startsWith('MCP ')).map(line => line.split(' | ')[0]),
+    TOOL_NAMES.map(name => `MCP ${name}`));
   assert.match(result.stdout, /Object \| Used \| Limit \| Remaining \| Unit \| Status/);
   assert.doesNotMatch(result.stdout, /github-coding|EXCEEDED/);
 });
@@ -123,8 +133,7 @@ test('CLI reports negative remaining capacity and exits nonzero for Markdown or 
       object = quota.path;
     } else {
       const descriptions = { ...toolDescriptions, task_read: 'a'.repeat(MCP_DESCRIPTION_QUOTA + 1) };
-      writeFileSync(join(root, 'src/task-board/tool-descriptions.js'),
-        `export const toolDescriptions = ${JSON.stringify(descriptions)};\n`);
+      writeDescriptions(root, descriptions);
       object = 'MCP task_read';
     }
     const result = runScript(root);
@@ -133,6 +142,24 @@ test('CLI reports negative remaining capacity and exits nonzero for Markdown or 
     assert.ok(row, result.stdout);
     assert.ok(row.endsWith(` | -1 | ${QUOTA_UNIT} | EXCEEDED`), row);
     assert.match(result.stdout, /1 prompt quota\(s\) exceeded\./);
+    assert.doesNotMatch(result.stdout, /All prompt quotas are within/);
+  }
+});
+
+test('CLI rejects missing, empty or unexpected MCP catalogs without dependencies', t => {
+  const { task_read, ...missingRead } = toolDescriptions;
+  for (const [descriptions, error] of [
+    [missingRead, /missing: task_read/],
+    [{}, /missing: task_read, task_create/],
+    [{ ...toolDescriptions, task_unpublished: 'Not a published tool.' }, /unexpected: task_unpublished/],
+  ]) {
+    const root = fixture(t);
+    writeDescriptions(root, descriptions);
+    assert.equal(existsSync(join(root, 'node_modules')), false);
+    const result = runScript(root);
+    assert.equal(result.status, 1, result.error?.message ?? `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stderr, /MCP descriptions must match the published tool names/);
+    assert.match(result.stderr, error);
     assert.doesNotMatch(result.stdout, /All prompt quotas are within/);
   }
 });

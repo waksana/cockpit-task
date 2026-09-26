@@ -358,6 +358,8 @@ test('module packaging carries both Skills without evaluation resources', () => 
   assert.equal(execFileSync('tar', ['-xOf', archive, './scripts/migrate-task-v10.js'], { encoding: 'utf8' }), read('scripts/migrate-task-v10.js'));
   assert.equal(execFileSync('tar', ['-xOf', archive, './src/task-board/tool-descriptions.js'], { encoding: 'utf8' }),
     read('src/task-board/tool-descriptions.js'));
+  assert.equal(execFileSync('tar', ['-xOf', archive, './src/task-board/tool-names.js'], { encoding: 'utf8' }),
+    read('src/task-board/tool-names.js'));
   const packagedManifest = JSON.parse(execFileSync('tar', ['-xOf', archive, './cockpit.module.json'], { encoding: 'utf8' }));
   assert.deepEqual(packagedManifest.roles.map(role => role.id), ['node']);
   assert.deepEqual(packagedManifest.roles[0].skillDirectories.sort(), ['skills/cockpit-task-tree', 'skills/github-coding']);

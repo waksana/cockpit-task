@@ -4,8 +4,18 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { schemas, toolSchemas, TOOL_NAMES, READ_GROUPS } from '../src/task-board/contracts.js';
+import { completeToolEntries } from '../src/task-board/tool-names.js';
 
 const task_id = 'de33dc0a-2f93-4c5a-b14e-87111940d520';
+
+test('published schemas follow the shared tool inventory and reject inventory drift', () => {
+  assert.deepEqual(Object.keys(toolSchemas), TOOL_NAMES);
+  assert.deepEqual(completeToolEntries(schemas, 'MCP schemas'), Object.entries(schemas));
+  const { task_read, ...missingRead } = schemas;
+  assert.throws(() => completeToolEntries(missingRead, 'MCP schemas'), /MCP schemas.*missing: task_read/);
+  assert.throws(() => completeToolEntries({ ...schemas, task_unpublished: task_read }, 'MCP schemas'),
+    /MCP schemas.*unexpected: task_unpublished/);
+});
 
 test('reopen public schema requires a full explicit revision agreement and excludes takeover fields', async t => {
   const { client } = await fixture(t);
