@@ -93,9 +93,16 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     for (const tool of tools) {
       assert.deepEqual(tool.inputSchema, z.toJSONSchema(toolSchemas[tool.name], { target: 'draft-7' }));
       assert.ok(tool.description.length < 1400, `${tool.name}: keep workflow detail in Skills`);
+      if (tool.inputSchema.properties.request_id) {
+        assert.match(tool.inputSchema.properties.request_id.description, /trusted calling session/);
+      }
+      assert.equal('actor' in tool.inputSchema.properties, false);
+      assert.equal('actor_session_id' in tool.inputSchema.properties, false);
     }
     assert.match(descriptions.task_read, /list, filter by orchestrator, assignee or parent_task_id, or omit them with status=unfinished for the pre-dispatch conflict check/);
     assert.match(descriptions.task_read, /caller is the session named by host invocation metadata/);
+    assert.match(descriptions.task_read, /operation resolves request_id only in the calling session/);
+    assert.match(tools.find(tool => tool.name === 'task_assign').inputSchema.properties.resume_request_id.description, /same calling session/);
     assert.match(descriptions.task_read, /Reads never acknowledge/);
     const readSchema = tools.find(tool => tool.name === 'task_read').inputSchema;
     assert.deepEqual(readSchema.properties.include.items.enum, READ_GROUPS);
@@ -340,8 +347,12 @@ test('MCP invocation metadata supplies caller identity and rejects identity argu
     assert.equal(missing.isError, true);
     assert.equal(missing.structuredContent.error.code, 'INVOCATION_REQUIRED');
     assert.equal(store.read({ view: 'list', status: 'all' }).items.length, 0);
+    const missingRead = await f.client.callTool({
+      name: 'task_read', arguments: { view: 'operation', request_id: 'missing' },
+    });
+    assert.equal(missingRead.structuredContent.error.code, 'INVOCATION_REQUIRED');
 
-    for (const identity of [{ actor: 'victim' }, { invocation: { sessionId: 'victim' } }]) {
+    for (const identity of [{ actor: 'victim' }, { actor_session_id: 'victim' }, { invocation: { sessionId: 'victim' } }]) {
       const rejected = await f.client.callTool({
         name: 'task_create',
         arguments: { request_id: randomUUID(), title: 'Legacy identity', description: 'Reject', ...identity },
@@ -351,6 +362,7 @@ test('MCP invocation metadata supplies caller identity and rejects identity argu
       assert.equal(rejected.structuredContent.error.code, 'INVALID_INPUT');
       assert.equal(store.read({ view: 'list', status: 'all' }).items.length, 0);
     }
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM operations').get().n, 0);
 
     const created = await f.client.callTool({
       name: 'task_create',
@@ -360,6 +372,56 @@ test('MCP invocation metadata supplies caller identity and rejects identity argu
     assert.notEqual(created.isError, true, JSON.stringify(created));
     assert.equal(store.task(created.structuredContent.result.task_id).orchestrator, 'orchestrator');
   } finally {
+    await f.close();
+    service.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('MCP business request IDs follow the trusted containing session, not connection or runtime IDs', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'task-mcp-scoped-'));
+  const store = new TaskStore(root);
+  const service = new TaskService(store, {});
+  const f = fixture((name, input, options) => service.execute(name, input, options), undefined, toolSchemas, { injectMeta: false });
+  const peer = fixture(undefined, f.module, toolSchemas, { injectMeta: false });
+  const call = async (client, sessionId, name, input, runtime = {}) => {
+    const response = await client.callTool({
+      name, arguments: input,
+      _meta: { 'cockpit/invocation': { sessionId, runtimeSessionId: sessionId, subagent: false, ...runtime } },
+    });
+    return response.structuredContent;
+  };
+  try {
+    await f.connect();
+    await peer.connect();
+    assert.notEqual(f.transport.sessionId, peer.transport.sessionId);
+    const input = { request_id: 'same-id', title: 'Scoped identity', description: 'Synthetic transport test' };
+    const first = await call(f.client, 'main', 'task_create', input, {
+      runtimeSessionId: 'child-a', subagent: true, agentName: 'worker-a',
+    });
+    assert.equal(first.error, null);
+    assert.deepEqual((await call(peer.client, 'main', 'task_create', input)).result, first.result);
+    assert.deepEqual((await call(f.client, 'main', 'task_create', input, {
+      runtimeSessionId: 'child-b', subagent: true, agentName: 'worker-b',
+    })).result, first.result);
+    assert.equal((await call(f.client, 'main', 'task_create', { ...input, title: 'Changed' })).error.code, 'REQUEST_ID_CONFLICT');
+    const independent = await call(f.client, 'other-main', 'task_create', input, {
+      runtimeSessionId: 'child-a', subagent: true,
+    });
+    assert.equal(independent.error, null);
+    assert.notEqual(independent.result.task_id, first.result.task_id);
+    const selector = { view: 'operation', request_id: input.request_id };
+    const receipt = await call(peer.client, 'main', 'task_read', selector);
+    assert.deepEqual(receipt.result.result, first.result);
+    assert.deepEqual(receipt.result.invocation, {
+      sessionId: 'main', runtimeSessionId: 'child-a', subagent: true, agentName: 'worker-a',
+    });
+    assert.deepEqual((await call(peer.client, 'other-main', 'task_read', selector)).result.result, independent.result);
+    assert.equal((await call(peer.client, 'unrelated', 'task_read', selector)).error.code, 'OPERATION_NOT_FOUND');
+    assert.equal((await call(peer.client, 'unrelated', 'task_read', { ...selector, actor: 'main' })).error.code, 'INVALID_INPUT');
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM operations').get().n, 2);
+  } finally {
+    await peer.client.close();
     await f.close();
     service.close();
     rmSync(root, { recursive: true, force: true });

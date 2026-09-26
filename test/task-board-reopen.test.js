@@ -109,7 +109,7 @@ test('reopen rejects mismatched/missing actor, state, stale revision and editabl
   const g = fixture(t);
   assert.equal(g.reopen(g.done(g.assign(g.create())), { actor: 'orchestrator' }).revision, 2);
   rejects(() => f.reopen(completed, { actor: 'someone-else' }), 'ORCHESTRATOR_OR_ASSIGNEE_REQUIRED');
-  rejects(() => f.reopen(completed, { actor: undefined }), 'ORCHESTRATOR_OR_ASSIGNEE_REQUIRED');
+  rejects(() => f.reopen(completed, { actor: undefined }), 'INVOCATION_REQUIRED');
   rejects(() => f.reopen(completed, { revision: 2 }), 'DESCRIPTION_UPDATED');
   rejects(() => f.reopen(completed, { write_context: assigned.write_context }), 'TASK_STATE_CONFLICT');
   const edited = f.store.executeLocal('task_edit', f.input(completed, { reason: 'Rename', title: 'Changed' }));
@@ -167,7 +167,7 @@ test('assignment history preserves reopen eligibility after restart', t => {
   const f = fixture(t), prior = f.done(f.assign(f.create()));
   const history = f.store.read({ view: 'outcomes', task_id: prior.task_id });
   f.restart();
-  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 10);
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 11);
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM task_assignments').get().n, 1);
   assert.deepEqual(f.store.read({ view: 'outcomes', task_id: prior.task_id }), history);
   assert.equal(f.reopen(prior).task_status, 'in_progress');

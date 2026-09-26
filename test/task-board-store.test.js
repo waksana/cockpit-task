@@ -484,17 +484,17 @@ test('pending external receipts replay after restart and changed input conflicts
   assert.equal(replay.error.code, 'OPERATION_UNCONFIRMED');
   assert.equal(replay.result.operation.status, 'unconfirmed');
   rejects(() => f.store.reserveOperation('task_session_create', { ...input, cwd: '/other' }), 'REQUEST_ID_CONFLICT');
-  f.store.saveOperation(input.request_id, { result: { operation: { session_id: 'known', creation: 'created' } } }, { final: false });
-  assert.equal(f.store.read({ view: 'operation', request_id: input.request_id }).result.operation.session_id, 'known');
-  f.store.saveOperation(input.request_id, { result: { operation: { status: 'applied', session_id: 'known' } } });
-  rejects(() => f.store.saveOperation(input.request_id, { result: { changed: true } }), 'OPERATION_FINALIZED');
+  f.store.saveOperation(input, { result: { operation: { session_id: 'known', creation: 'created' } } }, { final: false });
+  assert.equal(f.store.read({ view: 'operation', request_id: input.request_id, actor: input.actor }).result.operation.session_id, 'known');
+  f.store.saveOperation(input, { result: { operation: { status: 'applied', session_id: 'known' } } });
+  rejects(() => f.store.saveOperation(input, { result: { changed: true } }), 'OPERATION_FINALIZED');
 });
 
 test('assignment commit stores binding facts atomically and rechecks revision/lifecycle before send', t => {
   const f = fixture(t), task = f.create(), input = f.input(task, { assignee: 'assignee' });
   f.store.reserveOperation('task_assign', input);
   const bound = f.store.bindAssignment(input);
-  assert.equal(f.store.operation(input.request_id).result.operation.assignment, 'applied');
+  assert.equal(f.store.operation(input).result.operation.assignment, 'applied');
   assert.equal(f.store.dispatchPreflight(input).assignee, 'assignee');
   rejects(() => f.store.bindAssignment(input), 'ASSIGNMENT_CONFLICT');
   f.edit(bound, { description: 'Changed before dispatch' });
@@ -508,7 +508,7 @@ test('explicit dispatch recovery requires confirmed not-sent result and cannot c
   const resume = f.input(bound, { assignee: 'assignee', resume_request_id: original.request_id });
   f.store.reserveOperation('task_assign', resume);
   rejects(() => f.store.bindAssignment(resume), 'UNSAFE_DISPATCH_RECOVERY');
-  f.store.saveOperation(original.request_id, { result: { operation: { assignment: 'applied', message: 'not_sent', status: 'partially_applied' } } });
+  f.store.saveOperation(original, { result: { operation: { assignment: 'applied', message: 'not_sent', status: 'partially_applied' } } });
   assert.equal(f.store.bindAssignment(resume).assignee, 'assignee');
   assert.equal(f.store.dispatchPreflight(resume).assignee, 'assignee');
   const another = { ...resume, request_id: randomUUID() };
@@ -522,7 +522,7 @@ test('unknown, accepted and unexpectedly queued dispatches never authorize recov
     const task = f.create(), original = f.input(task, { assignee: `assignee-${message}` });
     f.store.reserveOperation('task_assign', original);
     const bound = f.store.bindAssignment(original);
-    f.store.saveOperation(original.request_id, { result: { operation: { assignment: 'applied', message, status: 'unconfirmed' } } });
+    f.store.saveOperation(original, { result: { operation: { assignment: 'applied', message, status: 'unconfirmed' } } });
     const resume = f.input(bound, { assignee: original.assignee, resume_request_id: original.request_id });
     f.store.reserveOperation('task_assign', resume);
     rejects(() => f.store.bindAssignment(resume), 'UNSAFE_DISPATCH_RECOVERY');
@@ -598,7 +598,7 @@ test('failed business receipts are final and cannot later become newly applied e
   f.ack(task);
   rejects(() => f.store.executeLocal('task_report', report), 'ACK_REQUIRED');
   assert.equal(f.store.read({ view: 'activity', task_id: task.id }).items.length, 0);
-  assert.equal(f.store.operation(report.request_id).status, 'final');
+  assert.equal(f.store.operation(report).status, 'final');
 });
 
 test('serialized history pages enforce aggregate budget and retain every remainder through cursors', t => {
@@ -746,7 +746,7 @@ test('completion transaction rolls back outcome, retro, activity and subscriptio
   assert.equal(f.store.read({ view: 'outcomes', task_id: task.task_id }).items.length, 0);
   assert.equal(f.store.read({ view: 'activity', task_id: task.task_id }).items.length, 0);
   assert.equal(f.store.read({ view: 'subscriptions', task_id: task.task_id }).items[0].state, 'waiting');
-  rejects(() => f.store.operation(request.request_id), 'OPERATION_NOT_FOUND');
+  rejects(() => f.store.operation(request), 'OPERATION_NOT_FOUND');
   f.store.db.exec('DROP TRIGGER fail_completion');
   assert.equal(f.store.executeLocal('task_report', request).retro.status, 'saved');
   assert.equal(f.store.read({ view: 'subscriptions', task_id: task.task_id }).items[0].state, 'triggered');
@@ -914,7 +914,7 @@ test('v8 migration renames Task vocabulary, events and assignment receipts', t =
   db.close();
 
   store = new TaskStore(directory);
-  assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 10);
+  assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 11);
   const execution = store.read({ view: 'execution', task_id: taskId, actor: 'old-executor' });
   assert.equal(execution.orchestrator, 'old-owner');
   assert.equal(execution.assignee, 'old-executor');
@@ -924,10 +924,12 @@ test('v8 migration renames Task vocabulary, events and assignment receipts', t =
   assert.equal(subscription.author, 'old-executor');
   assert.equal(subscription.event.actor, 'old-executor');
   assert.equal('actor_session_id' in subscription.event, false);
-  const operation = store.read({ view: 'operation', request_id: 'assign-old' });
-  assert.equal(operation.result.operation.assignee, 'old-executor');
-  assert.equal('executor' in operation.result.operation, false);
+  rejects(() => store.read({ view: 'operation', request_id: 'assign-old', actor: 'old-owner' }), 'LEGACY_OPERATION_UNSCOPED');
   const rawOperation = store.db.prepare('SELECT * FROM operations WHERE request_id=?').get('assign-old');
+  assert.equal(rawOperation.actor, null);
+  assert.ok(rawOperation.legacy_reason);
+  assert.equal(JSON.parse(rawOperation.result).operation.assignee, 'old-executor');
+  assert.equal('executor' in JSON.parse(rawOperation.result).operation, false);
   assert.equal(JSON.parse(rawOperation.input).assignee, 'old-executor');
   assert.equal('executor' in JSON.parse(rawOperation.input), false);
   assert.equal('invocation' in rawOperation, true);

@@ -8,7 +8,7 @@ See the [MCP contract](task-mcp-contract.md) for input/result shapes, the
 ## Module and data
 
 The module ID and MCP server key are `cockpit-task`, display name Task, version
-`0.3.0` (source preparation; no deployment implied). Its manifest is [cockpit.module.json](../cockpit.module.json).
+`0.3.1` (source preparation; no deployment implied). Its manifest is [cockpit.module.json](../cockpit.module.json).
 `src/task-board/`, `web/task-board/` and the database filename `task-board.sqlite`
 are current internal paths. Task runs inside Cockpit, not a standalone service.
 
@@ -56,6 +56,50 @@ prerequisite remains; reads, ACK, discussion and definition edits remain possibl
 Readiness never changes lifecycle or dispatches.
 `report`/`cancel`/automation finish return these as `notice_ids`, delivered and
 recovered through the same outbox path as `subscription_ids`.
+
+### Caller-scoped receipts and schema v11
+
+The idempotency key is `(actor, request_id)`. For MCP the service derives `actor`
+only from the trusted main session ID in host invocation metadata; a subagent uses
+that containing session, not its runtime session ID or transport connection ID.
+Module HTTP uses the existing internal `user` namespace. No new caller argument,
+identity fallback, authorization rule or subagent write restriction is introduced.
+
+Schema v11 rebuilds `operations` with a monotonic `seq`, nullable `actor`,
+`legacy_reason` and `UNIQUE(actor,request_id)`. Normal writes require a valid actor
+and a null legacy reason. Migration copies the original row order and every v10
+field unchanged: tool, request ID, fingerprint, input, status, result, error,
+timestamps, binding context, consumed `resumed_by` marker and invocation audit.
+It never rehashes input, upgrades uncertainty to success, resends a message,
+repeats a host call or changes automation run facts.
+
+Attribution uses the stored service-derived `input.actor` introduced in v9,
+including the internal Web `user`. If invocation was recorded, its `sessionId`
+must match that actor. The v9 migration did not promote the old caller-supplied
+`actor_session_id`; such records, missing/invalid actors, malformed identity JSON,
+embedded caller fields or contradictory invocation metadata are not guessed.
+They remain in `operations` with `actor=NULL` and an explicit `legacy_reason`.
+A partial unique index reserves each such request ID globally.
+
+Any receipt lookup, write or resume referencing an unattributable legacy ID fails
+with `LEGACY_OPERATION_UNSCOPED` (409). Direct lookups include
+`result.legacy_operation` with the ID, tool, historical pending/final status and
+reason; they do not expose or guess an actor. The full original evidence remains
+stored, not converted to a successful or empty receipt. Unrelated request IDs work
+normally. There is no public reassignment, delete, override or retry switch.
+An authorized operator must inspect the retained evidence on an isolated consistent
+copy before separately deciding any remediation. A new ID is not permission to
+repeat a possibly completed action.
+
+The v10-to-v11 migration runs atomically at storage initialization and rolls back
+all schema/data changes on failure. Older supported schemas first retain their
+existing migration requirements. In particular, v9 still requires the reviewed
+v10 lifecycle plan below; the 0.3.1 CLI reports `final_schema:11` in inventory and
+preflight, and applies the reviewed lifecycle step and mechanical receipt step in
+one transaction. Its plan's `target_schema:10` remains the lifecycle review target.
+Schema v11 is roll-forward only; released 0.3.0 rejects it with `SCHEMA_TOO_NEW`.
+Source merge, packaging and synthetic fixtures do not authorize production database
+access, migration, installation, restart or release.
 
 ### Schema v10 migration
 
@@ -177,9 +221,16 @@ There is no bound-Task repair mode or automatic resource selection from Task tex
 
 ## Concurrency and replay
 
-Every write has a stable `request_id`. Its fingerprint covers the tool and
-complete validated input plus the derived actor (not the full invocation). The same ID with different input
-fails; exact-input/same-actor replay returns the original effects without repeating them. Old request IDs replayed after v9 may conflict because the fingerprint shape changed.
+Every write has a stable `request_id` within its trusted caller namespace.
+Different sessions may reuse the same ID independently. Its fingerprint covers
+the tool and complete validated input plus the derived actor, not invocation
+runtime details. Same-session changed input fails with `REQUEST_ID_CONFLICT`;
+exact replay by that session or its subagents returns the original effects without
+repeating them. The first invocation audit remains unchanged on replay.
+All local writes (including registration and automation), external reservation,
+step updates, finalization, operation reads and dispatch recovery use the same key.
+Original fingerprints are preserved during migration; incompatible historical
+input may still conflict rather than reexecute, and unscoped legacy IDs fail closed.
 Local effects and final receipt commit atomically. `definition_check` is always
 fresh, not stored as a permanent conclusion in a receipt.
 
@@ -214,8 +265,9 @@ accepts retro; ordinary reports omit it. Completion status, outcome and retro
 save atomically; the retro field also reports saved/rejected/not_requested.
 All incoming done requests missing retro, including old-format replay attempts,
 reject with `INVALID_INPUT` before any writes, including activity. Stored legacy
-operations remain untouched and readable through side-effect-free
-`task_read(view=operation,request_id=<original ID>)`. Do not auto-fill null or
+operations remain untouched. Attributable receipts are readable in their caller
+namespace through side-effect-free `task_read(view=operation,request_id=<original ID>)`;
+unattributable legacy IDs return `LEGACY_OPERATION_UNSCOPED`. Do not auto-fill null or
 retry modified input with the same request ID. Exact replay of a valid new
 request retains its original saved result without duplicate effects.
 Retro shares that outcome's revision, assignee, author, reported source, time and ID.
@@ -309,7 +361,9 @@ For official MCP transport calls, `mcp.js` copies `_meta["cockpit/invocation"]` 
 Session creation, preparation and assignment persist a pending receipt before host calls.
 Step results are updated durably. A crash during an external action leaves
 unconfirmed evidence; startup does not automatically repeat creation or dispatch.
-`task_read(view=operation,request_id)` exposes the known result without host refresh.
+`task_read(view=operation,request_id)` exposes the calling session's known result
+without host refresh. It cannot select another session, including from the Web
+`user` namespace; a missing local receipt returns `OPERATION_NOT_FOUND`.
 
 Creation retains a confirmed session ID even if capability inspection fails.
 It does not bind a Task or send an initialization prompt, and replay never
@@ -375,9 +429,11 @@ receipt reads/replays do not refresh them or repair the session.
 
 Exact request replay never resends. Explicit recovery requires a new request ID,
 fresh context/revision, the same Task/assignee and `resume_request_id` pointing
-to an unused finalized assignment receipt proving `assignment=applied` and
+to an unused finalized assignment receipt in the same caller namespace proving `assignment=applied` and
 `message=not_sent`. Recovery consumes that receipt and repeats the safety checks.
 Pending, unknown, queued or accepted sends cannot authorize recovery.
+Historical consumed markers remain consumed even if a pre-v11 recovery was made
+by another actor; migration never treats them as unconsumed or relinks them.
 No recovery path reassigns, reopens a terminal Task or silently rolls back binding.
 
 ## One-shot status notifications

@@ -153,7 +153,7 @@ test('actual transitions consume once, address only stored subscriber, and retai
   assert.equal(recorded.event.request_id, input.request_id);
   assert.equal(recorded.event.actor, 'assignee');
   assert.equal(recorded.event.at, recorded.ended_at);
-  assert.equal(f.store.operation(input.request_id).result.subscription_ids[0], subscription.subscription_id);
+  assert.equal(f.store.operation(input).result.subscription_ids[0], subscription.subscription_id);
 });
 
 test('same-status, activity, definitions and stale status reports do not fire or contact the host', async t => {
@@ -365,7 +365,7 @@ test('current schema preserves Task rows and receipts across restart', t => {
   f.service.close();
   const upgraded = new TaskStore(f.root);
   try {
-    assert.equal(upgraded.db.prepare('PRAGMA user_version').get().user_version, 10);
+    assert.equal(upgraded.db.prepare('PRAGMA user_version').get().user_version, 11);
     assert.deepEqual(upgraded.task(task.task_id), before);
     assert.deepEqual(upgraded.db.prepare('SELECT * FROM operations ORDER BY request_id').all(), receipts);
     assert.deepEqual(upgraded.read({ view: 'subscriptions', task_id: task.task_id }).items, []);

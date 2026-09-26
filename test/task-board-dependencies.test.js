@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { inspectLifecycleMigration, TaskStore } from '../src/task-board/store.js';
 import { TaskService } from '../src/task-board/service.js';
 import { LIMITS, parseInput } from '../src/task-board/contracts.js';
+import { restoreV10Operations } from './helpers/operations-v10.js';
 
 function fixture(t, overrides = {}) {
   const root = join(process.cwd(), '.task-board-tests', randomUUID());
@@ -134,7 +135,7 @@ test('assigning a not-ready Task is rejected before reservation or Assignee insp
   assert.match(rejected.error.message, new RegExp(a.task_id));
   assert.deepEqual(f.inspected, []);
   assert.deepEqual(f.sent, []);
-  assert.throws(() => f.store.operation(request_id), error => error.code === 'OPERATION_NOT_FOUND');
+  assert.throws(() => f.store.operation({ actor: 'orchestrator', request_id }), error => error.code === 'OPERATION_NOT_FOUND');
   assert.equal(f.store.task(d.task_id).assignee, null);
   // The transactional bind is the authoritative gate even without the service precheck.
   const input = { actor: 'orchestrator', request_id: randomUUID(), task_id: d.task_id, write_context: f.store.task(d.task_id).write_context, revision: 1, assignee: 'assignee-y' };
@@ -320,7 +321,7 @@ test('schema keeps existing Tasks without changing dependency facts', t => {
   store.close();
   store = new TaskStore(root);
   try {
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 10);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 11);
     assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
     assert.deepEqual(store.db.prepare('SELECT * FROM operations').all(), receipts);
     const migrated = store.task(task.task_id);
@@ -542,6 +543,7 @@ test('schema v10 preflights every legacy state and migrates all branches only wi
   db.prepare(`INSERT INTO subscriptions(
     id,task_id,subscriber,author,statuses,state,created_at
   ) VALUES(?,?,?,?,?,'waiting',?)`).run(randomUUID(), paused.task_id, 'observer', 'observer', '["blocked","done"]', at);
+  restoreV10Operations(db);
   db.exec('PRAGMA user_version=9;');
   db.close();
 
@@ -575,7 +577,10 @@ test('schema v10 preflights every legacy state and migrates all branches only wi
   writeFileSync(planFile, JSON.stringify(plan));
   const before = readFileSync(join(root, 'task-board.sqlite'));
   const cli = (...args) => execFileSync(process.execPath, ['scripts/migrate-task-v10.js', '--data-root', root, ...args], { encoding: 'utf8' });
-  assert.equal(JSON.parse(cli('--preflight', '--plan', planFile)).status, 'ready');
+  const preflight = JSON.parse(cli('--preflight', '--plan', planFile));
+  assert.equal(preflight.status, 'ready');
+  assert.equal(preflight.target_schema, 10);
+  assert.equal(preflight.final_schema, 11);
   assert.deepEqual(readFileSync(join(root, 'task-board.sqlite')), before, 'preflight is read-only');
   const drift = new DatabaseSync(join(root, 'task-board.sqlite'));
   drift.prepare('UPDATE tasks SET editable=editable+1 WHERE id=?').run(condition.task_id);
@@ -583,10 +588,12 @@ test('schema v10 preflights every legacy state and migrates all branches only wi
   assert.throws(() => new TaskStore(root, { migrationPlan: plan }), error => error.code === 'MIGRATION_REVIEW_REQUIRED');
   plan.source_fingerprint = inspectLifecycleMigration(root).source_fingerprint;
   writeFileSync(planFile, JSON.stringify(plan));
-  assert.equal(JSON.parse(cli('--apply', '--plan', planFile)).status, 'migrated');
+  const applied = JSON.parse(cli('--apply', '--plan', planFile));
+  assert.equal(applied.status, 'migrated');
+  assert.equal(applied.schema, 11);
   store = new TaskStore(root);
   try {
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 10);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 11);
     assert.equal(store.task(withDependency.task_id).status, 'in_progress');
     assert.equal(store.task(withDependency.task_id).ready, true);
     assert.deepEqual(store.task(condition.task_id).blocked_by,
@@ -616,6 +623,7 @@ test('v9 startup requires a reviewed plan even without legacy statuses', t => {
   const task = f.store.executeLocal('task_create', {
     actor: 'orchestrator', request_id: randomUUID(), title: 'Current state', description: 'Keep intact',
   });
+  restoreV10Operations(f.store.db);
   f.store.db.exec(`DROP TRIGGER tasks_status_insert; DROP TRIGGER tasks_status_update;
     DROP TABLE migration_v10_items; DROP TABLE migration_v10_subscriptions; PRAGMA user_version=9`);
   const inventory = inspectLifecycleMigration(f.root);
@@ -627,7 +635,7 @@ test('v9 startup requires a reviewed plan even without legacy statuses', t => {
   } });
   try {
     assert.equal(migrated.task(task.task_id).description, 'Keep intact');
-    assert.equal(migrated.db.prepare('PRAGMA user_version').get().user_version, 10);
+    assert.equal(migrated.db.prepare('PRAGMA user_version').get().user_version, 11);
   } finally { migrated.close(); }
 });
 

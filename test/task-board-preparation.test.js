@@ -121,7 +121,7 @@ test('native partial effects and creation ID survive readiness failures and repl
   assert.deepEqual(first.result.operation.resources, native);
   f.host.create = f.host.prepare = f.host.inspect = () => assert.fail('Replay cannot repeat host work');
   assert.deepEqual((await f.service.execute('task_session_create', input)).result, first.result);
-  assert.deepEqual(f.store.operation(input.request_id).result, first.result);
+  assert.deepEqual(f.store.operation(input).result, first.result);
 });
 
 test('lost preparation result remains durable unknown with no retry after restart', async t => {

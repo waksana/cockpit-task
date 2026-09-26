@@ -82,7 +82,7 @@ export class TaskService {
           const options = {
             input, signal,
             inspect: id => this.host.inspect(id),
-            save: value => this.store.saveOperation(input.request_id, value),
+            save: value => this.store.saveOperation(input, value),
             preparationSupported: this.host.preparationSupported === true,
             prepare: (id, resources) => this.host.prepare(id, resources),
             preflight: id => this.store.preparationPreflight(id),
@@ -102,7 +102,7 @@ export class TaskService {
                 ...(typeof this.host.nameState === 'function' && typeof this.host.rename === 'function' ? { retitle: {
                   nameState: id => this.host.nameState(id),
                   rename: (id, name) => this.host.rename(id, name),
-                  previous: () => this.store.moduleSessionTitle(input.assignee, input.request_id),
+                  previous: () => this.store.moduleSessionTitle(input.assignee, input),
                 } } : {}),
               }));
             } catch (error) {

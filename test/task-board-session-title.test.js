@@ -112,6 +112,19 @@ test('a later assignment replaces only the title Task itself set, never a user r
   assert.equal(f.renames().length, 2);
 });
 
+test('title provenance excludes only the current caller receipt, not another caller with the same ID', async t => {
+  const f = nativeHost(t);
+  const first = await f.create('First caller title');
+  const prior = await f.assign(first, { request_id: 'shared-title-id' });
+  assert.equal(prior.result.operation.session_title.status, 'renamed');
+  await f.finish(first);
+  const second = await f.create('Web caller title');
+  const current = await f.assign(second, { actor: 'user', request_id: 'shared-title-id' });
+  assert.equal(current.error, null);
+  assert.deepEqual(current.result.operation.session_title, { status: 'renamed', title: second.title });
+  assert.equal(f.renames().length, 2);
+});
+
 test('rename failure or an unconfirmed result is reported without affecting the assignment', async t => {
   for (const rename of [
     () => { throw new Error('native rename rejected'); },
