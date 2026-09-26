@@ -8,6 +8,7 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
+    "quotas": "node scripts/quotas.js",
     "package:module": "node scripts/package-task-board.js"
   },
   "dependencies": {

@@ -5,6 +5,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TASK_EVENTS } from '../src/task-board/reference.js';
+import { formatQuotaReport, markdownBody, readMarkdownQuotas } from '../scripts/prompt-quotas.js';
 
 // Enforce a small YAML-safe release format, not a replacement YAML parser:
 // kebab-case names and JSON-quoted descriptions (valid YAML double-quoted scalars).
@@ -26,8 +27,7 @@ const deletedReferences = [
   'task-links.md', 'task-writes-and-recovery.md',
 ];
 const read = (...path) => readFileSync(join(root, ...path), 'utf8');
-const prose = source => source.replace(/---[\s\S]*?---\s*/, '').replace(/\s+/g, ' ').trim();
-const wordCount = source => prose(source).split(/\s+/).filter(Boolean).length;
+const prose = source => markdownBody(source, true).replace(/\s+/g, ' ');
 const localLinks = source => [...source.matchAll(/\[[^\]\n]*\]\(([^)\s]+)\)/g)]
   .map(([, target]) => target)
   .filter(target => !/^(?:[a-z][a-z\d+.-]*:|#|task:)/i.test(target));
@@ -110,11 +110,11 @@ test('repository entrypoints describe the current Task module', () => {
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[''].name, pkg.name);
   assert.equal(lock.packages[''].version, pkg.version);
-  assert.deepEqual(Object.keys(pkg.scripts).sort(), ['package:module', 'test']);
+  assert.deepEqual(Object.keys(pkg.scripts).sort(), ['package:module', 'quotas', 'test']);
   assert.deepEqual(readdirSync(join(root, 'src')), ['task-board']);
   assert.deepEqual(readdirSync(join(root, 'web')), ['task-board']);
   assert.deepEqual(readdirSync(join(root, 'roles')).sort(), ['task-node.md']);
-  assert.deepEqual(readdirSync(join(root, 'scripts')), ['migrate-task-v10.js', 'package-task-board.js']);
+  assert.deepEqual(readdirSync(join(root, 'scripts')), ['migrate-task-v10.js', 'package-task-board.js', 'prompt-quotas.js', 'quotas.js']);
   assert.deepEqual(readdirSync(join(root, '.github/workflows')), ['task-board-ci.yml']);
   assert.deepEqual(manifest.roles.map(role => role.id), ['node']);
   assert.deepEqual(manifest.roles[0].skillDirectories.sort(), ['skills/cockpit-task-tree', 'skills/github-coding']);
@@ -259,13 +259,10 @@ test('guidance forbids direct agent messages and deleted references stay removed
   }
 });
 
-test('role prompt and compact Skill texts stay short and point to cockpit-task-tree', () => {
+test('role prompt and compact Skill texts respect character quotas and point to cockpit-task-tree', () => {
   const role = read('roles/task-node.md');
-  const skill = read(treeDirectory, 'SKILL.md');
-  const automation = read(treeDirectory, 'references/automation.md');
-  assert.ok(wordCount(role) <= 360, 'role prompt stays short');
-  assert.ok(wordCount(skill) <= 1500, 'Task tree Skill stays compact');
-  assert.ok(wordCount(automation) <= 500, 'automation reference stays compact');
+  const usages = readMarkdownQuotas(root);
+  assert.ok(usages.every(usage => !usage.exceeded), formatQuotaReport(usages));
   assert.match(role, /Load `cockpit-task-tree` when first needed/);
   assert.match(role, /Task is the only channel between nodes/);
   assert.match(role, /ACK its exact revision/);
@@ -320,6 +317,29 @@ test('github-coding guidance still composes with Task coordination without widen
   assert.doesNotMatch(coding, /Owner|Executor|orchestrator prepares|orchestrator safely cleans/);
 });
 
+test('worktree initialization stays project-specific rather than adding package-manager rules to the Skill', () => {
+  const coding = prose(read(codingDirectory, 'SKILL.md'));
+  assert.match(coding, /New checkouts do not inherit untracked or ignored local environment files/);
+  assert.match(coding, /Follow the project guide to prepare the environment needed for the current work/);
+  assert.match(coding, /another worktree being runnable does not establish that this one is ready/);
+  assert.doesNotMatch(coding, /\b(?:npm|pnpm|node_modules|registry)\b/);
+
+  const contributing = read('CONTRIBUTING.md');
+  const setupLink = localLinks(contributing).find(link => link.startsWith('README.md#'));
+  assert.ok(setupLink, 'CONTRIBUTING links the authoritative README initialization section');
+  const readme = read('README.md');
+  assert.ok(readme.includes(`## ${decodeURIComponent(setupLink.split('#')[1])}`));
+  assert.match(contributing, /npm run quotas/);
+  for (const requirement of [
+    /npm ci --ignore-scripts --no-audit --no-fund/,
+    /Each worktree needs its own `node_modules`/,
+    /npm's own cache/,
+    /Do not copy production dependencies or credentials, or symlink another worktree's entire `node_modules`/,
+    /Documentation-only edits do not require dependency installation/,
+    /a ready environment should not be reinstalled unconditionally/,
+  ]) assert.match(prose(readme), requirement);
+});
+
 test('module packaging carries both Skills without evaluation resources', () => {
   const packaged = spawnSync('npm', ['run', 'package:module'], { cwd: root, encoding: 'utf8' });
   assert.equal(packaged.status, 0, packaged.error?.message ?? `${packaged.stdout}\n${packaged.stderr}`);
@@ -336,6 +356,10 @@ test('module packaging carries both Skills without evaluation resources', () => 
   assert.deepEqual(topLevel, ['README.md', 'cockpit.module.json', 'node_modules', 'package.json', 'roles', 'scripts', 'skills', 'src', 'web']);
   assert.deepEqual(entries.filter(entry => entry.startsWith('./scripts/') && !entry.endsWith('/')), ['./scripts/migrate-task-v10.js']);
   assert.equal(execFileSync('tar', ['-xOf', archive, './scripts/migrate-task-v10.js'], { encoding: 'utf8' }), read('scripts/migrate-task-v10.js'));
+  assert.equal(execFileSync('tar', ['-xOf', archive, './src/task-board/tool-descriptions.js'], { encoding: 'utf8' }),
+    read('src/task-board/tool-descriptions.js'));
+  assert.equal(execFileSync('tar', ['-xOf', archive, './src/task-board/tool-names.js'], { encoding: 'utf8' }),
+    read('src/task-board/tool-names.js'));
   const packagedManifest = JSON.parse(execFileSync('tar', ['-xOf', archive, './cockpit.module.json'], { encoding: 'utf8' }));
   assert.deepEqual(packagedManifest.roles.map(role => role.id), ['node']);
   assert.deepEqual(packagedManifest.roles[0].skillDirectories.sort(), ['skills/cockpit-task-tree', 'skills/github-coding']);
@@ -346,7 +370,7 @@ test('module packaging carries both Skills without evaluation resources', () => 
 });
 
 test('public documentation links resolve to active resources rather than retired content', () => {
-  const files = ['README.md', ...readdirSync(join(root, 'docs')).filter(file => file.endsWith('.md')).map(file => `docs/${file}`)];
+  const files = ['README.md', 'CONTRIBUTING.md', ...readdirSync(join(root, 'docs')).filter(file => file.endsWith('.md')).map(file => `docs/${file}`)];
   for (const file of files) {
     const path = join(root, file);
     const source = readFileSync(path, 'utf8');

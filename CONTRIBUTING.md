@@ -5,6 +5,11 @@ existing version preparations. Validate with the existing `npm test` and
 `npm run package:module` commands using synthetic data, never production Tasks,
 native sessions or credentials.
 
+Follow the [README development and packaging guide](README.md#%E5%BC%80%E5%8F%91%E4%B8%8E%E6%89%93%E5%8C%85)
+for worktree-local initialization; another checkout's environment does not establish
+readiness here. Run `npm run quotas` to see fixed prompt-text character limits, usage
+and remaining capacity; exceeding a limit exits nonzero.
+
 ## Immutable installation versions
 
 Do not bump versions for every commit. Before packaging changed content for

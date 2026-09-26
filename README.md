@@ -122,6 +122,20 @@ npm test
 npm run package:module
 ```
 
+Each worktree needs its own `node_modules`; untracked or ignored local setup is not
+inherited. Use the initialization command above when the current work needs missing
+dependencies, reusing downloads through npm's own cache. Do not copy production
+dependencies or credentials, or symlink another worktree's entire `node_modules`.
+Documentation-only edits do not require dependency installation, and a ready
+environment should not be reinstalled unconditionally.
+
+Run `npm run quotas` for prompt-text usage and remaining capacity; it needs no
+dependency installation. Characters are JavaScript `String.length` (UTF-16 code
+units): Markdown line endings are normalized to LF, Skill frontmatter and outer
+whitespace are excluded, and internal whitespace is counted. MCP descriptions are
+counted unchanged. The fixed limits and counting rules live in
+`scripts/prompt-quotas.js`, separately from business payload limits.
+
 模块代码位于 `src/task-board/`，卡片位于 `web/task-board/`；
 `cockpit.module.json` 是模块入口。归档输出到 `dist/cockpit-task-<version>.tgz`，
 供支持所需接口的 Cockpit 装载；Task 不提供独立服务启动命令。
