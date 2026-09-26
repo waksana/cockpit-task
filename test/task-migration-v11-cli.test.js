@@ -63,9 +63,13 @@ test('preflight includes committed WAL records without changing source schema or
   const db = new DatabaseSync(f.path);
   try {
     db.exec("PRAGMA journal_mode=WAL; UPDATE tasks SET title='Committed WAL data'");
+    db.prepare(`INSERT INTO operations(${v10OperationColumns.join(',')}) VALUES(${v10OperationColumns.map(() => '?').join(',')})`)
+      .run('wal-only', 'task_create', 'wal-fingerprint', '{}', 'pending', null, null, 'wal', 'wal', null, null, null);
     const before = db.prepare('SELECT * FROM tasks').all();
     const result = run(f.root, '--preflight');
     assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).operations, 3);
+    assert.equal(JSON.parse(result.stdout).legacy_operations, 2);
     assert.equal(db.prepare('PRAGMA user_version').get().user_version, 10);
     assert.deepEqual(db.prepare('SELECT * FROM tasks').all(), before);
   } finally { db.close(); }
