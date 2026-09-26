@@ -114,7 +114,7 @@ test('repository entrypoints describe the current Task module', () => {
   assert.deepEqual(readdirSync(join(root, 'src')), ['task-board']);
   assert.deepEqual(readdirSync(join(root, 'web')), ['task-board']);
   assert.deepEqual(readdirSync(join(root, 'roles')).sort(), ['task-node.md']);
-  assert.deepEqual(readdirSync(join(root, 'scripts')), ['check-release.js', 'migrate-task-v10.js', 'migrate-task-v11.js', 'package-task-board.js', 'prompt-quotas.js', 'quotas.js', 'release-state.js', 'verify-package.js']);
+  assert.deepEqual(readdirSync(join(root, 'scripts')), ['check-release.js', 'migrate-task-v10.js', 'migrate-task-v11.js', 'package-task-board.js', 'prompt-quotas.js', 'quotas.js', 'release-state.js', 'release-write.js', 'verify-package.js']);
   assert.deepEqual(readdirSync(join(root, '.github/workflows')).sort(), ['release.yml', 'task-board-ci.yml']);
   assert.deepEqual(manifest.roles.map(role => role.id), ['node']);
   assert.deepEqual(manifest.roles[0].skillDirectories.sort(), ['skills/cockpit-task-tree', 'skills/github-coding']);
@@ -428,11 +428,11 @@ test('module packaging carries both Skills without evaluation resources', () => 
 test('release publishes only the checked archive after the draft gate', () => {
   const workflow = read('.github/workflows/release.yml');
   for (const text of ['uses: ./.github/workflows/task-board-ci.yml', 'actions: read', 'check-release.js',
-    '--verify-tag --draft', 'gh api --paginate --slurp', 'release-state.js select',
-    "Accept: application/octet-stream", 'gh api --method PATCH']) {
+    'release-write.js create', 'release-write.js upload', 'gh api --paginate --slurp', 'release-state.js select',
+    "Accept: application/octet-stream", 'release-write.js publish']) {
     assert.ok(workflow.includes(text), text);
   }
-  assert.ok(workflow.indexOf('Accept: application/octet-stream') < workflow.indexOf('gh api --method PATCH'));
+  assert.ok(workflow.indexOf('Accept: application/octet-stream') < workflow.indexOf('release-write.js publish'));
   assert.doesNotMatch(workflow, /--clobber|gh release (?:download|edit)|npm run package:module|pull_request_target|secrets\./);
   for (const [, use] of workflow.matchAll(/uses:\s+([^\s]+)/g)) {
     if (!use.startsWith('./')) assert.match(use, /^[\w/-]+@[a-f0-9]{40}$/);
