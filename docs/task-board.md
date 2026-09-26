@@ -1,7 +1,7 @@
 # Task
 
 Task is a Cockpit module for independent work records shared by orchestrator and assignee.
-Its module ID and HTTP MCP key are `cockpit-task`, version `0.3.1` (source preparation; no deployment implied).
+Its module ID and HTTP MCP key are `cockpit-task`, version `0.3.2` (source preparation; no deployment implied).
 It runs in Cockpit, not a standalone daemon or dashboard.
 
 Version 0.1.13 packaged per-Task hierarchical delegation and the tree-node model
@@ -446,7 +446,7 @@ npm test
 npm run package:module
 ```
 
-`dist/cockpit-task-0.3.1.tgz` contains runtime dependencies, backend/frontend assets,
+`dist/cockpit-task-0.3.2.tgz` contains runtime dependencies, backend/frontend assets,
 the node role prompt, the tree Skill and the shared coding Skill. Its `.sha256` sidecar identifies the
 archive. [Task CI](https://github.com/waksana/cockpit-task/blob/main/.github/workflows/task-board-ci.yml) retains these as the
 `cockpit-task-module` artifact; an artifact is not an installation or deployment.
@@ -455,7 +455,7 @@ Installation is an explicit operator action on a compatible host. From the host
 checkout, stage the local artifact using the host's module installer:
 
 ```sh
-pnpm module install /absolute/path/to/cockpit-task-0.3.1.tgz --trust-local-code
+pnpm module install /absolute/path/to/cockpit-task-0.3.2.tgz --trust-local-code
 ```
 
 This command deliberately omits automatic enablement. Follow that host's documented

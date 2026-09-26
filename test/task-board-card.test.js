@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { posix } from 'node:path';
 import {
   activate,
   acknowledgementLabel,
@@ -31,6 +32,27 @@ const result = {
 const response = (data = result, error = null, status = 200) =>
   new Response(JSON.stringify({ result: data, error, definition_check: null }), { status });
 const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test('every frontend import and the icon license is a declared module asset', () => {
+  const root = new URL('../', import.meta.url);
+  const manifest = JSON.parse(readFileSync(new URL('cockpit.module.json', root), 'utf8'));
+  const visited = new Set();
+  const check = path => {
+    assert.ok(manifest.frontend.assets.some(asset => path === asset || path.startsWith(`${asset}/`)),
+      `${path} is not exposed by the module asset allowlist`);
+    const source = readFileSync(new URL(path, root), 'utf8');
+    if (visited.has(path)) return;
+    visited.add(path);
+    for (const [, relative] of source.matchAll(/\bfrom\s+['"](\.[^'"]+)['"]/g)) {
+      check(posix.normalize(posix.join(posix.dirname(path), relative)));
+    }
+  };
+  check(manifest.frontend.entry);
+  for (const style of manifest.frontend.styles) check(style);
+  check('web/task-board/licenses/lucide.txt');
+  assert.ok(visited.has('web/task-board/read-resource.js'));
+  assert.ok(visited.has('web/task-board/icons.js'));
+});
 
 test('StrictMode effect replay retains more resources than the inactive cache limit', async () => {
   const f = fixture();

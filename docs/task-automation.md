@@ -115,7 +115,8 @@ cannot account for escaped processes. Immutable configuration and script SHA256
 do not freeze runtime/interpreter bytes, imports, dependencies or external state.
 Do not put secrets in Task inputs or retained output.
 
-Current source/package version is **0.3.1**, retaining completion retro for Agent Tasks,
+Current source/package version is **0.3.2**, adding compact cards and progressive details
+with identity-scoped refresh, retaining completion retro for Agent Tasks,
 selective Task reads, the coding/deployment Skill boundary clarification,
 orchestrator request follow-through (#45), immediate assignee update notices (#47),
 Agent reopen (#49), orchestrator sequential subscription follow-up (#53), assignee

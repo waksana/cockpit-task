@@ -29,7 +29,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
   timeout: 180_000,
 }, async t => {
   const hostSource = resolve(hostWorktree);
-  const archive = join(repository, 'dist', 'cockpit-task-0.3.1.tgz');
+  const archive = join(repository, 'dist', 'cockpit-task-0.3.2.tgz');
   const originalEnv = { ...process.env };
   const originalCwd = process.cwd();
   const root = await mkdtemp(join(repository, '.task-board-host-integration-'));
@@ -337,7 +337,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     stage = 'installing the real artifact and activating its backend';
     const installed = await installLocalModule(archive, { hostRoot: dirs.host, trustLocalCode: true, enable: true });
     assert.equal(installed.manifest.id, 'cockpit-task');
-    assert.equal(installed.manifest.version, '0.3.1');
+    assert.equal(installed.manifest.version, '0.3.2');
     assert.ok(installed.root.startsWith(`${dirs.host}/modules/installed/`));
     const startModule = async ({ listen = true, port = 0 } = {}) => {
       app = Fastify({ forceCloseConnections: true });
@@ -360,7 +360,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const origin = await startModule();
     const bootstrap = moduleHost.bootstrap();
     assert.deepEqual(bootstrap.errors, []);
-    assert.deepEqual(bootstrap.active, [{ id: 'cockpit-task', version: '0.3.1', digest: installed.digest }]);
+    assert.deepEqual(bootstrap.active, [{ id: 'cockpit-task', version: '0.3.2', digest: installed.digest }]);
     const apiBase = bootstrap.modules[0].apiBase;
     const headers = { 'X-Cockpit-Module-Digest': installed.digest };
     assert.equal((await app.inject(bootstrap.modules[0].entry)).statusCode, 200);
@@ -368,6 +368,10 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const sharedReference = await app.inject(sharedReferenceUrl.pathname);
     assert.equal(sharedReference.statusCode, 200, 'The shared browser reference parser must be a declared packaged asset');
     assert.ok(sharedReference.body.includes('export const TASK_EVENTS'));
+    for (const asset of ['./read-resource.js', './icons.js', './licenses/lucide.txt']) {
+      const url = new URL(asset, `${origin}${bootstrap.modules[0].entry}`);
+      assert.equal((await app.inject(url.pathname)).statusCode, 200, `${asset} must be a declared packaged asset`);
+    }
     const readPayload = { view: 'list' };
     for (const digest of [undefined, '', '0'.repeat(64)]) {
       const rejected = await app.inject({
