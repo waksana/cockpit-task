@@ -101,6 +101,30 @@ Schema v11 is roll-forward only; released 0.3.0 rejects it with `SCHEMA_TOO_NEW`
 Source merge, packaging and synthetic fixtures do not authorize production database
 access, migration, installation, restart or release.
 
+### Explicit schema v10 to v11 migration
+
+The packaged `scripts/migrate-task-v11.js` supports an existing schema v10
+database only. It reuses the storage migration without starting Task services,
+reconciling automation or replaying any operation:
+
+```sh
+node scripts/migrate-task-v11.js --data-root <consistent-copy> --preflight
+# After authorization, a WAL-consistent backup and stopping all writers:
+node scripts/migrate-task-v11.js --data-root <authorized-data-root> --apply
+```
+
+Preflight opens the source read-only, makes a temporary SQLite online backup,
+and exercises the exact migration on that copy. It reports `status: "ready"`,
+`schema: 10`, `target_schema: 11` and operation/legacy counts, then removes its
+temporary copy. It is not a durable recovery backup or a guarantee against
+later source drift. Apply repeats schema/integrity checks under `BEGIN IMMEDIATE`,
+preserves receipts through the existing migration, checks integrity and commits
+schema 11 atomically. On failure it rolls back, exits nonzero and does not retry.
+Both modes reject other schemas, missing databases and unknown flags. Successful
+apply reports `status: "migrated", schema: 11`; it is deliberately not replayable.
+Keep the coordinated backup: the older module cannot open v11, and restoring
+old data would discard later writes and needs a separate operator decision.
+
 ### Schema v10 migration
 
 The lifecycle is `todo`, `in_progress`, `done`, `cancelled`; blocking is derived from
