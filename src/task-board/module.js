@@ -15,16 +15,31 @@ export function activate(context) {
   const store = new TaskStore(context.dataRoot);
   const controller = new AbortController();
   const signal = AbortSignal.any([context.signal, controller.signal]);
-  const service = new TaskService(store, host, { invalidate: context.invalidate, report: context.report });
+  const service = new TaskService(store, host, { invalidate: context.invalidate, publish: context.publish, report: context.report });
   signal.addEventListener('abort', () => service.close(), { once: true });
   if (signal.aborted) service.close();
   const execute = (name, input, options) => service.execute(name, input, options);
   const mcp = createMcpRoutes({ execute, schemas: toolSchemas, signal, report: context.report });
-  const json = async (name, request) => {
+  const json = async (name, request, displaySessions = false) => {
     // Module HTTP callers are the signed-in user (Web board, operators), never a native session.
     const body = await execute(name, request.body, {
       signal: AbortSignal.any([request.signal, signal]), actor: 'user', external: true,
     });
+    if (displaySessions && !body.error && ['overview', 'execution', 'list'].includes(request.body?.view)) {
+      const titles = new Map();
+      const display = id => {
+        if (!id || id === 'user') return null;
+        if (!titles.has(id)) titles.set(id, host.display(id));
+        return titles.get(id);
+      };
+      const enrich = async task => {
+        const [orchestrator, assignee] = await Promise.all([display(task.orchestrator), display(task.assignee)]);
+        return { ...task, sessions: { orchestrator, assignee } };
+      };
+      body.result = request.body.view === 'list'
+        ? { ...body.result, items: await Promise.all(body.result.items.map(enrich)) }
+        : await enrich(body.result);
+    }
     return { status: body.error?.status ?? (body.error ? 409 : body.notification_error ? 502 : 200), body };
   };
   return {
@@ -33,7 +48,7 @@ export function activate(context) {
       return service.recoverNotifications({ signal });
     },
     routes: [
-      { method: 'POST', path: '/read', body: 'json', bodyLimit: 262144, handler: request => json('task_read', request) },
+      { method: 'POST', path: '/read', body: 'json', bodyLimit: 262144, handler: request => json('task_read', request, true) },
       { method: 'POST', path: '/tools/:name', body: 'json', bodyLimit: 262144, handler: request => json(request.params.name, request) },
       {
         method: 'GET', path: '/tasks/:id/native',

@@ -2,11 +2,11 @@
 
 当前 UI 的精确宿主支持基线为
 `9fd5204bda99a8bd65b2c5ef152cc47ce87837d5`（Cockpit 源码，未宣称已发行）。
-卡片复用 `ck-button`，详情使用 `ck-surface`、`ck-modal`、`ck-heading`、
+卡片正文与行内刷新使用独立原生按钮，刷新复用 `ck-icon-button`；详情使用 `ck-button`、`ck-surface`、`ck-modal`、`ck-heading`、
 `ck-actions` 与公共字体 tokens。激活在注册贡献前检查
 `context.uiVersion === 1` 与独立的 `context.uiSurfaceVersion === 1`，
 缺少或不支持时明确拒绝；历史 UI v1 主机不会自动获得新增样式。
-原生 dialog 的 portal、打开、关闭、焦点和业务几何不变；不引入 React SDK 或私有宿主依赖。
+原生 dialog 保留 portal、打开、关闭和焦点生命周期；业务布局由模块维护，不引入 React SDK 或私有宿主依赖。
 
 资源准备是独立的后端支持契约，由 [waksana/cockpit#100](https://github.com/waksana/cockpit/pull/100)
 实现；完整后端源码支持基线为 `d9952cb6060ef6d573431dd4778d6cd221311ece`，
@@ -270,8 +270,22 @@ unknown、accepted、queued 和已记录 not_sent 失败不自动再试，
 及受支持 event query。卡片使用合法 inline DOM，详情通过 portal 打开；
 不扫描、重写整段聊天或增加独立 dashboard。
 
-URL event 固定消息原因，卡片重新读取当前 Task；模块 invalidation/事件只提示
-刷新，不是持久回放，重连必须重读。Task 报告与 native 观察分别显示。
+URL event 固定消息原因，详情历史区域保留该上下文，不冒充当前状态。卡片按 Task 身份和读取参数
+共享缓存与在途请求；重渲染、重挂载、关闭详情和通用 `onInvalidate` 不触发重新读取。
+仅显式刷新、相关 `task/changed` 与断线重连对账使对应资源重读；事件不是持久回放，
+不能把离线时未收到事件理解为数据未变。后台读保留正文与折叠状态，失败标旧而不清空。
+Task 报告与 native 观察分别显示。
+服务通过公开 `context.publish` 发布 `{type:"task/changed",task_id,data_version}`；
+版本与 overview/execution/list 的同一 Task 读取相等比较。事务内 TEMP SQL 跟踪只在提交后发布，
+回滚和无实际变更的重放不发布；子任务、依赖变化为受影响父项/依赖方各发独立 Task 身份事件。
+通用 invalidate 仍兼容旧消费者，但不是新卡片的数据失效证据。事件不持久、不回放，
+模块重启改变版本域；外部 SQLite 写入仅在后续读取保守改变版本，不虚构精确事件。
+
+`POST /read` 的 overview/execution/list 附加
+`sessions:{orchestrator,assignee}`，每项为 `{session_id,title,available,error?}`；
+未分配及字面 Web actor `user` 对应 null。标题不可得时保留 ID、title:null 和明确错误。
+同次读取去重 session/get；不加载 session，不进入 MCP/通用 tools 返回。
+session 重命名不是 Task 变化，名称只在后续读取时更新，不宣称实时。
 native 读取只用 session/get，不采集能力、不加载 session、不持久复制原生状态
 或推断实时业务进展。不要使用会被 File 当作文件候选的相对 `task/<id>` 路径。
 

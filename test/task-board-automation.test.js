@@ -123,6 +123,13 @@ test('registration/create do not execute; typed literal argv, optional pre-subsc
     const outcomes = f.store.read({ view: 'outcomes', task_id: id }).items;
     assert.equal(outcomes.length, 1);
     assert.equal(outcomes[0].assignee, null);
+    for (const view of ['overview', 'execution']) {
+      const read = f.store.read({ view, task_id: id });
+      assert.equal(read.activity_count, 0, 'Automation logs and outcomes are not Agent activity reports');
+      assert.equal(read.outcome.current, true);
+      assert.equal(read.outcome.source, 'automation');
+      assert.equal(read.outcome.id, outcomes[0].id);
+    }
     assert.equal(outcomes[0].source, 'automation');
     assert.deepEqual(outcomes[0].retro, { status: 'not_applicable' });
     assert.equal(outcomes[0].run_id, done.automation.run_id);

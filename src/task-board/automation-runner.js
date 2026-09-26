@@ -74,7 +74,10 @@ export class AutomationRunner {
     const decoders = [new StringDecoder('utf8'), new StringDecoder('utf8')];
     const append = text => {
       if (!text || loggingError) return;
-      try { this.store.append(run.task_id, text); }
+      try {
+        this.store.append(run.task_id, text);
+        this.service.invalidate();
+      }
       catch (error) {
         loggingError = error;
         this.service.report(error);

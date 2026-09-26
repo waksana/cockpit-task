@@ -14,6 +14,7 @@ function fixture() {
   const controller = new AbortController();
   const calls = [];
   const errors = [];
+  const events = [];
   let invalidations = 0;
   let meta = {
     sessionId: 'assignee', status: 'idle', loaded: true, nativeProcessing: false,
@@ -33,12 +34,12 @@ function fixture() {
   };
   const context = {
     apiVersion: 1, serviceReadyVersion: 1, moduleId: 'cockpit-task', dataRoot: root, host, signal: controller.signal,
-    invalidate: () => { invalidations++; }, report: error => errors.push(error),
+    invalidate: () => { invalidations++; }, publish: event => events.push(event), report: error => errors.push(error),
   };
   let module = activate(context);
   let request = 0;
   return {
-    root, calls, errors, context, host,
+    root, calls, errors, events, context, host,
     set meta(value) { meta = value; },
     get meta() { return meta; },
     set capability(value) { capability = value; },
@@ -51,6 +52,11 @@ function fixture() {
     async list(fields = {}) {
       return module.routes.find(route => route.path === '/read').handler({
         body: { view: 'list', ...fields }, signal: controller.signal,
+      });
+    },
+    async toolRead(taskId) {
+      return module.routes.find(route => route.path === '/tools/:name').handler({
+        params: { name: 'task_read' }, body: { task_id: taskId, view: 'execution' }, signal: controller.signal,
       });
     },
     async native(taskId) {
@@ -126,6 +132,162 @@ test('HTTP tool calls reject body identity fields and create Tasks as the signed
     assert.equal(created.status, 200);
     const task = (await f.read(created.body.result.task_id)).body.result;
     assert.equal(task.orchestrator, 'user');
+  } finally { f.close(); }
+});
+
+test('Web reads resolve session titles passively with explicit unavailable metadata and no MCP enrichment', async () => {
+  const f = fixture();
+  try {
+    const seeded = f.seedAssigned({ orchestrator: 'planner', assignee: 'worker' });
+    f.host.call = async (name, body) => {
+      f.calls.push({ name, body });
+      assert.equal(name, 'session/get');
+      return { meta: { sessionId: body.sessionId, loaded: false, status: 'unloaded', title: `Title ${body.sessionId}` } };
+    };
+    for (const view of ['overview', 'execution']) {
+      const result = (await f.read(seeded.task_id, view)).body.result;
+      assert.deepEqual(result.sessions, {
+        orchestrator: { session_id: 'planner', title: 'Title planner', available: true },
+        assignee: { session_id: 'worker', title: 'Title worker', available: true },
+      });
+    }
+    const plain = await f.toolRead(seeded.task_id);
+    assert.equal(plain.body.error, null);
+    assert.equal('sessions' in plain.body.result, false);
+    assert.equal(f.calls.length, 4);
+    f.seedAssigned({ orchestrator: 'planner', assignee: 'another-worker' });
+    f.calls.length = 0;
+    await f.list();
+    assert.deepEqual(f.calls.map(call => call.body.sessionId).sort(), ['another-worker', 'planner', 'worker']);
+    f.host.call = async (_name, { sessionId }) => {
+      if (sessionId === 'planner') return { meta: null };
+      throw new Error('Host unavailable');
+    };
+    const failed = await f.read(seeded.task_id, 'overview');
+    assert.equal(failed.status, 200);
+    assert.equal(failed.body.error, null);
+    assert.deepEqual(failed.body.result.sessions.orchestrator, {
+      session_id: 'planner', title: null, available: false,
+      error: { code: 'SESSION_NOT_FOUND', message: 'The session is no longer known to the host' },
+    });
+    assert.equal(failed.body.result.sessions.assignee.error.code, 'SESSION_DISPLAY_UNAVAILABLE');
+    assert.equal(failed.body.result.sessions.assignee.session_id, 'worker');
+    assert.equal(failed.body.result.sessions.assignee.title, null);
+    f.host.call = async (_name, { sessionId }) => ({ meta: { sessionId, loaded: false, status: 'unloaded', title: '' } });
+    const missing = (await f.read(seeded.task_id)).body.result;
+    assert.equal(missing.sessions.orchestrator.error.code, 'SESSION_TITLE_UNAVAILABLE');
+    assert.equal(missing.sessions.assignee.available, false);
+    const web = await f.write('task_create', { title: 'Web', description: 'Unassigned' });
+    assert.deepEqual((await f.read(web.body.result.task_id)).body.result.sessions, { orchestrator: null, assignee: null });
+    assert.deepEqual(f.errors, []);
+  } finally { f.close(); }
+});
+
+test('Task change events share opaque read versions and suppress unchanged and replayed mutations', async () => {
+  const f = fixture();
+  try {
+    const input = { request_id: 'event-create', title: 'Versioned', description: 'Synthetic' };
+    const created = (await f.write('task_create', input)).body.result;
+    const id = created.task_id;
+    assert.equal(f.events.length, 1);
+    const first = f.events[0];
+    assert.deepEqual(Object.keys(first).sort(), ['data_version', 'task_id', 'type']);
+    assert.equal(first.type, 'task/changed');
+    assert.equal(first.task_id, id);
+    assert.match(first.data_version, /^[a-f0-9]{64}$/);
+    for (const view of ['overview', 'execution']) {
+      assert.equal((await f.read(id, view)).body.result.data_version, first.data_version);
+    }
+    assert.equal((await f.list()).body.result.items[0].data_version, first.data_version);
+    await f.write('task_create', input);
+    await f.write('task_edit', {
+      task_id: id, revision: 1, write_context: created.write_context, title: input.title, reason: 'No change',
+    });
+    assert.equal(f.events.length, 1);
+    const edited = await f.write('task_edit', {
+      task_id: id, revision: 1, write_context: created.write_context, metadata: { changed: true }, reason: 'Material changed',
+    });
+    assert.equal(edited.body.error, null);
+    assert.equal(f.events.length, 2);
+    assert.notEqual(f.events[1].data_version, first.data_version);
+    assert.equal((await f.read(id)).body.result.data_version, f.events[1].data_version);
+    f.restart();
+    assert.notEqual((await f.read(id)).body.result.data_version, f.events[1].data_version);
+  } finally { f.close(); }
+});
+
+test('child changes and blocker transitions publish the affected parents and dependents, not unrelated Tasks', async () => {
+  const f = fixture();
+  try {
+    const parent = f.seedAssigned({ assignee: 'user' });
+    const child = (await f.write('task_create', { title: 'Child', description: 'Child agreement' })).body.result;
+    assert.deepEqual(new Set(f.events.map(event => event.task_id)), new Set([parent.task_id, child.task_id]));
+    const dependent = (await f.write('task_create', {
+      title: 'Dependent', description: 'Wait for child', blocked_by: [{ task_id: child.task_id }],
+    })).body.result;
+    f.events.length = 0;
+    const before = (await f.read(dependent.task_id)).body.result.data_version;
+    const cancelled = await f.write('task_cancel', {
+      task_id: child.task_id, write_context: child.write_context, reason: 'Explicit cancellation',
+    });
+    assert.equal(cancelled.body.error, null);
+    assert.deepEqual(new Set(f.events.map(event => event.task_id)), new Set([parent.task_id, child.task_id, dependent.task_id]));
+    assert.equal(f.events.length, 3, 'One final change event per affected Task');
+    for (const event of f.events) {
+      assert.equal((await f.read(event.task_id)).body.result.data_version, event.data_version);
+    }
+    assert.notEqual((await f.read(dependent.task_id)).body.result.data_version, before);
+  } finally { f.close(); }
+});
+
+test('activity-only updates change read versions without a new definition and reads emit nothing', async () => {
+  const f = fixture();
+  try {
+    const task = f.seedAssigned();
+    const fields = { task_id: task.task_id, revision: 1, write_context: task.write_context };
+    await f.write('task_ack', fields);
+    f.events.length = 0;
+    const before = (await f.read(task.task_id)).body.result;
+    await f.write('task_report', { ...fields, activity: { text: 'Another durable report' } });
+    assert.equal(f.events.length, 1);
+    const after = (await f.read(task.task_id)).body.result;
+    assert.equal(after.revision, before.revision);
+    assert.equal(after.write_context, before.write_context);
+    assert.notEqual(after.data_version, before.data_version);
+    assert.equal(after.activity_count, before.activity_count + 1);
+    assert.equal(f.events[0].data_version, after.data_version);
+    await f.read(task.task_id, 'overview');
+    await f.read(task.task_id, 'activity');
+    assert.equal(f.events.length, 1);
+  } finally { f.close(); }
+});
+
+test('event publication failure preserves saved effects and can retry the same version without replaying mutations', async () => {
+  const f = fixture();
+  try {
+    const input = { request_id: 'publication-failure', title: 'Saved', description: 'Synthetic' };
+    let fail = true;
+    f.context.publish = event => {
+      if (fail) throw new Error('Synthetic event transport failure');
+      f.events.push(event);
+    };
+    f.restart();
+    const created = await f.write('task_create', input);
+    assert.equal(created.body.error, null);
+    assert.equal(f.errors.length, 1);
+    const id = created.body.result.task_id;
+    const version = (await f.read(id)).body.result.data_version;
+    assert.equal(f.events.length, 0);
+    const db = new DatabaseSync(join(f.root, 'task-board.sqlite'), { readOnly: true });
+    try {
+      assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE name LIKE 'task_read_%'").get().count, 0);
+    } finally { db.close(); }
+    fail = false;
+    const replay = await f.write('task_create', input);
+    assert.deepEqual(replay.body.result, created.body.result);
+    assert.equal((await f.list()).body.result.items.length, 1);
+    assert.deepEqual(f.events, [{ type: 'task/changed', task_id: id, data_version: version }]);
+    assert.match(version, /^[a-f0-9]{64}$/);
   } finally { f.close(); }
 });
 

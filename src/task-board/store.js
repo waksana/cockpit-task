@@ -7,6 +7,7 @@ import { AutomationStore } from './automation-store.js';
 import { groupAlive } from './automation-runner.js';
 import { validateLifecyclePlan } from './lifecycle-migration.js';
 import { migrateOperationScopes, operationActor } from './operation-scopes.js';
+import { ReadVersions } from './read-versions.js';
 
 export { TaskError } from './contracts.js';
 export { inspectLifecycleMigration } from './lifecycle-migration.js';
@@ -211,6 +212,7 @@ export class TaskStore {
       if (version < 11) migrateOperationScopes(this.db);
       this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}; COMMIT;`);
       this.automation = new AutomationStore(this, { platform });
+      this.readVersions = new ReadVersions(this.db);
     } catch (error) {
       this.db.close();
       throw error;
@@ -1223,14 +1225,38 @@ export class TaskStore {
     return this.summary(row);
   }
   overview(row, includeCancellation = true) {
-    const activity = this.db.prepare('SELECT id,revision,assignee,author,text,at FROM activities WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
-    const outcome = this.db.prepare('SELECT id,revision,at FROM outcomes WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
+    const outcome = this.db.prepare('SELECT id,revision,at,summary,run_id FROM outcomes WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
     return {
       ...this.summary(row),
-      activity: activity ? { ...activity, source: 'reported', text: activity.text.slice(0, LIMITS.excerpt), truncated: activity.text.length > LIMITS.excerpt } : null,
-      outcome: outcome ? { ...outcome, available: true, current: outcome.revision === row.revision } : { available: false },
+      data_version: this.readVersions.token(row.id),
+      activity_count: this.activityCount(row.id),
+      activity: this.latestActivity(row),
+      outcome: outcome ? {
+        id: outcome.id, revision: outcome.revision, at: outcome.at, available: true,
+        current: outcome.revision === row.revision, source: outcome.run_id ? 'automation' : 'reported',
+        summary: outcome.summary.slice(0, LIMITS.excerpt), truncated: outcome.summary.length > LIMITS.excerpt,
+      } : { available: false },
       retro: this.latestRetro(row),
       ...(includeCancellation && row.cancellation ? { cancellation: JSON.parse(row.cancellation) } : {}),
+    };
+  }
+  activityCount(taskId) {
+    return this.db.prepare('SELECT COUNT(*) AS count FROM activities WHERE task_id=?').get(taskId).count;
+  }
+  latestActivity(row) {
+    const activity = this.db.prepare('SELECT id,revision,assignee,author,text,at FROM activities WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
+    return activity ? {
+      ...activity, source: 'reported', current: activity.revision === row.revision,
+      text: activity.text.slice(0, LIMITS.excerpt), truncated: activity.text.length > LIMITS.excerpt,
+    } : null;
+  }
+  latestOutcome(row) {
+    const entry = this.db.prepare('SELECT id,task_id,revision,assignee,author,summary,refs,at,run_id FROM outcomes WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
+    if (!entry) return null;
+    const { refs, ...fields } = entry;
+    return {
+      ...fields, references: JSON.parse(refs), current: entry.revision === row.revision,
+      source: entry.run_id ? 'automation' : 'reported',
     };
   }
   retro(row, outcome, includeText = true) {
@@ -1291,18 +1317,10 @@ export class TaskStore {
     const result = this.identity(row);
     if (include.has('activity')) {
       const entry = this.db.prepare('SELECT id,task_id,revision,assignee,author,text,at FROM activities WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
+      result.activity_count = this.activityCount(row.id);
       result.activity = entry ? { ...entry, current: entry.revision === row.revision, source: 'reported' } : null;
     }
-    if (include.has('outcome')) {
-      const entry = this.db.prepare('SELECT id,task_id,revision,assignee,author,summary,refs,at,run_id FROM outcomes WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
-      if (entry) {
-        const { refs, ...fields } = entry;
-        result.outcome = {
-          ...fields, references: JSON.parse(refs), current: entry.revision === row.revision,
-          source: entry.run_id ? 'automation' : 'reported',
-        };
-      } else result.outcome = null;
-    }
+    if (include.has('outcome')) result.outcome = this.latestOutcome(row);
     if (include.has('retro')) result.retro = this.latestRetro(row, true);
     if (include.has('definition')) {
       const entry = this.db.prepare('SELECT revision,author,at FROM definitions WHERE task_id=? AND revision=?').get(row.id, row.revision);
@@ -1385,6 +1403,14 @@ export class TaskStore {
         return withRole(item);
       });
     }
+    if (input.view === 'overview' || input.view === 'execution') return this.transaction(() => {
+      const row = this.row(input.task_id);
+      return withRole(input.view === 'overview' ? this.overview(row) : {
+        ...this.task(row.id), data_version: this.readVersions.token(row.id),
+        activity_count: this.activityCount(row.id), activity: this.latestActivity(row), outcome: this.latestOutcome(row),
+        ...(row.cancellation ? { cancellation: JSON.parse(row.cancellation) } : {}),
+      });
+    }, { readOnly: true });
     const row = this.row(input.task_id);
     if (input.view === 'automation_log') return this.automation.log(input);
     if (['subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices'].includes(input.view)) {
@@ -1394,8 +1420,7 @@ export class TaskStore {
         .all(row.id, this.cursor(input, scope), limit + 1);
       return this.page(rows, limit, scope, entry => ({ subscriptions: this.subscription, dependency_notices: this.notice, child_notices: this.childNotice, assignee_notices: this.assigneeNotice })[input.view].call(this, entry), { task_id: row.id });
     }
-    if (input.view === 'overview') return withRole(this.overview(row));
-    if (input.view === 'execution' || input.view === 'definition') return withRole(this.task(row.id));
+    if (input.view === 'definition') return withRole(this.task(row.id));
     if (input.view === 'changelog' && input.revision !== undefined) {
       const entry = this.db.prepare('SELECT revision,description,reason,author,at FROM definitions WHERE task_id=? AND revision=?').get(row.id, input.revision);
       if (!entry) fail('REVISION_NOT_FOUND', 'Definition revision does not exist', 404);

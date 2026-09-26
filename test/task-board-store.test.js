@@ -78,7 +78,9 @@ test('offline data-root relocation preserves Task IDs, contexts, receipts and se
   store = null;
   renameSync(source, destination);
   store = new TaskStore(destination);
-  assert.deepEqual(store.read({ view: 'execution', task_id: created.task_id }), before);
+  const after = store.read({ view: 'execution', task_id: created.task_id });
+  assert.notEqual(after.data_version, before.data_version, 'A new store has a new read-version epoch');
+  assert.deepEqual({ ...after, data_version: before.data_version }, before);
   assert.deepEqual(store.db.prepare('SELECT * FROM operations ORDER BY request_id').all(), receipts);
   assert.deepEqual(store.executeLocal('task_create', createInput), created);
   const acknowledged = store.executeLocal('task_ack', {
@@ -160,7 +162,8 @@ test('selected overview returns only requested full latest records, distinguishi
   assert.equal(legacy.activity.text.length, LIMITS.excerpt);
   assert.equal(legacy.activity.truncated, true);
   assert.equal(legacy.outcome.available, true);
-  assert.equal('summary' in legacy.outcome, false);
+  assert.equal(legacy.outcome.summary, 'Earlier outcome');
+  assert.equal(legacy.outcome.truncated, false);
   assert.deepEqual(legacy.retro, { status: 'not_recorded' });
   f.report(blocked, { status: 'done', outcome: { summary: 'Delivered', references: [{ label: 'PR', target: 'https://example.invalid/pr/1' }] }, retro: null });
   const done = read(['outcome', 'retro']);
@@ -537,14 +540,94 @@ test('role-focused bounded views never attach full definitions, history or outco
   assert.equal(overview.activity.truncated, true);
   assert.equal(overview.outcome.available, true);
   for (const key of ['description', 'references', 'metadata']) assert.equal(key in overview, false);
-  assert.equal('summary' in overview.outcome, false);
+  assert.equal(overview.outcome.summary, 'o'.repeat(LIMITS.excerpt));
+  assert.equal(overview.outcome.truncated, true);
+  assert.equal(overview.outcome.source, 'reported');
   const execution = f.store.read({ view: 'execution', task_id: task.task_id });
   assert.equal(execution.description.length, 24000);
   assert.equal(execution.metadata.environment, 'synthetic');
-  assert.equal('activity' in execution, false);
+  assert.deepEqual(execution.activity, overview.activity);
+  assert.equal(execution.activity.text.length, LIMITS.excerpt);
+  assert.equal(execution.activity.truncated, true);
+  assert.equal(execution.activity.current, true);
+  assert.equal(execution.outcome.summary.length, 8000);
+  assert.equal(execution.outcome.current, true);
   const changes = f.store.read({ view: 'changelog', task_id: task.task_id });
   assert.equal('description' in changes.items[0], false);
   assert.equal(changes.items[0].description_available, true);
+});
+
+test('activity totals count all durable reports, not page length or other records, and execution preserves historical outcomes', t => {
+  const f = fixture(t), created = f.create();
+  const read = view => f.store.read({ view, task_id: created.task_id });
+  assert.equal(read('overview').activity_count, 0);
+  assert.equal(read('execution').activity_count, 0);
+  assert.equal(read('execution').activity, null);
+  assert.equal(read('execution').outcome, null);
+  const assigned = f.ack(f.bind(created));
+  for (let n = 0; n < 8; n++) f.report(assigned, { activity: { text: `Report ${n}` } });
+  const input = f.input(assigned, { actor: 'assignee', activity: { text: 'Saved exactly once' } });
+  f.store.executeLocal('task_report', input);
+  f.store.executeLocal('task_report', input);
+  const completed = f.report(assigned, { status: 'done', outcome: { summary: 'Delivered', references: [] }, retro: null });
+  assert.equal(read('activity').items.length, 5);
+  for (const view of ['overview', 'execution']) assert.equal(read(view).activity_count, 9);
+  assert.equal(f.store.read({ view: 'list', status: 'all' }).items[0].activity_count, 9);
+  const before = read('execution').outcome;
+  assert.equal(before.current, true);
+  f.store.executeLocal('task_reopen', f.input(completed, {
+    description: 'A new agreement', reason: 'Explicit rework',
+  }));
+  const reopened = read('execution');
+  assert.equal(reopened.activity_count, 9);
+  assert.equal(reopened.activity.text, 'Saved exactly once');
+  assert.equal(reopened.activity.current, false);
+  assert.deepEqual(reopened.outcome, { ...before, current: false });
+  assert.equal(read('overview').outcome.current, false);
+  assert.equal(read('outcomes').items[0].current, false);
+  f.restart();
+  assert.equal(read('execution').activity_count, 9);
+  assert.deepEqual(read('execution').outcome, reopened.outcome);
+});
+
+for (const view of ['overview', 'execution']) test(`${view} reads outcome and activity count from the same Task snapshot`, t => {
+  const f = fixture(t), task = f.ack(f.bind(f.create()));
+  f.report(task, { activity: { text: 'Original activity' }, outcome: { summary: 'Original outcome' } });
+  const other = new TaskStore(f.directory);
+  const prepare = f.store.db.prepare.bind(f.store.db);
+  let changed = false;
+  f.store.db.prepare = sql => {
+    const statement = prepare(sql);
+    if (!changed && sql.includes('FROM tasks WHERE id=?')) {
+      const get = statement.get.bind(statement);
+      statement.get = (...args) => {
+        const row = get(...args);
+        changed = true;
+        const revised = other.executeLocal('task_edit', f.input(task, {
+          actor: 'assignee', reason: 'New agreement', description: 'Revision two',
+        }));
+        other.executeLocal('task_report', f.input(revised, {
+          actor: 'assignee', activity: { text: 'New activity' }, outcome: { summary: 'New outcome' },
+        }));
+        return row;
+      };
+    }
+    return statement;
+  };
+  try {
+    const read = f.store.read({ view, task_id: task.task_id });
+    assert.equal(changed, true);
+    assert.equal(read.revision, 1);
+    assert.equal(read.activity_count, 1);
+    assert.equal(read.activity.text, 'Original activity');
+    assert.equal(read.activity.current, true);
+    assert.equal(read.outcome.summary, 'Original outcome');
+    assert.equal(read.outcome.current, true);
+    assert.equal(f.store.read({ view, task_id: task.task_id }).activity_count, 2);
+  } finally {
+    f.store.db.prepare = prepare;
+    other.close();
+  }
 });
 
 test('opaque keyset pagination is stable under insertions and rejects task/filter/view mismatch', t => {
@@ -739,8 +822,12 @@ test('completion transaction rolls back outcome, retro, activity and subscriptio
   f.store.executeLocal('task_subscribe', subscriptionInput);
   f.store.db.exec(`CREATE TRIGGER fail_completion BEFORE UPDATE OF status ON tasks
     WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT, 'synthetic completion failure'); END`);
+  for (const pending of f.store.readVersions.pending()) f.store.readVersions.acknowledge(pending);
+  const version = f.store.readVersions.token(task.task_id);
   const request = f.input(task, { actor: 'assignee', status: 'done', outcome: { summary: 'Delivered' }, retro: 'A useful finding', activity: { text: 'Final work' } });
   assert.throws(() => f.store.executeLocal('task_report', request), /synthetic completion failure/);
+  assert.equal(f.store.readVersions.token(task.task_id), version);
+  assert.deepEqual(f.store.readVersions.pending(), []);
   assert.equal(f.store.task(task.task_id).status, 'todo');
   assert.deepEqual(f.store.task(task.task_id).retro, { status: 'not_recorded' });
   assert.equal(f.store.read({ view: 'outcomes', task_id: task.task_id }).items.length, 0);
@@ -749,6 +836,7 @@ test('completion transaction rolls back outcome, retro, activity and subscriptio
   rejects(() => f.store.operation(request), 'OPERATION_NOT_FOUND');
   f.store.db.exec('DROP TRIGGER fail_completion');
   assert.equal(f.store.executeLocal('task_report', request).retro.status, 'saved');
+  assert.notEqual(f.store.readVersions.token(task.task_id), version);
   assert.equal(f.store.read({ view: 'subscriptions', task_id: task.task_id }).items[0].state, 'triggered');
 });
 

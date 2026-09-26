@@ -327,7 +327,8 @@ test('official MCP discovers, registers and executes an automation Task without 
     assert.equal(selected.outcome.current, true);
     assert.deepEqual(selected.retro, { status: 'not_applicable' });
     assert.equal(selected.activity, null);
-    for (const query of queries) assert.doesNotMatch(query, /\*|\blog\b/);
+    assert.equal(selected.activity_count, 0);
+    for (const query of queries) assert.doesNotMatch(query.replace(/\bCOUNT\(\*\)/gi, 'COUNT(1)'), /\*|\blog\b/);
     assert.deepEqual(errors, []);
   } finally {
     await f.close();

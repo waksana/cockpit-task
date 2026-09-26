@@ -349,6 +349,16 @@ The frontend renders an inline reference card and current-data detail dialog,
 not a separate dashboard. Message reason is fixed; title, state, definition and
 history are fetched from Task. Native session observations are labelled separately,
 read on demand and never imply business progress or capability readiness.
+Cards use three compact rows with a status icon, summary, single-line session name,
+activity total, definition/ACK versions and an inline refresh button. Activity totals
+count Task reports, not chat messages or automation output; unavailable counts show
+a dash. Background refresh keeps the content and spins only the refresh icon.
+Opening the dialog exposes Overview, Activity, Relations and History, with complete
+session names, technical fields and historical records disclosed as needed.
+Repeated references and remounts share data and pending requests. Ordinary chat
+updates do not reread older Tasks, and closing detail does not refresh the card.
+Only explicit refresh, relevant Task changes and reconnect reconciliation reread
+cached resources; failures retain data labelled as unconfirmed.
 
 Assigned work receives one `[Task updated]` at ready-to-blocked or blocked-to-ready
 boundaries, for ordinary agreement changes while ready, reopen, or blocker cancellation.
