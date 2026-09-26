@@ -41,7 +41,7 @@ Task 的创建工具为新 session 选择它；指派不补装任何能力，也
 | `kind` | `agent`（默认）或 `automation`；创建后不转换 |
 | `automation` | automation 的运行事实；definition/execution 另含不可变脚本与参数快照 |
 | `title` | 可识别的短名称，不代替完整说明 |
-| `description` | 完整当前背景、目标、约束和完成条件；修改传完整正文，不是差量补丁 |
+| `description` | 本项工作特有且影响交付的当前目标、决定、边界和完成要求；外部资料引用，修改仍传完整正文而非差量补丁 |
 | `orchestrator` | 创建 Task 的调用 session，负责编排、跟进和集成；依赖通知的固定接收者；状态订阅发送给 subscriber |
 | `assignee` | Agent 的固定执行 session，未指派或 automation 为 `null`；无共享执行归属 |
 | `status` | 工作状态，与 native running/idle/unloaded 无关 |
@@ -49,8 +49,8 @@ Task 的创建工具为新 session 选择它；指派不补装任何能力，也
 | `changelog` | 每版 description 的正文、作者、服务时间与原因，包括初始定义 |
 | `acknowledged_revision` | 固定 assignee 已记录确认的版本，初始为 `null` |
 | ACK 历史 | 逐版保留 `confirmed_for`（固定 assignee）与 `author`（自报操作者） |
-| `activity` | 执行者报告的事实；每条有 revision、assignee、author、时间及正文 |
-| `outcome` | 成果 summary 与可选 references，保留所属 revision 与执行归属 |
+| `activity` | 执行者报告的重要变化；每条有 revision、assignee、author、时间及正文 |
+| `outcome` | 实际交付、遗留和证据入口；summary 与可选 references 保留所属 revision 与执行归属 |
 | `retro` | Agent 完成时显式提交的独立复盘文本或 null，与同次 outcome 关联，不代替成果或阻塞 |
 | `retro_handlings` | schema v8 对某条有发现 retro 的处理记录（fixed/followup/watching/dismissed），按 outcome_id 追加保留历史；任意调用者可记录 |
 | `references` | `{label,target}` 数组；资料、成果或独立 Task 引用，不形成依赖 |

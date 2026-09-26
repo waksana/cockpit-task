@@ -130,21 +130,23 @@ test('each current Skill has an independent relative reference closure', () => {
 test('Task tree Skill states the core idea and rules R1-R6 in order', () => {
   const skill = read(treeDirectory, 'SKILL.md');
   const normalized = prose(skill);
-  assert.match(normalized, /Task is the only channel between nodes/);
+  assert.match(normalized, /Task is the only channel between formal Task nodes/);
   assert.match(normalized, /Every session is a node/);
   assert.match(normalized, /service sends every notice/);
   assert.match(normalized, /Decisions come from the user/);
   regexInOrder(skill, [
-    /\*\*R1 Communicate only through Task\.\*\*/,
+    /\*\*R1 Coordinate Task nodes through Task\.\*\*/,
     /\*\*R2 Do your Task by the current agreement\.\*\*/,
-    /\*\*R3 Do it yourself, or split it\.\*\*/,
+    /\*\*R3 Choose how to do the work\.\*\*/,
     /\*\*R4 Report work outside your Task upward\.\*\*/,
     /\*\*R5 Authorization comes from the user\.\*\*/,
     /\*\*R6 Act on Task facts; when unsure, read first\.\*\*/,
   ]);
-  assertSectionContains(skill, 'R1 Communicate only through Task', [
-    /Never send anything to another agent, not even a Task link/,
-    /description is the complete current agreement/,
+  assertSectionContains(skill, 'R1 Coordinate Task nodes through Task', [
+    /Do not message another Task node, even with a Task link or through a helper/,
+    /description to work-specific goals, decisions, boundaries and completion requirements/,
+    /Reference external material instead of copying common knowledge, existing rules, procedures, unnecessary implementation detail or history/,
+    /important changes in activity.*actual delivery, remaining work and evidence links in the outcome/,
     /Do not ask a question someone is already asking/,
     /Keep secrets out of Tasks/,
   ]);
@@ -153,25 +155,28 @@ test('Task tree Skill states the core idea and rules R1-R6 in order', () => {
     /read the full current Task.*ACK its exact revision/,
     /github-coding.*changing repository files/,
     /revise your own Task/,
-    /agreement guide when you work as well as what you do/,
-    /instruction to wait is not a blocker to escalate/,
-    /notices and ready prerequisites do not lift it/,
-    /report status truthfully/,
+    /notice or ready prerequisite is not permission to resume work the user paused/,
+    /Report status truthfully/,
     /delivery state is not live session or tool activity/,
     /Mark done with a new outcome.*retro.*null/,
   ]);
-  assertSectionContains(skill, 'R3 Do it yourself, or split it', [
-    /independently deliverable result, not by stage or trade/,
-    /carries every requirement.*deeper levels/,
+  assertSectionContains(skill, 'R3 Choose how to do the work', [
+    /Work directly when the relevant context is already in hand/,
+    /internal subagents for parallel work, context separation or independent judgment/,
+    /integrate their results yourself/,
+    /Independent review need not create a Task or session/,
+    /independent owner to keep it moving, deliver separately or coordinate dependencies/,
+    /work-specific requirements and references.*do not take over assigned work/,
+    /not a fixed priority or per-use approval gate/,
+    /suitable existing or new session.*neither new sessions nor fewer Tasks are goals/,
     /check all unfinished Tasks.*conflicting work/,
     /blocked_by/,
     /revise, reorder or cancel obsolete Subtasks/,
     /Verify each result/,
-    /fold your Subtasks' retros into your own retro/,
-    /root.*do not follow progress/,
+    /fold Subtask retros into your own before completing your Task/,
   ]);
   assertSectionContains(skill, 'R4 Report work outside your Task upward', [/\{condition\}.*state what is missing/, /put it in your outcome/, /reports it upward/]);
-  assertSectionContains(skill, 'R5 Authorization comes from the user', [/Discussion, research and records do not authorize/, /asking for a result does not authorize doing it yourself/, /explicit consent/]);
+  assertSectionContains(skill, 'R5 Authorization comes from the user', [/Discussion, research and records do not authorize/, /Choosing a helper or Task does not widen authorization or transfer an existing assignment/, /explicit consent/]);
   assertSectionContains(skill, 'R6 Act on Task facts; when unsure, read first', [/read the Task or operation/, /safe recovery/, /Read only what the current decision needs/, /Never poll/, /Subscribe only when a future status unlocks/]);
 });
 
@@ -244,7 +249,7 @@ test('basic situations F1-F7 and service guarantees preserve the core contract',
   ]) assert.match(guarantees, requirement);
 });
 
-test('guidance forbids direct agent messages and deleted references stay removed from Skills and roles', () => {
+test('guidance forbids manual Task notices and deleted references stay removed from Skills and roles', () => {
   for (const file of [join(root, treeDirectory, 'SKILL.md'), join(root, treeDirectory, 'references/automation.md'), join(root, 'roles/task-node.md')]) {
     assertNoDirectAgentMessaging(readFileSync(file, 'utf8'), file);
   }
@@ -264,7 +269,7 @@ test('role prompt and compact Skill texts respect character quotas and point to 
   const usages = readMarkdownQuotas(root);
   assert.ok(usages.every(usage => !usage.exceeded), formatQuotaReport(usages));
   assert.match(role, /Load `cockpit-task-tree` when first needed/);
-  assert.match(role, /Task is the only channel between nodes/);
+  assert.match(role, /Task is the only channel between formal Task nodes/);
   assert.match(role, /ACK its exact revision/);
 });
 
@@ -298,10 +303,13 @@ test('github-coding guidance still composes with Task coordination without widen
   const role = prose(read('roles/task-node.md'));
   const metadata = skillMetadata(read(codingDirectory, 'SKILL.md'));
   assert.match(metadata.description, /authorized work requires changing version-controlled repository files/);
-  assert.match(metadata.description, /orchestrator states requirements and any existing Issue/);
-  assert.match(metadata.description, /assignee reuses or creates the Issue, creates its own branch and worktree/);
+  assert.match(metadata.description, /implementing node reuses or creates the Issue, creates its own branch and worktree/);
+  assert.match(metadata.description, /Choose collaboration through cockpit-task-tree/);
   assert.match(coding, /This is a work Skill, not a Task role or authority to change scope/);
   assert.match(coding, /Task guidance still governs assignment, current-definition reads\/ACK, reporting and communication/);
+  assert.match(coding, /implementing node is the assignee for delegated work, otherwise the current node/);
+  assert.match(coding, /Independent review may use an internal helper; it does not require a separate Task or session/);
+  assert.match(coding, /reference project instructions, methods and prior evidence instead of copying them/);
   assert.match(coding, /Questions and idea exploration do not require an Issue, Task or worktree/);
   assert.match(coding, /investigation-only, patch-only or PR-only authorization stops at that boundary/);
   assert.match(coding, /The orchestrator does not prepare or clean up branches or worktrees/);
@@ -315,6 +323,31 @@ test('github-coding guidance still composes with Task coordination without widen
   assert.match(coding, /If your worktree was already removed after merge, create a fresh branch and worktree from freshly fetched mainline/);
   assert.match(role, /Load `cockpit-task-tree` when first needed/);
   assert.doesNotMatch(coding, /Owner|Executor|orchestrator prepares|orchestrator safely cleans/);
+});
+
+test('role and active documentation preserve helper responsibility without forcing delegation or copied context', () => {
+  const role = prose(read('roles/task-node.md'));
+  assert.match(role, /Choose direct work, internal subagents or Task delegation/);
+  assert.match(role, /integrate helper and Subtask results.*helper does not take over responsibility/);
+  assert.match(role, /Keep Task records work-specific/);
+  assert.match(role, /external material referenced rather than copied/);
+  assert.match(role, /without repeating a question another node is asking/);
+  const skill = prose(read(treeDirectory, 'SKILL.md'));
+  assert.match(skill, /Internal subagents are helpers whose results you integrate/);
+  const rootCase = skill.split('**F1 The root receives a request.**')[1].split('**F2')[0];
+  assert.match(rootCase, /choose how to do it.*For Task delegation/);
+  assert.match(rootCase, /capable existing or new node.*assignee owns delivery/);
+  for (const file of [
+    'README.md', 'docs/task-tools-skills.md', 'docs/task-design.md', 'docs/task-board.md',
+    'docs/task-schema.md', 'docs/task-mcp-contract.md',
+  ]) {
+    const source = prose(read(file));
+    assert.doesNotMatch(source, /默认委派|delegates implementation and state-changing delivery by default|default delegation responsibility/, file);
+    assert.doesNotMatch(source, /agent 不给其他 agent 发消息|Never send anything to another agent/, file);
+    assert.match(source, /work-specific|本项工作.*(?:特有|目标)/, file);
+  }
+  const cases = read('docs/task-lifecycle-testing.md').split('## Tree-node cases T1-T22')[1].split('### Recorded')[0];
+  assert.doesNotMatch(cases, /copied verbatim|assigns it to a new node/);
 });
 
 test('worktree initialization stays project-specific rather than adding package-manager rules to the Skill', () => {

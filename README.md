@@ -6,8 +6,10 @@ Task 是 Cockpit 模块：用共同的持久化 Task 记录协作，通过唯一
 默认不登记订阅；仅当未来状态会使 编排者需要作决定、安排后续独立工作等必要行动时，
 由编排者自行判断并显式登记一次性订阅，不为追踪进度或确认完成而订阅。
 
-每个 session 都是 Task 树的节点：有被指派的 Task 就负责完成它，可亲自完成或在授权范围内
-编排Subtask；没有 Task 的根节点委派交付。`orchestrator` / `assignee` 由每条 Task 的事实决定，读取结果以
+每个 session 都是节点：按上下文和责任需要选择自己做、内部 subagent 或正式 Task；
+已有指派时，assignee 仍负责交付并整合 helper/Subtask 结果。内部 helper 不成为独立 Task 负责人，
+正式 Task 节点之间只通过 Task 记录协作。选择不设固定优先级，不偏向新建 session 或更少 Task。
+`orchestrator` / `assignee` 由每条 Task 的事实决定，读取结果以
 `actor_role` 标明，卡片使用当前标签；历史 “As Owner:” / “As Executor:” 前缀仅作兼容识别。它们不是 session
 的业务身份，也不是可选角色。旧 `owner` / `executor` 角色已删除且无别名。
 服务拒绝自我指派、沿祖先链的回环指派，以及执行中节点与他人互相代建 Task。
@@ -30,7 +32,7 @@ event 只说明这条消息的原因，不是 Task 状态；卡片仍读取当�
 进入目标状态才触发，不重复订阅、不轮询、不打断编排者当前工作。操作者自己的订阅只消费、不自我提醒；
 同一收件人的取消订阅由即时取消指令覆盖，抑制原因持久保存。阻塞期间普通要求更新和部分解除静默。
 
-“A 完成后做 B”时，编排者立即以 `blocked_by: [{task_id: A}]` 创建未指派的 B 并写完整要求，
+已确定用 Task 协调“A 完成后做 B”时，编排者以 `blocked_by: [{task_id: A}]` 登记 B 的本项交付要求，
 不必为每个前置 Task 订阅。所有 blocker done 前 `task_assign` / `task_automation_start`
 返回 `TASK_NOT_READY`；未指派依赖方就绪时发送 `[Subtask ready](task:<uuid>?event=ready)` 给其编排者，
 blocker 取消则发送 `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)`；已指派依赖方改由 assignee 收到 `[Task updated]`。
@@ -39,7 +41,9 @@ blocker 取消则发送 `[Subtask blocker cancelled](task:<uuid>?event=blocker_c
 active 关系决定 `ready`；解除会持久保存，blocker 后续 reopen 不会让旧关系复活。
 assignee 可新增 condition，但只有 orchestrator/Web user 可解除或原子替换它。
 
-默认 Agent Task 由一个 assignee 完整负责，可在内部使用 subagents。要求直接修改 Task，
+Task 只记录本项工作特有且影响交付的目标、决定、边界和完成要求；外部资料引用即可，
+不复制通用规则、流程或历史。activity 写重要变化，outcome 写实际交付、遗留和证据入口。
+Agent Task 由一个 assignee 完整负责，可在内部使用 subagents。要求直接修改 Task，
 执行者在同步点读取并 ACK；执行动态和结果带有实际确认的版本。可在授权范围内
 编排Subtask（受深度上限限制），没有改派或任意终态回退。用户明确授权返工时，orchestrator 或符合条件的原执行者可
 `task_reopen` 同一 done Agent Task；不重新派单、不更换责任人。原执行者调用会 auto-ACK 且静默，orchestrator/Web-user 调用会通知 assignee 读取并 ACK。
@@ -72,13 +76,14 @@ Linux 进程组终止屏障只由 `task_automation_reconcile` 在内核确认组
 [编排者脚本参考](skills/cockpit-task-tree/cockpit-task-tree/references/automation.md)。
 
 编码流程按是否需要修改并提交仓库文件判断，不按 GitHub 或部署等关键词触发。
-纯部署使用现有已验证产物时用 Task，不由本 Skill 强制 Issue/PR/branch/worktree；
-项目既有政策、不可变安装目录及独立部署授权仍须遵守，编排者默认委派职责不变。
-混合交付保持一个 Task，Issue/PR 只覆盖必要仓库变更，不另建部署总 Issue。
-编排者说明要求并引用现有 Issue，以目标仓库共享主 checkout 为 cwd 创建执行者，
-不准备或清理 branch/worktree。执行者视该 checkout 为只读，自行复用或创建 Issue、
-从最新主线建立专用 branch/worktree 并记录到 Task，负责开发、验证、独立审阅及授权内的
+纯部署使用现有已验证产物时，不由编码 Skill 强制 Issue/PR/branch/worktree；
+项目既有政策、不可变安装目录及独立部署授权仍须遵守，协作方式按工作需要判断。
+委派混合交付时保持一个 Task，Issue/PR 只覆盖必要仓库变更，不另建部署总 Issue。
+使用 Task 委派时，编排者说明本项要求并引用现有 Issue，选择符合条件的既有或新执行者，
+不接管其交付或准备、清理 branch/worktree。实际实施节点视共享 checkout 为只读，自行复用或创建 Issue、
+从最新主线建立专用 branch/worktree；有 Task 时记录关联，负责开发、验证、独立审阅及授权内的
 PR 合并，合并后确认无人使用再清理自己的 worktree/分支并记录结果；不确定时保留并说明。
+独立审阅可由内部 helper 完成，不因此强制新增 Task/session。
 执行中发现超出范围的变更先问用户，获授权后同样自建环境。
 仅未来状态解锁必要且已授权的行动时订阅，不恢复默认通知或轮询。
 仅讨论、仅 PR 和非 GitHub 工作保留各自边界；合并不等于部署。

@@ -16,8 +16,9 @@ Task 提供一个树节点角色 `node` 与一个合并 Skill
 | --- | --- | --- |
 | Node | [task-node.md](../roles/task-node.md) | 全部十七个：`task_read`、`task_create`、`task_session_create`、`task_session_prepare`、`task_assign`、`task_edit`、`task_cancel`、`task_subscribe`、`task_unsubscribe`、`task_script_read`、`task_script_register`、`task_automation_start`、`task_automation_reconcile`、`task_ack`、`task_report`、`task_reopen`、`task_retro_handle` |
 
-每个 session 都是 Task 树中的节点：有被指派的 Task 就负责完成它（亲自做或编排 Subtask），
-没有就作为根节点委派交付。orchestrator/assignee 是针对某个 Task 的事实（`orchestrator`/`assignee`
+每个 session 都是节点：按上下文和责任需要选择自己做、内部 subagent 或正式 Task；
+已有 Task 的 assignee 负责整合结果，启动 helper 不转移责任。
+orchestrator/assignee 是针对某个 Task 的事实（`orchestrator`/`assignee`
 字段与读取返回的 `actor_role`），不是 session 的角色；0.1.13 删除旧的 `owner`/`executor`
 角色且不提供别名。宿主冷启动到 0.1.13 前，操作者须备份并迁移每个 session 的
 `$COCKPIT_HOME/session-roles/<sessionId>.json`，把 `cockpit-task/owner` 和
@@ -35,7 +36,8 @@ Skill 结构为一个 [SKILL.md](../skills/cockpit-task-tree/cockpit-task-tree/S
 常驻 prompt 固定责任及加载入口；Skill 正文指导判断，随包 references 解释
 具体问题。外层目录是原生发现根目录，内层技能自包含，不依赖仓库 docs。
 `node` 的 `skillDirectories` 包含 `skills/cockpit-task-tree` 与 `skills/github-coding` 根。
-Task 正文按名字指向这个可发现工作 Skill，不假定 Subtask 的 assignee 继承 orchestrator 已读的上下文，也不在 role prompt 注入整套方法。
+需要特定工作 Skill 时引用其名字，不复制正文、不假定 Subtask 的 assignee 继承上下文，
+也不在 role prompt 注入整套方法。
 
 首次需要时加载 Skill，指令仍在上下文时复用。压缩/恢复后缺失、内容改变或
 具体规则不清楚时再读，不因每条消息或检查点重复加载。稳定指导可以复用，
@@ -46,26 +48,27 @@ Task 正文按名字指向这个可发现工作 Skill，不假定 Subtask 的 as
 是否适用按需要修改并提交的仓库文件判断；从 GitHub 使用现有已验证产物部署、
 运行配置或安全重启不由此流程强制 Issue/PR/branch/worktree，项目政策与不可变安装要求仍有效。
 运行配置不等于仓库内版本号、构建配置、源码或文档变更；后者才走仓库变更流程。
-混合交付保持一个 Task，Issue/PR 只覆盖必要仓库变更，不额外建部署总 Issue。
+委派混合交付时保持一个 Task，Issue/PR 只覆盖必要仓库变更，不额外建部署总 Issue。
 执行中发现超出约定范围的变更时，assignee 先直接问用户（范围由用户决定），
 获授权后更新当前 Task 并按同样方式建立该仓库的 Issue/worktree；不通过 assignee-to-orchestrator 聊天。
-部署等独立授权与此流程适用性分开，orchestrator 默认委派职责不变。
+部署等独立授权与此流程适用性、协作方式的选择分开。
 
-orchestrator 说明要求（改什么、涉及哪些仓库、交付边界），有现成 Issue 时引用，并创建描述完整的 Task；
-不准备也不清理 branch/worktree，也不亲自实施代码。orchestrator 创建 assignee session 时把 cwd
+使用 Task 委派时，orchestrator 说明本项要求并引用现有 Issue；
+不接管已指派的交付，也不准备或清理 assignee 的 branch/worktree。新建 assignee session 时把 cwd
 设为目标仓库的共享主 checkout（跨仓库时任选其一），以加载仓库指令和 Skill。
 
-该 checkout 对 assignee 只读。编码的第一步是复用或创建 Issue，从新 fetch 的主线建立专用
-branch 和独立 worktree，并在 Task 记录 Issue、branch 与路径；之后只在 worktree 操作。
+该 checkout 对实施节点只读。编码时复用或创建 Issue，从新 fetch 的主线建立专用
+branch 和独立 worktree；有 Task 时记录 Issue、branch 与路径，之后只在 worktree 操作。
 工具默认使用 cwd，编辑、构建、测试须明确指向 worktree 路径。多仓库各自如此。
 已有合适 Issue/环境在核实归属后继续使用，不能为“干净”丢弃、stash 或删除他人改动。
 
-assignee 完整负责实现、必要验证、独立只读 review、修复、
-关联 PR 和授权内正常合并；PR 创建后及时补 Task 链接，确认最新 head 的 CI，
+实施节点完整负责实现、必要验证、独立只读 review、修复、
+关联 PR 和授权内正常合并；PR 创建后及时补已有 Task 链接，确认最新 head 的 CI，
 不绕过仓库保护。Task 用现有 references/metadata/outcome.references 表达关联，
 不增加 GitHub 字段、MCP 或评论镜像。仅 PR、补丁、调查授权不擅自扩成合并。
+独立 review 可使用内部 helper；是否需要正式 Task 取决于独立责任，而非 review 这个阶段名。
 
-合并后由 assignee 自行清理：核实已按 PR 合入目标分支（含 squash/rebase），确认自己、
+合并后由实施节点自行清理：核实已按 PR 合入目标分支（含 squash/rebase），确认自己、
 subagent 及其他工作都不再使用且无未保存/需保留产物后，仅删除本次的 worktree 和本地/远端
 分支（仓库政策保留的除外），不删除任何 session 的 cwd。合并或占用不确定时保留并在
 outcome 记录原因。outcome 记录 PR、branch、path 及清理结果。orchestrator 无例行清理职责，
@@ -80,25 +83,22 @@ Task done 是约定结果，不等于 session 空闲。
 独立审阅并按授权正常合并。环境改作他用或有冲突使用者时明确解决阻塞，不接管。
 源码交付不扩为发布/安装/部署/重启/迁移，合并后 assignee 再次清理。
 
-## 2. orchestrator：澄清、委派、跟进
+## 2. 选择协作与正式 Task 委派
 
-orchestrator 可只读了解情况、回答问题和澄清目标。实施及改变外部状态的交付默认通过
-Task 交给独立 assignee，不亲自实施或用自身 subagent 绕过委派。
-要求达成结果不等于要求本人执行；明确的本人执行要求或实际 assignee 指派才是例外。
-仅持有 node 角色本身不是承接，无法委派应说明阻塞。
+上下文已在手、直接处理更合适时自己做；需要并行、分担上下文或独立判断时用内部
+subagent，由当前负责人整合；需要独立负责人持续推进、独立交付或依赖协调时派 Task。
+这是判断依据，不设固定顺序、数量目标或逐次审批，也不偏向新建或复用 session。
+内部 helper 与当前节点交换结果；正式 Task 节点之间只读写 Task，不直接或经 helper 传话。
+已有指派的责任和用户授权不因工具选择改变，同一用户决定不在多个会话重复询问。
 
-将一个完整成果放在一个 Task，独立成果才分别登记。创建或修订 description 时，
-完整保留本项工作的目标、范围、关键决定、授权边界、特殊约束和完成条件；
-完整约定不等于完整上下文。通用 Skill、仓库指令和环境资料按需引用，不重复展开，
-任务专属且影响正确执行的信息仍须明确，已有调查与当前要求分开。
-Task 是共同工作记录，不是原始证据仓库：详细证据用可访问、可定位的引用保留，
-但不能以“见 Issue”替代关键约定、把要求藏进 metadata 或假定继承上下文；
-支持结论或安全接续必需的精确数值仍应保留。不复制整段聊天，不强制工作表单。区分讨论、调查、登记
-和执行授权；尊重“只讨论”“暂不执行”，不对已授权工作重复索要开工口令。
+Task description 只写本项工作特有且影响交付的目标、决定、边界和完成要求。
+外部资料用可定位引用，不复制常识、已有规则、操作流程、无必要的实现细节或历史；
+影响交付的关键约定不能只藏在引用或 metadata 中。activity 写重要变化，outcome 写实际
+交付、遗留和证据入口。区分讨论、登记与执行授权，不对已授权工作重复索要开工口令。
 
-默认 Agent 流程：
+选择正式 Agent Task 后：
 
-1. 选择已授权工作环境及现有可发现的 Skill/MCP，`task_create` 登记完整要求；
+1. 选择已授权工作环境及现有可发现的 Skill/MCP，`task_create` 登记本项交付要求与引用；
    不从 Task 正文猜资源，backlog 登记不派单。
 2. 用 `task_session_create` 显式选择资源，或以 `task_session_prepare` 准备符合条件的
    既有 assignee。排除任何绑定未结束 Task 的 session，即使 native idle；
@@ -129,7 +129,7 @@ Task/session、不重新派单；可由 orchestrator 重开并通知 assignee，
 ### 轻量 automation 路径
 
 Agent 仍是默认；orchestrator 仅为可信、可重复的已知脚本选择服务执行，不把任意工作
-脚本化，也不亲自实施来绕过委派。按需读
+脚本化或绕过已有责任与授权。按需读
 [orchestrator 脚本参考](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md)：
 发现/不可变登记 → task_create 保存配置与类型化输入快照 → 可选必要订阅 → 显式 start。
 无 assignee、ACK、session 占用或自动订阅；可作为服务管理的 Subtask，单队列不是工作流引擎。
@@ -153,7 +153,7 @@ assignee 先读 execution 确认真实指派、完整 description、资料、版
 
 真实决策、缺少的重要条件及范围变更直接向自己 session 中的用户提出，
 不让 orchestrator 转述，不向 orchestrator 直接或经 subagent 发送问题、进展、阻塞或完成消息。
-澄清后的有效结论写回完整 description，并说明来源、原因和被替代决定。
+澄清后的当前有效结论写回 description，变更原因留在修订记录中，不把旧决定反复搬回正文。
 编辑定义遵循上述任务专属约定与证据取舍原则，不要将提案或引用误作授权，
 也不把要求藏进 metadata。
 
@@ -170,10 +170,8 @@ assignee 先读 execution 确认真实指派、完整 description、资料、版
 旧成果/复盘 current:false，旧 ACK/成果不能交付新版。完成仍须新 outcome/retro。
 已结束订阅不续订、不补发通知，不新增强制 activity 日志或轮次状态机。
 
-activity 先写本次有意义的变化、发现、决定、阻碍和必要剩余工作，说明解除阻碍
-需要什么，不重述任务、不固定间隔更新、不编造百分比或倾倒工具日志。
-outcome 先写交付结论、约定满足情况和剩余限制，再给必要依据；研究成果可详细，
-区分结论、论证和未验证点。引用不能删去支持结论或安全接续必需的精确数值。
+activity 只记重要变化，不重述任务、固定间隔更新或倾倒工具日志。
+outcome 写实际交付、遗留和证据入口，详细研究成果作为引用；影响交付判断的必要精确数值仍须保留。
 这些是内容取舍指导，不是必填模板、字数限制或模型行为保证。
 用户暂缓不报告 blocked 或虚构前置；in_progress 不要求持续运行。真实阻碍用具体
 `{condition}` 加入 active blocked_by，服务向 orchestrator 上行一次；由其确认解除或
@@ -210,7 +208,7 @@ activity 不自动改状态，outcome 不自动 done。完成最新已确认约�
 状态、命令或事件总线。卡片读取当前数据，消息原因保持不变。
 完整语法见[引用契约](task-implementation.md#read-boundaries-and-reference)。
 
-普通要求更新只改 Task；agent 不给其他 agent 发消息或补发卡片。服务按 ready 期间更新、
+正式 Task 节点间的要求更新只改 Task，不直接或经内部 helper 传话、补发卡片。服务按 ready 期间更新、
 ready/blocked 边界、reopen 或取消规则发送固定引用，仍 blocked 时普通更新/部分完成静默，
 不提醒操作者本人。assignee notices 用 `mode:"immediate"`，不复制 description、
 不整理或重放队列；未知效果不盲目补发。接受不等于 ACK，不解除用户暂缓约定。

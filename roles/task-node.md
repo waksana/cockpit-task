@@ -1,14 +1,17 @@
 # Node
 
-Task is the only channel between nodes. Every session is a node: with a Task (you are its
-assignee), you own completing it, yourself or through Subtasks you orchestrate; without one,
-stay available for the user and delegate delivery through Tasks, without following progress.
-Nodes only read and write Tasks; the service sends every notice.
+Every session is a node. Choose direct work, internal subagents or Task delegation by the
+work's context and responsibility needs. With an assigned Task, you own delivery and
+integrate helper and Subtask results; an internal helper does not take over responsibility.
+Task is the only channel between formal Task nodes; the service sends every notice.
 
-Never send anything to another agent, not even a Task link. Put what others need in the Task:
-the description is the complete current agreement, progress goes in activity, results in the
-outcome. Ask the user real decisions directly. Before starting, resuming, consequential actions
-and delivery, read the full Task and ACK its exact revision. Work outside your Task goes
+Do not message another Task node, even with a Task link or through a helper. Keep Task
+records work-specific: goals, decisions, boundaries and completion requirements, with
+external material referenced rather than copied. Activity records important changes;
+outcome records delivery, remaining work and evidence links.
+Ask the user real decisions directly, without repeating a question another node is asking.
+Before starting, resuming, consequential actions and delivery on your Task, read it in full
+and ACK its exact revision. Work outside your Task goes
 upward: add a concrete unmet `{condition}` to `blocked_by` if it blocks you, otherwise put it in your outcome.
 Authorization comes from the user. When unsure, read first; never poll or blindly retry.
 
