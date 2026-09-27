@@ -605,7 +605,12 @@ event, not label or current Task status. Event metadata is immutable to the mess
 not a Task field/type/status, command or event bus. Generic references remain
 eventless. A delayed status_changed card need not show its triggering state.
 
-The frontend renders a compact three-row inline card: title/status, current summary,
+The frontend renders an optional muted notification row from the link event,
+using semantic icons for assignment, updates, status changes, blocking, readiness,
+completion and cancellation. It stays fixed across reads, including errors/offline;
+plain references omit it. No historical reason is inferred from current data.
+Below it are three compact data rows: title with current-state icon/label grouped
+on the right, current summary,
 then assignee, authoritative activity count, definition/ACK and an inline refresh
 button. Unknown counts are not zero. Session names are single-line with full names
 and IDs available in detail. Lucide 1.46.0 SVG nodes and their complete license ship

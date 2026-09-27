@@ -9,6 +9,19 @@ const STATUS_LABELS = {
   cancelled: 'Cancelled',
 };
 
+const NOTICE_ICONS = {
+  assigned: 'assigned',
+  updated: 'updated',
+  cancelled: 'cancelled',
+  status_changed: 'activity',
+  blocked: 'blocked',
+  ready: 'ready',
+  blocker_cancelled: 'cancelled',
+  child_done: 'done',
+  child_blocked: 'blocked',
+  child_cancelled: 'cancelled',
+};
+
 export function parseTaskReference(node) {
   return node?.kind === 'link' ? parseTaskTarget(node.target)?.taskId ?? null : null;
 }
@@ -605,6 +618,8 @@ export function activate(context) {
     const state = useRead({ view: 'overview', task_id: taskId });
     const [open, setOpen] = useState(false);
     const task = state.data;
+    const notice = Object.hasOwn(TASK_EVENTS, event) ? TASK_EVENTS[event] : null;
+    const stateIcon = taskStateIcon(state);
     const label = { loading: 'Loading Task…', missing: 'Task not found', offline: 'Disconnected', error: 'Unable to read Task' }[state.phase];
     const owner = task?.kind === 'automation' ? 'Automation service' : task?.sessions?.assignee?.title ?? task?.assignee ?? 'Unassigned';
     const summary = state.phase === 'ready' ? cardSummary(task)
@@ -615,11 +630,15 @@ export function activate(context) {
       h('span', { className: 'tb-card', 'data-status': task?.status ?? state.phase },
         h('button', { type: 'button', className: 'tb-card-open', onClick: () => setOpen(true),
           title: `${task?.title ?? taskId}\n${owner}\n${summary}`,
-          'aria-haspopup': 'dialog', 'aria-expanded': open, 'aria-label': `Open Task: ${task?.title ?? taskId}` }),
+          'aria-haspopup': 'dialog', 'aria-expanded': open,
+          'aria-label': `${notice ? `Message: ${notice}. ` : ''}Open Task: ${task?.title ?? taskId}` }),
+        notice ? h('span', { className: 'tb-card-event',
+          title: 'Message context: a past event, not the current Task state.' },
+          h(Icon, { name: NOTICE_ICONS[event] }), h('span', null, notice)) : null,
         h('span', { className: 'tb-card-top' },
-          h(Icon, { name: taskStateIcon(state) }),
           h('span', { className: 'tb-card-title', title: task?.title ?? taskId }, task?.title ?? label),
-          h('span', { className: 'tb-card-status' }, task ? statusLabel(task.status) : 'Task')),
+          h('span', { className: 'tb-card-status', title: 'Current Task state' },
+            h(Icon, { name: stateIcon }), task ? stateIcon === 'blocked' ? 'Blocked' : statusLabel(task.status) : 'Task')),
         h('span', { className: 'tb-card-summary', title: summary }, summary),
         h('span', { className: 'tb-card-meta' },
           h('span', { className: 'tb-card-owner', title: owner },

@@ -33,15 +33,19 @@
 }
 
 .tb-card:has(.tb-card-open:hover) { border-color: var(--ck-color-accent); }
-.tb-card-top, .tb-card-meta, .tb-card-owner, .tb-card-count, .tb-detail-status {
+.tb-card-top, .tb-card-meta, .tb-card-owner, .tb-card-count, .tb-detail-status,
+.tb-card-event, .tb-card-status {
   display: flex;
   align-items: center;
   gap: 6px;
   min-inline-size: 0;
 }
 .tb-card-top { pointer-events: none; }
+.tb-card-event { color: var(--ck-color-muted); font-size: var(--ck-text-meta); pointer-events: none; }
+.tb-card-event > span { min-inline-size: 0; overflow-wrap: anywhere; }
+.tb-card-event > svg, .tb-card-status > svg { flex: none; }
 .tb-card-title { flex: 1; font-weight: 600; }
-.tb-card-status { flex: none; font-size: var(--ck-text-meta); color: var(--ck-color-muted); }
+.tb-card-status { flex: none; font-size: var(--ck-text-meta); white-space: nowrap; }
 .tb-card-summary { font-size: var(--ck-text-meta); color: var(--ck-color-muted); pointer-events: none; }
 .tb-card-title, .tb-card-summary, .tb-session-name {
   display: block;
