@@ -19,6 +19,7 @@ import {
   taskStateIcon,
 } from '../web/task-board/index.js';
 import { ICONS } from '../web/task-board/icons.js';
+import { TASK_EVENTS } from '../src/task-board/reference.js';
 
 const taskId = 'd10c0c92-3580-4cdd-85bf-d7fcf22ab3ff';
 const input = { view: 'overview', task_id: taskId };
@@ -233,7 +234,7 @@ test('activation requires public compatibility and preserves native fallback on 
   assert.equal(renderer.component({ node: unknown, fallback }), fallback);
 });
 
-test('compact cards expose state, authoritative count, owner and ACK without message-event clutter', () => {
+test('compact cards separate historical notification context from right-aligned current state', () => {
   let snapshot = { phase: 'loading', data: null, error: null };
   const context = {
     apiVersion: 2, uiVersion: 1, uiSurfaceVersion: 1, createPortal() {},
@@ -264,20 +265,51 @@ test('compact cards expose state, authoritative count, owner and ACK without mes
       orchestrator: sessionInfo(result.orchestrator, null) },
     outcome: { current: true, summary: 'Delivered current result' } };
   snapshot = { phase: 'ready', data: task, error: null };
-  for (const event of [null, 'assigned', 'updated', 'status_changed', 'ready', 'blocked', 'blocker_cancelled', 'child_done', 'child_blocked', 'child_cancelled']) {
+  const noticeIcons = {
+    assigned: 'assigned', updated: 'updated', cancelled: 'cancelled', status_changed: 'activity',
+    blocked: 'blocked', ready: 'ready', blocker_cancelled: 'cancelled',
+    child_done: 'done', child_blocked: 'blocked', child_cancelled: 'cancelled',
+  };
+  assert.deepEqual(Object.keys(noticeIcons).sort(), Object.keys(TASK_EVENTS).sort());
+  for (const event of [null, ...Object.keys(TASK_EVENTS)]) {
     const card = render(event, 'An unrelated message label');
-    assert.deepEqual(card.children.slice(1).map(child => child.props.className),
-      ['tb-card-top', 'tb-card-summary', 'tb-card-meta']);
+    assert.deepEqual(card.children.slice(1).filter(Boolean).map(child => child.props.className),
+      [...(event ? ['tb-card-event'] : []), 'tb-card-top', 'tb-card-summary', 'tb-card-meta']);
     assert.equal(card.props['data-status'], 'done');
-    assert.equal(field(card, 'tb-card-top').children[0].props.name, 'done');
+    assert.equal(field(card, 'tb-card-top').children[0].props.className, 'tb-card-title');
+    assert.equal(field(card, 'tb-card-status').children[0].props.name, 'done');
+    assert.equal(field(card, 'tb-card-status').children[1], 'Done');
     assert.equal(field(card, 'tb-card-title').props.title, task.title);
     assert.equal(field(card, 'tb-card-summary').children[0], task.outcome.summary);
     assert.equal(field(card, 'tb-card-owner').props.title, task.sessions.assignee.title);
     assert.equal(field(card, 'tb-card-count').children[1], 12);
     assert.equal(field(card, 'tb-card-version').children[0], 'v4 · ACK v3');
     assert.equal(field(card, 'tb-card-meta').children.at(-1).type.name, 'Refresh');
-    assert.equal(field(card, 'tb-card-event'), undefined);
+    const notice = field(card, 'tb-card-event');
+    if (event) {
+      assert.equal(notice.children[0].props.name, noticeIcons[event]);
+      assert.ok(ICONS[noticeIcons[event]]);
+      assert.equal(notice.children[1].children[0], TASK_EVENTS[event]);
+      assert.match(notice.props.title, /past event/);
+      assert.ok(field(card, 'tb-card-open').props['aria-label'].includes(TASK_EVENTS[event]));
+    } else {
+      assert.equal(notice, undefined);
+      assert.equal(field(card, 'tb-card-open').props['aria-label'], `Open Task: ${task.title}`);
+    }
     assert.equal(field(card, 'tb-card-open').props['aria-haspopup'], 'dialog');
+  }
+  for (const phase of ['loading', 'ready', 'offline', 'error', 'missing']) {
+    snapshot = { phase, data: phase === 'loading' || phase === 'missing' ? null : task };
+    assert.equal(field(render('child_blocked'), 'tb-card-event').children[1].children[0], 'Subtask blocked');
+  }
+  for (const [status, ready, text, icon] of [
+    ['todo', false, 'Blocked', 'blocked'], ['in_progress', true, 'In progress', 'progress'],
+    ['done', false, 'Done', 'done'], ['cancelled', false, 'Cancelled', 'cancelled'],
+  ]) {
+    snapshot = { phase: 'ready', data: { ...task, status, ready } };
+    const badge = field(render('child_blocked'), 'tb-card-status');
+    assert.equal(badge.children[0].props.name, icon);
+    assert.equal(badge.children[1], text);
   }
   for (const [status, icon] of [['todo', 'todo'], ['in_progress', 'progress'], ['done', 'done'], ['cancelled', 'cancelled'], ['future', 'unknown']]) {
     assert.equal(taskStateIcon({ data: { ...task, status } }), icon);
@@ -929,6 +961,51 @@ function textContent(tree) {
   if (Array.isArray(tree)) return tree.map(textContent).join(' ');
   return tree && typeof tree === 'object' ? textContent(tree.children) : String(tree ?? '');
 }
+
+test('a mounted historical block notice survives refresh, completion, failure and reconnect', async () => {
+  const f = fixture(), harness = componentHarness(f.context);
+  const field = (tree, name) => elements(tree).find(node => node.props.className === name);
+  const render = () => {
+    const tree = harness.render(1, 'child_blocked');
+    assert.equal(textContent(field(tree, 'tb-card-event')).trim(), 'Subtask blocked');
+    for (const svg of elements(tree).filter(node => node.type === 'svg')) {
+      assert.equal(svg.props['aria-hidden'], true);
+      assert.equal(svg.props.focusable, false);
+    }
+    return tree;
+  };
+  try {
+    render();
+    f.requests[0].resolve(response({ ...result, ready: false, blocked_by: [{ condition: 'Synthetic prerequisite' }] }));
+    await settle();
+    let tree = render();
+    assert.equal(textContent(field(tree, 'tb-card-status')).trim(), 'Blocked');
+    field(tree, 'ck-icon-button tb-refresh').props.onClick();
+    tree = render();
+    assert.equal(field(tree, 'ck-icon-button tb-refresh').props['aria-busy'], true);
+    assert.equal(f.requests.length, 2);
+    f.requests[1].resolve(response({ ...result, status: 'done', ready: true, blocked_by: [] }));
+    await settle();
+    tree = render();
+    assert.equal(textContent(field(tree, 'tb-card-status')).trim(), 'Done');
+    field(tree, 'ck-icon-button tb-refresh').props.onClick();
+    f.requests[2].resolve(response(null, { code: 'UNAVAILABLE', message: 'Synthetic failure' }));
+    await settle();
+    tree = render();
+    assert.match(textContent(field(tree, 'tb-card-summary')), /current state unconfirmed/);
+    f.host({ connected: false });
+    render();
+    f.host({ connected: true });
+    assert.equal(f.requests.length, 4);
+    f.requests[3].resolve(response({ ...result, status: 'in_progress' }));
+    await settle();
+    tree = render();
+    assert.equal(textContent(field(tree, 'tb-card-status')).trim(), 'In progress');
+  } finally {
+    harness.stop();
+    f.controller.abort();
+  }
+});
 const button = (tree, label) => elements(tree).find(node => node.type === 'button'
   && (node.props['aria-label'] === label || textContent(node).trim() === label));
 const openCard = tree => elements(tree).find(node => node.props.className === 'tb-card-open').props.onClick();
@@ -1074,7 +1151,7 @@ test('unassigned Overview has no native observation and History lazily reads com
     f.requests[0].resolve(response());
     await settle();
     let tree = harness.render(1, 'assigned');
-    assert.doesNotMatch(textContent(tree), /Task assigned/);
+    assert.match(textContent(tree), /Task assigned/);
     openCard(tree);
     harness.render(1, 'assigned');
     f.requests[1].resolve(response({ ...result, description: 'Current definition', references: [], metadata: {} }));

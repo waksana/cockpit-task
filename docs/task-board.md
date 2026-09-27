@@ -349,7 +349,12 @@ The frontend renders an inline reference card and current-data detail dialog,
 not a separate dashboard. Message reason is fixed; title, state, definition and
 history are fetched from Task. Native session observations are labelled separately,
 read on demand and never imply business progress or capability readiness.
-Cards use three compact rows with a status icon, summary, single-line session name,
+Notification cards add a muted message-context row with a semantic icon above the
+three compact data rows. Plain references omit it. This fixed historical event is
+not the current state or a snapshot of the original blocking reason.
+The current-state icon and label sit together to the right of the title; an unmet
+prerequisite shows Blocked unless the Task is already done or cancelled.
+The data rows retain the summary, single-line session name,
 activity total, definition/ACK versions and an inline refresh button. Activity totals
 count Task reports, not chat messages or automation output; unavailable counts show
 a dash. Background refresh keeps the content and spins only the refresh icon.
