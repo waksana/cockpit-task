@@ -1,6 +1,8 @@
 .tb-card-container {
   display: inline-block;
-  inline-size: min(100%, 580px);
+  /* Keep the preferred size definite during a message bubble's intrinsic sizing. */
+  inline-size: 580px;
+  max-inline-size: 100%;
   min-inline-size: 0;
   vertical-align: middle;
 }

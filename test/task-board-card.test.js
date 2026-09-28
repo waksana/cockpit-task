@@ -128,6 +128,14 @@ test('dialog delegates focus and revisions use accessible lazy chevron disclosur
   assert.doesNotMatch(history, /back\.current|revisionButton|returnRevision/);
 });
 
+test('inline cards keep a definite preferred width and shrink to narrow message content', () => {
+  const css = readFileSync(new URL('../web/task-board/style.css', import.meta.url), 'utf8');
+  const container = css.match(/\.tb-card-container\s*\{([^}]+)\}/)[1];
+  assert.match(container, /inline-size: 580px;/);
+  assert.match(container, /max-inline-size: 100%;/);
+  assert.doesNotMatch(container, /inline-size: min\(/);
+});
+
 test('Task presentation composes public surfaces, headings and actions without private host styles', () => {
   const source = readFileSync(new URL('../web/task-board/index.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../web/task-board/style.css', import.meta.url), 'utf8');
