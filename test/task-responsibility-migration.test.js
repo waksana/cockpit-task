@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
@@ -215,7 +215,11 @@ test('dependency resolution history and rebuilt-table sequence high-water marks 
     VALUES(?,?,1,'old-assignee','cancelled','{}',?,'not_sent')`).run(randomUUID(), id, at);
   db.prepare("UPDATE sqlite_sequence SET seq=2000 WHERE name='assignee_notices'").run();
   const before = readAll(db, 'task_dependencies');
+  const sequenceTypes = () => db.prepare(`SELECT name,typeof(seq) AS type FROM sqlite_sequence
+    WHERE name IN ('task_dependencies','assignee_notices') ORDER BY name`).all();
+  assert.ok(sequenceTypes().every(row => row.type === 'integer'));
   applyResponsibilityMigration(db, plan(db));
+  assert.ok(sequenceTypes().every(row => row.type === 'integer'));
   assert.deepEqual(readAll(db, 'task_dependencies').map(({ evidence, refs, ...row }) => {
     assert.equal(evidence, null); assert.equal(refs, null); return row;
   }), before);
@@ -225,6 +229,97 @@ test('dependency resolution history and rebuilt-table sequence high-water marks 
     VALUES(?,?,'condition','New satisfied condition','author',?,?,'reviewer','evidence','Recorded user answer','[]')`)
     .run(randomUUID(), id, at, at);
   assert.equal(readAll(db, 'task_dependencies').at(-1).seq, 1001);
+});
+
+for (const highWater of [100n, 9007199254740993n, 9223372036854775806n]) {
+  test(`CLI migration preserves integer high-water ${highWater} and never reuses deleted IDs`, t => {
+    const { directory, db } = fixture(t);
+    const id = task(db);
+    const inserts = [
+      ['task_dependencies', db.prepare(`INSERT INTO task_dependencies(seq,id,task_id,kind,condition,author,at)
+        VALUES(?,?,?,'condition',?,'author',?)`)],
+      ['assignee_notices', db.prepare(`INSERT INTO assignee_notices(seq,id,task_id,revision,assignee,kind,event,created_at,delivery_status)
+        VALUES(?,?,?,1,?,'updated','{}',?,'not_sent')`)],
+    ];
+    const sequences = db.prepare(`SELECT name,seq,typeof(seq) AS type FROM sqlite_sequence
+      WHERE name IN ('task_dependencies','assignee_notices') ORDER BY name`);
+    sequences.setReadBigInts(true);
+    for (const [table, insert] of inserts) {
+      insert.setReadBigInts(true);
+      insert.run(1n, randomUUID(), id, 'Retained synthetic row', at);
+      insert.run(highWater, randomUUID(), id, 'Deleted synthetic row', at);
+      db.prepare(`DELETE FROM ${table} WHERE seq=?`).run(highWater);
+    }
+    const before = sequences.all();
+    assert.equal(before.length, 2);
+    assert.ok(before.every(row => row.seq === highWater && row.type === 'integer'));
+    const inventory = cliRun(directory, '--inventory');
+    assert.equal(inventory.status, 0, inventory.stderr);
+    const reviewed = plan(db);
+    assert.equal(JSON.parse(inventory.stdout).source_fingerprint, reviewed.source_fingerprint);
+    const planFile = resolve(directory, 'reviewed.json');
+    writeFileSync(planFile, JSON.stringify(reviewed));
+    const preflight = cliRun(directory, '--plan', planFile, '--preflight');
+    assert.equal(preflight.status, 0, preflight.stderr);
+    assert.deepEqual(sequences.all(), before);
+    const apply = cliRun(directory, '--plan', planFile, '--apply');
+    assert.equal(apply.status, 0, apply.stderr);
+    assert.deepEqual(sequences.all(), before);
+    for (const [table, insert] of inserts) {
+      assert.equal(insert.run(null, randomUUID(), id, 'New synthetic row', at).lastInsertRowid, highWater + 1n);
+      const rows = db.prepare(`SELECT seq FROM ${table} ORDER BY seq`);
+      rows.setReadBigInts(true);
+      assert.deepEqual(rows.all().map(row => row.seq), [1n, highWater + 1n]);
+    }
+    assert.ok(sequences.all().every(row => row.type === 'integer'));
+  });
+}
+
+test('safe-integer source fingerprints match the original number-based algorithm', t => {
+  const { db } = fixture(t);
+  task(db);
+  db.prepare("INSERT INTO sqlite_sequence(name,seq) VALUES('task_dependencies',?)").run(9007199254740991n);
+  const canonicalNumber = value => {
+    if (Array.isArray(value)) return `[${value.map(canonicalNumber).join(',')}]`;
+    if (value && typeof value === 'object') {
+      return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalNumber(value[key])}`).join(',')}}`;
+    }
+    return JSON.stringify(value);
+  };
+  const hash = createHash('sha256');
+  hash.update(String(db.prepare('PRAGMA user_version').get().user_version));
+  const schema = db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name').all();
+  hash.update(canonicalNumber(schema));
+  for (const { name } of schema.filter(row => row.type === 'table')) {
+    hash.update(canonicalNumber(name));
+    for (const row of db.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}" ORDER BY rowid`).iterate()) {
+      hash.update(canonicalNumber(row));
+      hash.update('\n');
+    }
+  }
+  assert.equal(responsibilityFingerprint(db), hash.digest('hex'));
+});
+
+test('source fingerprint distinguishes adjacent 64-bit sequence integers', t => {
+  const { db } = fixture(t);
+  const update = db.prepare("INSERT INTO sqlite_sequence(name,seq) VALUES('task_dependencies',?)");
+  update.run(9007199254740992n);
+  const before = responsibilityFingerprint(db);
+  db.prepare("UPDATE sqlite_sequence SET seq=? WHERE name='task_dependencies'").run(9007199254740993n);
+  assert.notEqual(responsibilityFingerprint(db), before);
+});
+
+test('public inventory refuses out-of-range retained row IDs without rounding or mutation', t => {
+  const { directory, db } = fixture(t);
+  const id = task(db);
+  db.prepare('UPDATE tasks SET seq=? WHERE id=?').run(9007199254740993n, id);
+  const before = responsibilityFingerprint(db);
+  assert.throws(() => responsibilityInventory(db), { code: 'ERR_OUT_OF_RANGE' });
+  const inventory = cliRun(directory, '--inventory');
+  assert.notEqual(inventory.status, 0);
+  assert.match(inventory.stderr, /too large|safe integer|out of range/i);
+  assert.equal(responsibilityFingerprint(db), before);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 11);
 });
 
 test('review may explicitly retain orchestrate without children and unknown historical terminal start stays unknown', t => {

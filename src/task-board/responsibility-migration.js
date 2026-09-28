@@ -13,6 +13,8 @@ const terminal = status => status === 'done' || status === 'cancelled';
 const quote = name => `"${name.replaceAll('"', '""')}"`;
 const reject = message => { throw new TaskError('MIGRATION_REVIEW_REQUIRED', message, 409); };
 const canonical = value => {
+  // Preserve exact SQLite integers while keeping existing safe-integer fingerprints.
+  if (typeof value === 'bigint') return value.toString();
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value && typeof value === 'object') {
     return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
@@ -107,7 +109,9 @@ export function responsibilityFingerprint(db) {
   hash.update(canonical(schema));
   for (const { name } of schema.filter(row => row.type === 'table')) {
     hash.update(canonical(name));
-    for (const row of db.prepare(`SELECT * FROM ${quote(name)} ORDER BY rowid`).iterate()) {
+    const rows = db.prepare(`SELECT * FROM ${quote(name)} ORDER BY rowid`);
+    rows.setReadBigInts(true);
+    for (const row of rows.iterate()) {
       hash.update(canonical(row));
       hash.update('\n');
     }
@@ -270,8 +274,9 @@ export function validateResponsibilityPlan(db, plan, inventory = responsibilityI
 }
 
 function installSchema(db) {
-  const sequences = new Map(db.prepare("SELECT name,seq FROM sqlite_sequence WHERE name IN ('task_dependencies','assignee_notices')").all()
-    .map(row => [row.name, row.seq]));
+  const sequenceRows = db.prepare("SELECT name,seq FROM sqlite_sequence WHERE name IN ('task_dependencies','assignee_notices')");
+  sequenceRows.setReadBigInts(true);
+  const sequences = new Map(sequenceRows.all().map(row => [row.name, row.seq]));
   db.exec(`
     ALTER TABLE tasks RENAME COLUMN orchestrator TO created_by;
     ALTER TABLE tasks ADD COLUMN work_mode TEXT CHECK(work_mode IN ('undecided','execute','orchestrate'));

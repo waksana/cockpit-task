@@ -127,6 +127,15 @@ The reviewed migration retains:
   original event JSON and delivery facts unchanged;
 - prerequisites and their history, automation run facts, barriers and uncertainty.
 
+Rebuilt tables retain their exact `sqlite_sequence` INTEGER high-water marks,
+including deleted historical IDs and values above JavaScript's safe-integer range.
+Fingerprinting reads SQLite integers losslessly and keeps existing safe-integer
+fingerprints unchanged. This does not widen the JSON review inventory's numeric
+contract: an out-of-range integer in an inventoried record (such as a retained
+Task or prerequisite row ID) still fails before migration, without rounding or
+writing source data. A sequence at SQLite's maximum integer remains exhausted;
+migration does not reset it to reuse deleted IDs.
+
 It adds explicit mode/legacy fields and migration audit/history records.
 Lifecycle/editable counters advance to invalidate old write contexts; revisions,
 ACKs and historical timestamps are not fabricated. It never assigns, starts,
