@@ -47,7 +47,7 @@ test('real module mutations refresh only their shared frontend identity; receipt
     await Promise.all([card.refresh(), unrelated.refresh(), detail.refresh()]);
     assert.equal(reads.length, 3);
     assert.equal(card.getSnapshot().data.activity_count, 0);
-    assert.deepEqual(card.getSnapshot().data.sessions, { orchestrator: null, assignee: null });
+    assert.deepEqual(card.getSnapshot().data.sessions, { parent_assignee: null, assignee: null });
     const initialVersion = card.getSnapshot().data.data_version;
     const before = reads.length;
     const edit = {
@@ -72,7 +72,15 @@ test('real module mutations refresh only their shared frontend identity; receipt
     });
     assert.equal(cancelled.body.error, null);
     await new Promise(resolve => setImmediate(resolve));
-    assert.equal(detail.getSnapshot().data.cancellation.reason, 'Authorization withdrawn');
+    assert.equal(detail.getSnapshot().data.cancellation_request.reason, 'Authorization withdrawn');
+    assert.equal(detail.getSnapshot().data.status, 'todo');
+    const finalized = await write('task_cancel_finalize', {
+      task_id: first.task_id, request_id: 'finalize-first', revision: detail.getSnapshot().data.revision,
+      write_context: detail.getSnapshot().data.write_context, summary: 'Authorization withdrawn',
+    });
+    assert.equal(finalized.body.error, null);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(detail.getSnapshot().data.status, 'cancelled');
     assert.equal(cardSummary(detail.getSnapshot().data), 'Authorization withdrawn');
     const afterCancellation = reads.length;
     card.stop(); duplicate.stop(); detail.stop();

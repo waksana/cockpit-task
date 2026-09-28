@@ -17,6 +17,7 @@ import { TaskService } from '../src/task-board/service.js';
 import { TaskStore } from '../src/task-board/store.js';
 import { toolDescriptions } from '../src/task-board/tool-descriptions.js';
 import { formatQuotaReport, measureToolDescriptionQuota } from '../scripts/prompt-quotas.js';
+import { seedOrchestratingRoot, startResponsibility, responsibilityContext } from './helpers/service-responsibility-fixtures.js';
 
 const manifest = JSON.parse(readFileSync(new URL('../cockpit.module.json', import.meta.url), 'utf8'));
 
@@ -105,41 +106,45 @@ test('published tool descriptions explain filters, dispatch races and same-repor
       assert.equal('actor' in tool.inputSchema.properties, false);
       assert.equal('actor_session_id' in tool.inputSchema.properties, false);
     }
-    assert.match(descriptions.task_read, /list, filter by orchestrator, assignee or parent_task_id, or omit them with status=unfinished for the pre-dispatch conflict check/);
-    assert.match(descriptions.task_read, /caller is the session named by host invocation metadata/);
-    assert.match(descriptions.task_read, /operation resolves request_id only in the calling session/);
+    assert.match(descriptions.task_read, /parent_assignee/);
+    assert.match(descriptions.task_read, /root/);
+    assert.match(descriptions.task_read, /work_mode/);
+    assert.match(descriptions.task_read, /Host identity determines actor_role/);
+    assert.match(descriptions.task_read, /operation resolves request_id only within the calling session/);
     assert.match(tools.find(tool => tool.name === 'task_assign').inputSchema.properties.resume_request_id.description, /same calling session/);
-    assert.match(descriptions.task_read, /Reads never acknowledge/);
+    assert.match(descriptions.task_read, /Reads never ACK/);
     const readSchema = tools.find(tool => tool.name === 'task_read').inputSchema;
     assert.deepEqual(readSchema.properties.include.items.enum, READ_GROUPS);
     assert.equal(readSchema.properties.include.minItems, 1);
     assert.equal(readSchema.properties.include.maxItems, READ_GROUPS.length);
     assert.match(readSchema.properties.include.description, /overview only.*48000.*RESULT_TOO_LARGE/);
-    assert.match(descriptions.task_read, /overview\+include.*one consistent read/);
-    assert.match(descriptions.task_assign, /send one "Task assigned" reference/);
-    assert.match(descriptions.task_assign, /without installing capability or proactively interrupting/);
-    assert.match(descriptions.task_assign, /not atomic.*queued or unconfirmed/);
-    assert.match(descriptions.task_assign, /per-step results and failure-time availability_reasons; never blindly resend/);
+    assert.match(descriptions.task_read, /overview\+include.*complete latest groups/);
+    assert.match(descriptions.task_assign, /send one assigned pointer/);
+    assert.match(descriptions.task_assign, /ready, idle, unoccupied Node/);
+    assert.match(descriptions.task_assign, /not atomic.*queued, accepted or unknown/);
+    assert.match(descriptions.task_assign, /per-step receipts.*availability.*Never blindly resend/);
     assert.doesNotMatch(descriptions.task_assign, /Does not interrupt or queue instructions/);
-    assert.match(descriptions.task_edit, /actual description change.*automatically acknowledges/);
-    assert.match(descriptions.task_reopen, /orchestrator or the original assignee.*done Agent Task to in_progress/);
+    assert.match(descriptions.task_edit, /Actual assignee description changes self-ACK/);
+    assert.match(descriptions.task_reopen, /original assignee, current parent assignee or Web user.*Reopen done Agent/);
     assert.match(descriptions.task_reopen, /no later assignment/);
-    assert.match(descriptions.task_cancel, /Cancelled Tasks cannot reopen/);
+    assert.match(descriptions.task_cancel, /cancellation intention.*task_cancel_finalize/);
+    assert.match(descriptions.task_cancel_finalize, /cancelled/);
     assert.match(descriptions.task_edit, /unchanged text and metadata-only edits do not/);
-    assert.match(descriptions.task_edit, /Never changes lifecycle status/);
-    assert.match(descriptions.task_report, /done requires a new outcome in the same request/);
+    assert.match(descriptions.task_edit, /Never starts, changes mode, attaches, cancels/);
+    assert.match(descriptions.task_report, /done requires in_progress.*new outcome.*in the same request/);
     assert.match(descriptions.task_report, /Stale activity may save while stale status\/outcome\/retro are rejected/);
-    assert.match(descriptions.task_report, /explicit retro: useful text or null for no findings; omission is rejected/);
-    assert.match(descriptions.task_subscribe, /Rejects an already-matching status/);
-    assert.match(descriptions.task_subscribe, /subscriber \(the caller\) receives the card/);
-    assert.match(descriptions.task_subscribe, /Optional: default to no subscription/);
-    assert.match(descriptions.task_subscribe, /only when a target state enables its necessary follow-up, not progress tracking/);
+    assert.match(descriptions.task_report, /explicit retro \(text or null\)/);
+    assert.match(descriptions.task_subscribe, /Reject an already-matching status/);
+    assert.match(descriptions.task_subscribe, /subscriber/);
+    assert.match(descriptions.task_subscribe, /Web.*explicit/);
+    assert.match(descriptions.task_subscribe, /Optional one-shot wait/);
+    assert.match(descriptions.task_subscribe, /only when a future status unlocks a necessary follow-up, never progress polling/);
     assert.match(descriptions.task_unsubscribe, /Cannot recall a consumed notification/);
     assert.match(descriptions.task_unsubscribe, /planned follow-up is no longer needed/);
     assert.match(descriptions.task_retro_handle, /Any caller records/);
     assert.match(descriptions.task_retro_handle, /followup \(reference required; terminal, never revisited/);
     assert.match(descriptions.task_retro_handle, /Sends no messages and changes no Task status/);
-    assert.match(descriptions.task_read, /retro filter: unhandled\|watching/);
+    assert.match(descriptions.task_retro_handle, /retro=unhandled\|watching/);
   } finally { await f.close(); }
 });
 
@@ -161,7 +166,7 @@ test('a status notification needs only one selective MCP read for done, in-progr
         actor: 'orchestrator', request_id: `create-${index}`, title: 'Selective notification', description: 'Synthetic only',
       });
       const assignment = {
-        actor: 'orchestrator', request_id: `assign-${index}`, task_id: created.task_id,
+        actor: 'user', request_id: `assign-${index}`, task_id: created.task_id,
         revision: 1, write_context: created.write_context, assignee: `assignee-${index}`,
       };
       store.reserveOperation('task_assign', assignment);
@@ -171,7 +176,13 @@ test('a status notification needs only one selective MCP read for done, in-progr
       const { revision, ...subscription } = base;
       store.executeLocal('task_subscribe', { ...subscription, actor: 'observer', request_id: `subscribe-${index}`, statuses: [status] });
       const text = `${'Full activity. '.repeat(80)}${status === 'in_progress' ? 'Work remains owned by the assignee.' : 'Delivered.'}`;
-      const { actor, ...reportBase } = base;
+      const started = await service.execute('task_start', {
+        task_id: task.task_id, revision: 1, write_context: task.write_context,
+        request_id: `start-${index}`, work_mode: 'execute',
+      }, { actor: task.assignee });
+      assert.equal(started.error, null);
+      const { actor } = base;
+      const reportBase = responsibilityContext(store.task(task.task_id));
       const report = await f.client.callTool({ name: 'task_report', arguments: {
         ...reportBase, request_id: `report-${index}`, status, activity: { text },
         ...(hasOutcome ? { outcome: { summary: `Result ${index}` } } : {}),
@@ -241,13 +252,13 @@ test('real MCP completion never defaults missing retro and persists text or null
         actor: 'orchestrator', request_id: `create-${retro}`, title: 'Retro', description: 'Synthetic completion',
       });
       const assign = {
-        actor: 'orchestrator', request_id: `assign-${retro}`, task_id: created.task_id,
+        actor: 'user', request_id: `assign-${retro}`, task_id: created.task_id,
         write_context: created.write_context, revision: 1, assignee: 'assignee',
       };
       store.reserveOperation('task_assign', assign);
       const task = store.bindAssignment(assign);
-      const base = { actor: 'assignee', task_id: task.task_id, revision: 1, write_context: task.write_context };
-      store.executeLocal('task_ack', { ...base, request_id: `ack-${retro}` });
+      const active = startResponsibility(store, task.task_id, 'assignee');
+      const base = { actor: 'assignee', ...responsibilityContext(active) };
       const { actor, ...requestBase } = base;
       const meta = { _meta: { 'cockpit/invocation': { sessionId: actor, runtimeSessionId: actor, subagent: false } } };
       const request = { ...requestBase, request_id: `done-${retro}`, status: 'done', outcome: { summary: 'Delivered' } };
@@ -257,7 +268,7 @@ test('real MCP completion never defaults missing retro and persists text or null
         assert.equal(response.structuredContent.error.code, 'INVALID_INPUT');
         assert.equal(response.structuredContent.definition_check.tasks[0].needs_ack, false);
       }
-      assert.equal(store.task(task.task_id).status, 'todo');
+      assert.equal(store.task(task.task_id).status, 'in_progress');
       assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items.length, 0);
       const completed = await f.client.callTool({ name: 'task_report', arguments: { ...request, retro }, ...meta });
       assert.notEqual(completed.isError, true);
@@ -274,11 +285,14 @@ test('real MCP completion never defaults missing retro and persists text or null
   }
 });
 
-test('official MCP discovers, registers and executes an automation Task without any Agent session', async () => {
+test('official MCP discovers, registers and executes automation without an Agent assignee', async () => {
   const root = mkdtempSync(join(tmpdir(), 'task-automation-mcp-'));
   const store = new TaskStore(root);
   const errors = [];
-  const service = new TaskService(store, {}, { report: error => errors.push(error) });
+  seedOrchestratingRoot(store);
+  const service = new TaskService(store, {
+    sessionExists: async () => true, send: async () => ({ ok: true }),
+  }, { report: error => errors.push(error) });
   service.automation.recover();
   const f = fixture((name, input, options) => service.execute(name, input, options), undefined, toolSchemas);
   let sequence = 0;
@@ -377,7 +391,9 @@ test('MCP invocation metadata supplies caller identity and rejects identity argu
       _meta: invocationMeta,
     });
     assert.notEqual(created.isError, true, JSON.stringify(created));
-    assert.equal(store.task(created.structuredContent.result.task_id).orchestrator, 'orchestrator');
+    assert.equal(store.task(created.structuredContent.result.task_id).created_by, 'orchestrator');
+    assert.equal(store.task(created.structuredContent.result.task_id).parent_assignee, null);
+    assert.equal(store.task(created.structuredContent.result.task_id).assignee, null);
   } finally {
     await f.close();
     service.close();
@@ -440,6 +456,7 @@ test('real notification failure crosses MCP without erasing Task effects or rese
   const store = new TaskStore(root);
   const sent = [];
   const service = new TaskService(store, {
+    inspect: async () => ({ ready: true, idle: true, node: true }),
     sessionExists: async () => true,
     async send(orchestrator, text) { sent.push({ orchestrator, text }); throw new Error('Synthetic lost acceptance response'); },
   });
@@ -459,14 +476,25 @@ test('real notification failure crosses MCP without erasing Task effects or rese
       request_id: 'create', title: 'Synthetic Task', description: 'Verify delivery evidence.',
     });
     assert.notEqual(created.isError, true);
-    const { task_id, write_context } = created.structuredContent.result;
+    const { task_id } = created.structuredContent.result;
+    const claimed = await call('task_claim', {
+      request_id: 'claim', ...responsibilityContext(created.structuredContent.result),
+    });
+    assert.notEqual(claimed.isError, true);
+    const { write_context } = claimed.structuredContent.result;
     const registered = await call('task_subscribe', {
       request_id: 'subscribe', task_id, write_context, statuses: ['cancelled'],
     }, 'observer');
     assert.notEqual(registered.isError, true);
     assert.deepEqual(sent, []);
     const input = { request_id: 'cancel', task_id, write_context, reason: 'Synthetic cancellation' };
-    const response = await call('task_cancel', input);
+    const requested = await call('task_cancel', input);
+    assert.notEqual(requested.isError, true);
+    assert.equal(store.task(task_id).status, 'todo');
+    const finalize = {
+      request_id: 'finalize', ...responsibilityContext(store.task(task_id)), summary: 'No external work remains.',
+    };
+    const response = await call('task_cancel_finalize', finalize);
     assert.equal(response.isError, true);
     const envelope = response.structuredContent;
     assert.equal(envelope.error, null);
@@ -478,7 +506,7 @@ test('real notification failure crosses MCP without erasing Task effects or rese
     const history = await call('task_read', { view: 'subscriptions', task_id });
     assert.notEqual(history.isError, true, 'Inspecting failed delivery is a successful bounded read');
     assert.deepEqual(history.structuredContent.result.items, envelope.notifications);
-    const replay = await call('task_cancel', input);
+    const replay = await call('task_cancel_finalize', finalize);
     assert.equal(replay.isError, true);
     assert.deepEqual(replay.structuredContent, envelope);
     assert.deepEqual(sent, [{

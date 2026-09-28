@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { TaskStore } from '../src/task-board/store.js';
 import { restoreV10Operations, v10OperationColumns } from './helpers/operations-v10.js';
+import { restoreV11Schema } from './helpers/responsibility-v11.js';
 
 const cli = fileURLToPath(new URL('../scripts/migrate-task-v11.js', import.meta.url));
 function fixture(t) {
@@ -20,6 +21,7 @@ function fixture(t) {
   store.close();
   const path = join(root, 'task-board.sqlite');
   const db = new DatabaseSync(path);
+  restoreV11Schema(db);
   restoreV10Operations(db);
   db.exec("PRAGMA user_version=10; UPDATE operations SET status='pending',resumed_by='consumed'");
   db.prepare(`INSERT INTO operations(${v10OperationColumns.join(',')}) VALUES(${v10OperationColumns.map(() => '?').join(',')})`)
@@ -50,12 +52,29 @@ test('preflight leaves source bytes unchanged; apply preserves receipts and all 
   const apply = run(f.root, '--apply');
   assert.equal(apply.status, 0, apply.stderr);
   assert.equal(JSON.parse(apply.stdout).schema, 11);
+  assert.ok(read(f.path, 'PRAGMA table_info(tasks)').some(row => row.name === 'orchestrator'));
+  assert.ok(!read(f.path, 'PRAGMA table_info(tasks)').some(row => row.name === 'work_mode'));
   assert.deepEqual(read(f.path, `SELECT ${v10OperationColumns.join(',')} FROM operations ORDER BY seq`), old);
   for (const [name, before] of rows) assert.deepEqual(read(f.path, `SELECT * FROM "${name}"`), before, name);
   assert.deepEqual(read(f.path, 'SELECT actor FROM operations ORDER BY seq').map(row => row.actor), ['synthetic-actor', null]);
   const again = run(f.root, '--apply');
   assert.notEqual(again.status, 0);
   assert.match(again.stderr, /requires schema v10/);
+});
+
+test('a later responsibility schema cannot be relabeled as schema10 to bypass reviewed mode migration', t => {
+  const root = mkdtempSync(join(tmpdir(), 'task-v11-relabel-test-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const store = new TaskStore(root);
+  store.db.exec('PRAGMA user_version=10');
+  store.close();
+  const file = join(root, 'task-board.sqlite'), bytes = readFileSync(file);
+  for (const action of ['--preflight', '--apply']) {
+    const result = run(root, action);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /relabeled later responsibility schema/);
+  }
+  assert.deepEqual(readFileSync(file), bytes);
 });
 
 test('preflight includes committed WAL records without changing source schema or records', t => {

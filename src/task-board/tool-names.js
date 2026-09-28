@@ -1,7 +1,8 @@
 export const TOOL_NAMES = Object.freeze([
   'task_read', 'task_create', 'task_script_register', 'task_script_read',
   'task_automation_start', 'task_automation_reconcile', 'task_session_create', 'task_session_prepare',
-  'task_assign', 'task_edit', 'task_ack', 'task_reopen', 'task_report', 'task_cancel',
+  'task_assign', 'task_claim', 'task_start', 'task_convert', 'task_attach', 'task_resolve_condition', 'task_cancel_finalize',
+  'task_edit', 'task_ack', 'task_reopen', 'task_report', 'task_cancel',
   'task_subscribe', 'task_unsubscribe', 'task_retro_handle',
 ]);
 

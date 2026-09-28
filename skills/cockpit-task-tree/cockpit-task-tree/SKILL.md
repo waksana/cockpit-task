@@ -1,155 +1,164 @@
 ---
 name: cockpit-task-tree
-description: "Operating manual for Task nodes: keep work-specific records and choose direct work, internal subagents or Task delegation as needed. Coordinate formal Task nodes through Tasks; retain responsibility and user authorization. Load when first needed; reuse guidance still in context."
+description: "Work as a node in a Task responsibility tree: recover the agreement, execute or orchestrate, use helpers in either mode, coordinate through Task facts, and close responsibility without abandoning children. Load when needed; reuse while in context."
 ---
 
 # Task tree
 
-Use `cockpit-task` MCP. Tool schemas/results define fields, limits and recovery;
-this Skill guides decisions.
+Use `cockpit-task` MCP; contracts define fields/authority/limits/recovery.
 
-## Core idea
+## Model and relations
 
-Every session is a node. With an assigned Task, you own its delivery. Internal subagents
-are helpers whose results you integrate; launching one does not transfer Task responsibility.
-Task is the only channel between formal Task nodes, and the service sends every notice.
-Decisions come from the user, asked directly.
+A Task is a continuing responsibility within user authorization. Its Agent session delivers
+directly (`execute`) or organizes narrower children and integrates results (`orchestrate`).
+Splitting never removes responsibility for the whole result.
+Task is the only channel between formal Task nodes; service notices are pointers.
+Every node asks the user directly; the tree is not an approval chain.
 
-## Relations
-
-If `assignee` is you, it is your Task (at most one unfinished). If `orchestrator` is you,
-you created it (a Subtask when you had a Task). Read `actor_role` when unsure. Host identity
-determines write authority; a subagent acts for its session:
-
-| Caller | Tools |
+| Current fact | Responsibility |
 | --- | --- |
-| Only the assignee | `task_ack`, `task_report` |
-| Orchestrator or assignee | `task_edit`, `task_cancel`, `task_reopen` |
-| Only the orchestrator | `task_assign`, `task_automation_start`, `task_automation_reconcile` |
-| Anyone | every other tool |
+| `assignee` is you | Deliver it; one unfinished Agent Task per session |
+| Your Task is its parent | Coordinate that child, not take over |
+| Your Task has a parent | `parent_assignee` integrates your result |
+| No parent | Ordinary root, no special role/authority |
+
+Only the own assignee is bound. `created_by` is history, not control. Use current relations,
+`actor_role` and host identity; never infer missing bindings.
 
 ## Rules
 
-**R1 Coordinate Task nodes through Task.**
-- Do not message another Task node, even with a Task link or through a helper.
-- Keep the description to work-specific goals, decisions, boundaries and completion
-  requirements. Reference external material instead of copying common knowledge, existing
-  rules, procedures, unnecessary implementation detail or history.
-- Record important changes in activity; put actual delivery, remaining work and evidence
-  links in the outcome.
-- The node facing a decision asks the user directly (ask_user where available). Do not ask
-  a question someone is already asking, or ask for facts you can check yourself.
-- Keep secrets out of Tasks.
+**R1 Keep one current agreement.**
+Describe work-specific goals, decisions, boundaries and completion requirements. Reference
+external material. Activity records important changes; outcome records delivery, remaining
+work and evidence. Keep secrets out of Tasks.
 
-**R2 Do your Task by the current agreement.**
-- Before starting, resuming, taking a consequential action and delivering, read the full
-  current Task (`execution`) and ACK its exact revision. A card is only a pointer; the Task
-  decides.
-- Follow project instructions and relevant work Skills for methods; use `github-coding`
-  when changing repository files. Methods never widen authorization or change communication.
-- When the agreement changes, revise your own Task. A notice or ready prerequisite is not
-  permission to resume work the user paused.
-- Report status truthfully: a Task's delivery state is
-  not live session or tool activity. Never call partial work complete.
-- Mark done with a new outcome and a retro (evidence-based
-  findings, or `null` when there are none).
+Ask the user decisions directly; do not ask for readable facts, repeat another node's question
+or make the parent ask again. Write changed agreements back; cross-Task effects use R4.
+Discussion/records/preparation do not authorize implementation or dispatch. Scope changes,
+trade-offs, cancellation, reopening and adding a parent need user consent. Methods/helpers
+never widen it. Follow project instructions; use `github-coding` for repository changes.
 
-**R3 Choose how to do the work.**
-- Work directly when the relevant context is already in hand and direct handling fits.
-- Use internal subagents for parallel work, context separation or independent judgment;
-  integrate their results yourself. Independent review need not create a Task or session.
-- Delegate a Task when work needs an independent owner to keep it moving, deliver separately
-  or coordinate dependencies. Give it the work-specific requirements and references it needs
-  (R1); do not take over assigned work.
-- These are judgment criteria, not a fixed priority or per-use approval gate. Choose a
-  suitable existing or new session for a Task; neither new sessions nor fewer Tasks are goals.
-- Before dispatching, check all unfinished Tasks for conflicting work on the same thing and
-  order them with `blocked_by`.
-- When things change, revise, reorder or cancel obsolete Subtasks.
-- Verify each result against the agreed requirements and have errors or gaps corrected.
-  Integrate results and fold Subtask retros into your own before completing your Task.
+**R2 Start and resume deliberately.**
+Before starting, resuming, consequential actions and delivery, read full `execution` and
+ACK its exact revision. Check mode, parent, intent, prerequisites and `definition_check`.
 
-**R4 Report work outside your Task upward.**
-- If it blocks you, atomically add a concrete `{condition}` to `blocked_by`: state what is
-  missing and what satisfies it.
-- If it does not block you, put it in your outcome.
-- An orchestrator reading this handles it within its own scope (create a Task, set
-  `blocked_by`, atomically replace the condition with `{task_id}`, revise the definition),
-  explicitly resolves the condition, or reports it upward the same way.
+New Agent work is `todo/undecided`: read, clarify and do limited discovery, not implementation
+or child creation. Binding, ACK and activity do not start it. When ready, `task_start`
+atomically enters `in_progress` with `execute` or `orchestrate`, within existing authorization.
+`task_report` cannot start todo or finish it directly; unstarted work can be cancelled.
+Readiness never overrides a user pause. Task mode, lifecycle and native session interaction
+mode are separate; do not synchronize them.
 
-**R5 Authorization comes from the user.**
-- Discussion, research and records do not authorize changes, dispatch or implementation.
-  Choosing a helper or Task does not widen authorization or transfer an existing assignment.
-- Scope changes, trade-offs, cancellation and reopening need the user's explicit consent.
+**R3 Fulfill responsibility.**
+`execute` delivers research, implementation or review. `orchestrate` divides responsibility,
+arranges interfaces/dependencies, handles blockers and integrates results.
 
-**R6 Act on Task facts; when unsure, read first.**
-- On an unknown result, failure or conflict, read the Task or operation before deciding.
-  Where a tool result names a safe recovery, follow it; otherwise never blindly retry,
-  redispatch or replace.
-- Read only what the current decision needs. Chat history, an idle session or a delivered
-  notice is not evidence of delivery.
-- Never poll, chase or wait for a notice to be read. Subscribe only when a future status
-  unlocks a necessary follow-up of yours.
+**Both modes may use tools and helpers.** You integrate helper results; calls do not change
+mode or ownership. Independent review need not create a Task/session. Use children for
+independent continuing delivery responsibility, not based on tool names. No fixed priority
+or per-use approval gate chooses between these means.
 
-## Notices
+If executing, first `task_convert` with reason, completed results and remaining work, then
+put remaining implementation in narrower children. Keep Task and assignee; no unchanged
+pass-through delegation. Orchestrators may research coordination decisions, but keep sustained
+implementation/deep investigation in children. No children yet is valid; never downgrade to
+`execute`/`undecided`, even after children end or reopening.
 
-| Card | Received by | Act |
+**R4 Coordinate through facts.**
+Before dispatch, check all unfinished Tasks for conflicts, define narrower requirements and
+prerequisites, and select/prepare a capable existing or new session. Session/Task counts are
+not goals; do not take over assigned work. An active, acknowledged, ready orchestrating parent
+uses `task_create`; `task_assign` binds another eligible session and sends the pointer.
+Preparation, binding and message acceptance are separate, not execution proof.
+
+For blocking work outside scope, atomically add a concrete `{condition}` to `blocked_by`:
+what is missing and what satisfies it. Put nonblocking needs in the outcome. The parent
+arranges work, revises agreements or replaces a condition with a Task dependency within its
+scope. Responsibility facts go upward, not user questions.
+
+A Task-ID dependency waits for that execution's `done`, not success. Cancellation does not
+satisfy it; reopening does not revive resolved relations. Express success as an actual
+condition when needed. Children are not automatically blockers: unfinished children limit
+parent termination, not coordination.
+
+Resolve your own satisfied condition with `task_resolve_condition`: exact `dependency_id`,
+recorded user answer/objective evidence and useful references. Parent/Web user may also
+resolve. This cannot remove Task-ID dependencies, change meaning or widen scope. A description
+edit alone does not resolve it. Missing facts/authority use R6, not repeated user approval.
+
+Never message another formal Task node, even through a helper; no private requirements ledger.
+
+**R5 Close responsibility.**
+Before `done` or final `cancelled`, all direct children must be `done` or `cancelled`.
+This gate is not parent success or automatic closure. For done, satisfy prerequisites,
+judge actual results against your agreement, correct gaps and integrate useful child retros.
+Submit your own new outcome and evidence-based retro, or explicit `null` for no findings.
+Never call partial work complete. Cancelled children may need authorized scope change,
+not invented success.
+
+`task_cancel` records an Agent cancellation request, not terminal status, even for a leaf.
+Stop goal progress; read/ACK, edit and record cleanup activity; close children and handle
+residuals. Only its assignee uses `task_cancel_finalize` with disposition; Web user finalizes unbound work.
+Cancellation need not satisfy abandoned execution prerequisites or ACK. No blind cascade.
+Ancestor intent blocks new progress, but existing child done may close under active
+orchestrating ancestors' intent/blockers; own intent forbids own done.
+
+A long-lived root may stay idle; do not invent work or close it because children finished.
+
+**R6 Recover from facts.**
+On failure, conflict or uncertainty, read the Task or original `operation`. Use only supported
+recovery; never blindly retry, redispatch, replace a Task or repeat external effects.
+Replay keeps `request_id` and original inputs; new writes use current `write_context`.
+Saved effects differ from delivery failures. Missing authority/facts are blockers, not
+permission to simulate the service through private state or messages.
+
+Read only needed facts. Session activity, idle/unloaded state and accepted notices
+are not completion. Never poll progress, chase ACKs or wait for notices to be read. Subscribe
+only for a necessary follow-up unlocked by a future state; cancel obsolete waits, never auto-renew.
+
+## Notices and situations
+
+| Card | Received by | Next action |
 | --- | --- | --- |
-| `[Task assigned]` | assignee | F2 |
-| `[Task updated]` | assignee: a ready Task's agreement changed, it became blocked/ready, it reopened, or a blocker was cancelled; not self-authored | F3 |
-| `[Task cancelled]` | assignee: someone else cancelled the Task | F4 |
-| `[Task blocked]` | orchestrator: the assignee recorded a concrete unmet condition | F5 |
-| `[Subtask done]`, `[Subtask cancelled]` | the Subtask's orchestrator | F5 |
-| `[Subtask blocked]` | legacy card to the Subtask's orchestrator; no new transition emits it | F5 |
-| `[Subtask ready]`, `[Subtask blocker cancelled]` | orchestrator of an undispatched dependent | F5 |
-| `[Subscribed Task status changed]` | the subscriber | the follow-up you subscribed for |
+| `[Task assigned]` | assignee | Read/ACK; initialize (R2) |
+| `[Task updated]` | assignee | Read/ACK; account for changed requirements and prerequisites |
+| `[Task cancellation requested]` | assignee | Read intent; cleanup/finalize (R5) |
+| `[Task cancelled]` | legacy assignee | Read cancellation; stop, no execution reports |
+| `[Task blocked]`, `[Subtask blocked]` | parent (latter legacy) | Read current unmet facts (R4) |
+| `[Subtask done]` | parent | Read/integrate outcome; automation run facts/barriers too |
+| `[Subtask cancelled]` | parent | Re-plan; no success inference |
+| `[Subtask ready]` | unbound dependent's parent | Read facts; authorized dispatch |
+| `[Subtask blocker cancelled]` | unbound dependent's parent | Re-plan; no automatic dependency removal |
+| `[Subscribed Task status changed]` | subscriber | Necessary follow-up only |
 
-Cards are `task:` links with fixed text and never carry free-form notes. Older labels, such
-as `[Task assigned to you]` or an `As Owner:` prefix, mean the same card. A top-level
-Task's lifecycle transitions reach the root only through its own subscription;
-a new assignee-recorded unmet condition also sends `[Task blocked]` once.
+Bound dependents get updates. Delivery rechecks relations, never reroutes stale recipients.
+No self-prompts, fabricated labels or retries.
 
-## Basic situations
+### Establish, reopen or extend a tree
 
-- **F1 The root receives a request.** Clarify the authorized result and choose how to do it
-  (R3). For Task delegation, record the requirements and references, check conflicts, select
-  or prepare a capable existing or new node, and assign. Then stay available without
-  following progress; the assignee owns delivery.
-- **F2 `[Task assigned]`.** Read the full Task and ACK. Do it or split it (R3).
-  Handle decisions under R1; revisions, reporting and completion under R2.
-- **F3 `[Task updated]`.** Read the full Task, ACK the latest revision, and act within the
-  current agreement and prerequisites. Address every changed requirement in your outcome,
-  including why one does not apply.
-- **F4 `[Task cancelled]`.** Read the cancellation, stop affected work, report nothing more.
-- **F5 Dependency/Subtask cards.** `done`: read the outcome, verify and integrate; for
-  automation, also inspect run facts and any barrier (F7).
-  `Task blocked` or legacy `Subtask blocked`: read current requirements and blocking
-  evidence, then handle unmet needs (R4). `cancelled` or `blocker cancelled`: re-plan.
-  `ready`: the orchestrator reads current facts and dispatches an unassigned Task when
-  authorized (R3, R5); for an assigned Task, its assignee reads/ACKs the latest agreement
-  and continues permitted work (R2).
-- **F6 Cancel or reopen.** With the user's consent, cancel with a reason, or reopen a done
-  Task with a complete description and reason.
-  Reopening does not revive resolved dependencies. Handle newly discovered gaps through R4.
-- **F7 Trusted scripts.** Agent work is the default. Only an existing, trusted, repeatable
-  script within the user's authorization runs as automation; never create a script to
-  bypass Agent delivery, and registration does not authorize running it. See
-  [Automation](references/automation.md).
+Without bound work, create an unbound root, then `task_claim` your ready Node: no self-dispatch,
+title change, start, ACK or caller idle check. Blocked roots may be claimed for clarification.
+Web user can assign
+roots; parents dispatch children. Initialize under R2.
 
-## Service guarantees
+`task_reopen` needs an authorized complete agreement/reason, original-assignment eligibility
+and safe workspace recovery. Preserve assignee/mode. Legally
+restore ended ancestors first; cancelled/ineligible ancestors prevent in-place reopen.
+No silent replacement, renewed subscriptions or revived dependencies. Unknown legacy mode
+cannot reopen or be repaired by API; never infer from child absence or session activity.
 
-The service enforces these protections; inspect actual effects under R6.
-- **Rejected changes**: the service rejects:
-  - self-assignment, assignment up the lineage, more than 3 levels, a second unfinished Task
-    for a node, and dispatch or done while prerequisites are unmet;
-  - a Task blocker on an ancestor or in a cycle, and an assignee trying to resolve a
-    textual condition without its orchestrator;
-  - reports without an ACK of that revision, and stale status, outcome or retro;
-  - done without an outcome and an explicit retro.
-- **Idempotent writes**: writes replay by `request_id` and reject stale `write_context`.
-- **Notices**: every notice above is sent by the service. Delivery results are recorded and
-  never retried. Notices never clear or rewrite queued session messages.
-- **Pending changes**: every response carries `definition_check` for your own Task.
+The new parent's assignee or Web user uses `task_attach` with both current contexts and an
+authorized reason. A different session owns the active orchestrating parent. Preserve root
+Task, binding, scope, descendants and history. Cycle/lifecycle/resource checks apply, with
+no fixed business depth cap, detach or arbitrary reparent escape; scope does not expand.
 
-Reuse this Skill while it remains in context; reload it only when guidance is missing,
-changed or unclear. That never replaces fresh Task reads or an exact ACK.
+### Trusted automation
+
+Agent work is default; only existing trusted repeatable scripts qualify, never invented to
+bypass delivery. Automation children need orchestrating parents; no Agent mode/assignee/ACK/report.
+Read [Automation](references/automation.md) to select, start, cancel or recover.
+
+## Service boundary
+
+Service checks data constraints, not judgment, success or consent. No generic tool sandbox
+or guessed migration. Keep native safeguards. Reuse this Skill, not stale Task reads/ACKs.

@@ -20,7 +20,7 @@ function fixture(t, sequence = 1) {
   const expected = identity(`v0.0.0-rolling.${sequence}`, sha);
   const descriptor = { ...expected, product: {
     kind: 'module', id: 'cockpit-task', hostApi: { min: 1, max: 1 }, requiresCapabilities: [],
-    requiredIntents: [], databases: [{ path: 'task-board.sqlite', schema: 11, preserve: [] }], migrations: [],
+    requiredIntents: [], databases: [{ path: 'task-board.sqlite', schema: 12, preserve: [] }], migrations: [],
   } };
   const sidecar = JSON.stringify(descriptor);
   writeFileSync(resolve(directory, 'stage/cockpit-deployment.json'), sidecar);
@@ -79,17 +79,25 @@ function fake() {
   };
   return client;
 }
-test('main remains dev, runtime displays source SHA, descriptor derives complete schema 11', () => {
+test('main remains dev, runtime displays source SHA, descriptor declares schema 12 without automatic migration', () => {
   for (const file of ['package.json', 'cockpit.module.json', 'package-lock.json']) {
     assert.equal(JSON.parse(readFileSync(resolve(root, file))).version, '0.0.0-dev');
   }
   assert.match(developmentVersion(), /^dev\+[a-f0-9]{7}$/);
   const product = moduleProduct(root);
-  assert.equal(product.databases[0].schema, 11);
+  assert.equal(product.databases[0].schema, 12);
   assert.deepEqual(product.migrations, []);
   assert.ok(product.databases[0].preserve.find(item => item.table === 'tasks').columns.includes('description'));
   assert.ok(product.databases[0].preserve.find(item => item.table === 'operations').columns.includes('fingerprint'));
   assert.ok(product.databases[0].preserve.find(item => item.table === 'migration_v10_items'));
+  const taskColumns = product.databases[0].preserve.find(item => item.table === 'tasks').columns;
+  assert.ok(taskColumns.includes('created_by'));
+  assert.ok(taskColumns.includes('work_mode'));
+  assert.ok(taskColumns.includes('legacy'));
+  assert.ok(taskColumns.includes('cancellation_request'));
+  assert.ok(!taskColumns.includes('orchestrator'));
+  assert.ok(product.databases[0].preserve.find(item => item.table === 'migration_v12_items'));
+  assert.ok(product.databases[0].preserve.find(item => item.table === 'responsibility_events'));
   assert.ok(product.requiredIntents.includes('session/resources-prepare'));
   assert.deepEqual(rollingIdentity(12, sha), identity('v0.0.0-rolling.12', sha));
 });

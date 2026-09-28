@@ -26,6 +26,12 @@ function migrate(db) {
     if (db.prepare('PRAGMA user_version').get().user_version !== 10) {
       throw new Error('Explicit receipt migration requires schema v10; no replay or older-schema migration is allowed');
     }
+    const taskColumns = db.prepare('PRAGMA table_info(tasks)').all().map(row => row.name);
+    const operationColumns = db.prepare('PRAGMA table_info(operations)').all().map(row => row.name);
+    if (!taskColumns.includes('orchestrator') || taskColumns.includes('created_by')
+      || taskColumns.includes('work_mode') || operationColumns.includes('actor')) {
+      throw new Error('Expected schema-v10 tables, not a relabeled later responsibility schema');
+    }
     check(db);
     const before = db.prepare('SELECT count(*) AS count FROM operations').get().count;
     migrateOperationScopes(db);

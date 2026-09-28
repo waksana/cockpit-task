@@ -101,18 +101,20 @@ export class AutomationStore {
     this.assertPlatform();
     const script = this.script({ script_id: input.script_id });
     scriptArguments(script, input.parameters);
-    this.db.prepare("UPDATE tasks SET kind='automation' WHERE id=?").run(taskId);
+    this.db.prepare("UPDATE tasks SET kind='automation',work_mode=NULL WHERE id=?").run(taskId);
     this.db.prepare("INSERT INTO automation_runs(run_id,task_id,script_id,script,parameters,state) VALUES(?,?,?,?,?,'created')")
       .run(randomUUID(), taskId, input.script_id, JSON.stringify(script), JSON.stringify(input.parameters));
   }
   start(input) {
     this.assertPlatform();
     const task = this.store.row(input.task_id), run = this.run(task.id);
-    this.store.authorize(task, input.actor, ['orchestrator']);
+    this.store.authorize(task, input.actor, ['parent_assignee']);
     this.store.checkContext(task, input, true);
     this.store.currentRevision(task, input);
     if (task.status !== 'todo' || run.state !== 'created') fail('AUTOMATION_ALREADY_STARTED', 'An automation Task can be started once; never retry script side effects');
     this.store.assertReady(task);
+    this.store.assertActiveAncestors(task);
+    if (task.parent_task_id) this.store.assertAcknowledged(this.store.row(task.parent_task_id));
     this.db.prepare("UPDATE automation_runs SET state='queued',queued_at=?,revision=? WHERE task_id=?")
       .run(now(), task.revision, task.id);
     this.db.prepare('UPDATE tasks SET lifecycle=lifecycle+1,updated_at=? WHERE id=?').run(now(), task.id);
@@ -141,7 +143,20 @@ export class AutomationStore {
   }
   next() {
     if (this.db.prepare('SELECT 1 FROM automation_runs WHERE barrier=1 LIMIT 1').get()) return null;
-    return this.db.prepare("SELECT * FROM automation_runs WHERE state='queued' ORDER BY queued_at,seq LIMIT 1").get() ?? null;
+    const rows = this.db.prepare("SELECT * FROM automation_runs WHERE state='queued' ORDER BY queued_at,seq LIMIT 10001").all();
+    if (rows.length > 10000) fail('TREE_RESOURCE_LIMIT', 'Automation queue exceeds the bounded responsibility scan');
+    for (const run of rows) {
+      const task = this.store.row(run.task_id);
+      try {
+        this.store.assertReady(task);
+        this.store.assertActiveAncestors(task);
+      } catch (error) {
+        if (error instanceof TaskError && ['TASK_NOT_READY', 'CANCELLATION_REQUESTED', 'PARENT_UNBOUND', 'PARENT_NOT_ORCHESTRATING'].includes(error.code)) continue;
+        throw error;
+      }
+      return run;
+    }
+    return null;
   }
   claim(taskId) {
     return this.store.transaction(() => {
@@ -164,6 +179,7 @@ export class AutomationStore {
   finish(taskId, { state, exit_code = null, signal = null, error = null, barrier = false }) {
     const write = () => {
       const run = this.run(taskId), task = this.store.row(taskId), at = now();
+      this.store.assertChildrenTerminal(task);
       const status = task.status === 'cancelled' ? 'cancelled' : 'done';
       const actualState = task.status === 'cancelled' ? 'cancelled' : state;
       this.db.prepare('UPDATE automation_runs SET state=?,exit_code=?,signal=?,error=?,barrier=?,finished_at=? WHERE task_id=?')
@@ -204,7 +220,7 @@ export class AutomationStore {
   }
   reconcile(input, groupAlive) {
     const task = this.store.row(input.task_id), run = this.run(task.id);
-    this.store.authorize(task, input.actor, ['orchestrator']);
+    this.store.authorize(task, input.actor, ['parent_assignee']);
     this.store.checkContext(task, input);
     if (!run.barrier || ['starting', 'running'].includes(run.state)) {
       fail('RECONCILE_NOT_READY', 'Only an interrupted or finished run with a termination barrier can be reconciled');

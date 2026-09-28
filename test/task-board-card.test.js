@@ -17,9 +17,15 @@ import {
   safeReferenceHref,
   statusLabel,
   taskStateIcon,
+  terminalGateLabel,
+  webActionUnavailable,
+  webMutationInput,
+  workModeLabel,
+  writeTask,
 } from '../web/task-board/index.js';
 import { ICONS } from '../web/task-board/icons.js';
 import { TASK_EVENTS } from '../src/task-board/reference.js';
+import { parseInput } from '../src/task-board/contracts.js';
 
 const taskId = 'd10c0c92-3580-4cdd-85bf-d7fcf22ab3ff';
 const input = { view: 'overview', task_id: taskId };
@@ -27,9 +33,12 @@ const dataVersion = 'a'.repeat(64);
 const nextDataVersion = 'b'.repeat(64);
 const sessionInfo = (session_id, title) => ({ session_id, title, available: title !== null });
 const result = {
-  id: taskId, title: 'Synthetic Task', orchestrator: 'synthetic-orchestrator', assignee: null,
+  id: taskId, title: 'Synthetic Task', created_by: 'synthetic-creator', parent_assignee: 'synthetic-parent', assignee: null,
+  work_mode: 'undecided', cancellation_request: null, write_context: 'synthetic-current-context',
   status: 'todo', revision: 1, acknowledged_revision: null, activity: null,
 };
+const rootTask = { ...result, parent_task_id: null, parent_assignee: null, children: { total: 0, nonterminal: 0 },
+  ready: true, blocked_by: [] };
 const response = (data = result, error = null, status = 200) =>
   new Response(JSON.stringify({ result: data, error, definition_check: null }), { status });
 const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -262,11 +271,11 @@ test('compact cards separate historical notification context from right-aligned 
   assert.equal(field(loading, 'tb-card-version').children[0], 'v— · ACK —');
   const task = { ...result, status: 'done', revision: 4, acknowledged_revision: 3, activity_count: 12,
     assignee: 'session-id', sessions: { assignee: sessionInfo('session-id', 'Long human-readable session name'),
-      orchestrator: sessionInfo(result.orchestrator, null) },
+      parent_assignee: sessionInfo(result.parent_assignee, null) },
     outcome: { current: true, summary: 'Delivered current result' } };
   snapshot = { phase: 'ready', data: task, error: null };
   const noticeIcons = {
-    assigned: 'assigned', updated: 'updated', cancelled: 'cancelled', status_changed: 'activity',
+    assigned: 'assigned', updated: 'updated', cancelled: 'cancelled', cancellation_requested: 'cancelled', status_changed: 'activity',
     blocked: 'blocked', ready: 'ready', blocker_cancelled: 'cancelled',
     child_done: 'done', child_blocked: 'blocked', child_cancelled: 'cancelled',
   };
@@ -373,7 +382,7 @@ test('presentation reads validate authoritative counts, opaque versions and sess
     ...result, assignee: 'worker-session-id', activity_count: 4, data_version: dataVersion,
     sessions: {
       assignee: sessionInfo('worker-session-id', 'Worker display name'),
-      orchestrator: sessionInfo(result.orchestrator, 'Coordinator display name'),
+      parent_assignee: sessionInfo(result.parent_assignee, 'Parent display name'),
     },
   };
   for (const view of ['overview', 'execution']) {
@@ -386,12 +395,12 @@ test('presentation reads validate authoritative counts, opaque versions and sess
         assignee: { ...sessionInfo(base.assignee, null), error: { code: 'UNAVAILABLE', message: 'Session metadata unavailable' } } } },
       { ...base, assignee: null, sessions: { ...base.sessions, assignee: null } },
       { ...base, assignee: 'user', sessions: { ...base.sessions, assignee: null } },
-      { ...base, orchestrator: 'user', sessions: { ...base.sessions, orchestrator: null } },
+      { ...base, parent_assignee: null, sessions: { ...base.sessions, parent_assignee: null } },
     ]) assert.deepEqual(await readTask({ request: async () => response(valid) }, request), valid);
     const invalid = [
       ...[-1, 1.5, '4', {}, Number.MAX_SAFE_INTEGER + 1].map(activity_count => ({ ...base, activity_count })),
       ...[null, '', 'a'.repeat(63), 'g'.repeat(64), 'A'.repeat(64), 123].map(data_version => ({ ...base, data_version })),
-      ...[null, [], {}, { assignee: null, orchestrator: null }].map(sessions => ({ ...base, sessions })),
+      ...[null, [], {}, { assignee: null, parent_assignee: null }].map(sessions => ({ ...base, sessions })),
       ...[
         { ...base.sessions.assignee, session_id: 'another-session' },
         { ...base.sessions.assignee, title: 123 },
@@ -400,7 +409,7 @@ test('presentation reads validate authoritative counts, opaque versions and sess
         { ...base.sessions.assignee, available: undefined },
       ].map(assignee => ({ ...base, sessions: { ...base.sessions, assignee } })),
       { ...base, assignee: null },
-      { ...base, orchestrator: 'user' },
+      { ...base, parent_assignee: null },
     ];
     for (const value of invalid) {
       await assert.rejects(readTask({ request: async () => response(value) }, request), /invalid result/,
@@ -812,7 +821,7 @@ const automation = {
   finished_at: null, exit_code: null, signal: null, error: null, cancel_requested: false,
   process_group: 123, pid: 123, barrier: true, revision: 1,
 };
-const automatedOverview = { ...result, kind: 'automation', automation, retro: { status: 'not_applicable' } };
+const automatedOverview = { ...result, kind: 'automation', work_mode: null, automation, retro: { status: 'not_applicable' } };
 const automatedExecution = {
   ...automatedOverview, description: 'Run a synthetic check', references: [], metadata: {},
   automation: {
@@ -904,7 +913,7 @@ function componentHarness(context) {
     Fragment: 'fragment',
     createElement: (type, props, ...children) => ({ type, props: { ...props, children: children.length === 1 ? children[0] : children } }),
     useMemo: memo,
-    useRef: () => hook(() => ({ current: { focus() {} } })),
+    useRef: value => hook(() => ({ current: value })),
     useState(initial) {
       const slot = hook(() => ({ value: initial }));
       return [slot.value, value => { slot.value = typeof value === 'function' ? value(slot.value) : value; }];
@@ -931,6 +940,7 @@ function componentHarness(context) {
       hookIndex = 0;
       return resolve(node.type(node.props), `${key}.render`);
     }
+    if (node.props.ref) node.props.ref.current = { focus() {} };
     return { ...node, children: resolve(node.props.children, `${path}.children`) };
   };
   return {
@@ -1062,7 +1072,7 @@ test('progressive sections and disclosures preserve session-name semantics and c
   globalThis.document = { body: {} };
   const task = { ...result, assignee: 'worker-session-id', activity_count: 8,
     sessions: { assignee: sessionInfo('worker-session-id', 'Human-readable worker name'),
-      orchestrator: sessionInfo(result.orchestrator, 'Human-readable coordinator name') } };
+      parent_assignee: sessionInfo(result.parent_assignee, 'Human-readable parent name') } };
   const execution = { ...task, description: 'Complete current definition', references: [], metadata: { diagnostic: true } };
   try {
     harness.render();
@@ -1079,9 +1089,9 @@ test('progressive sections and disclosures preserve session-name semantics and c
     tree = harness.render();
     const sections = elements(tree).find(node => node.props['aria-label'] === 'Task detail sections');
     assert.deepEqual(elements(sections).filter(node => node.type === 'button').map(node => textContent(node)),
-      ['Overview', 'Activity · 8', 'Relations', 'History']);
+      ['Overview', 'Activity · 8', 'Relations', 'History', 'Actions']);
     assert.match(textContent(tree), /Complete current definition/);
-    assert.match(textContent(tree), /Human-readable coordinator name/);
+    assert.match(textContent(tree), /Human-readable parent name/);
     assert.doesNotMatch(textContent(tree), /worker-session-id|diagnostic|Native state/);
     for (const toggle of elements(tree).filter(node => node.props.className === 'ck-button tb-disclosure-toggle')) {
       assert.equal(toggle.props['aria-expanded'], false);
@@ -1093,7 +1103,7 @@ test('progressive sections and disclosures preserve session-name semantics and c
     button(tree, 'Full session names and IDs').props.onClick();
     tree = harness.render();
     assert.match(textContent(tree), /Assignee ID: worker-session-id/);
-    assert.match(textContent(tree), /Orchestrator ID: synthetic-orchestrator/);
+    assert.match(textContent(tree), /Parent assignee ID: synthetic-parent/);
     assert.equal(f.requests.length, 2);
     button(tree, 'Activity · 8').props.onClick();
     harness.render();
@@ -1204,7 +1214,7 @@ test('unavailable session titles retain assignment identity and expose metadata 
   const task = { ...result, assignee: 'retained-assignee-id', sessions: {
     assignee: { ...sessionInfo('retained-assignee-id', null),
       error: { code: 'HOST_UNAVAILABLE', message: 'Title lookup failed' } },
-    orchestrator: sessionInfo(result.orchestrator, null),
+    parent_assignee: sessionInfo(result.parent_assignee, null),
   } };
   try {
     harness.render();
@@ -1219,7 +1229,7 @@ test('unavailable session titles retain assignment identity and expose metadata 
     await settle();
     tree = harness.render();
     assert.ok(button(tree, 'Session observation'), 'unavailable metadata does not erase the assignee');
-    assert.match(textContent(tree), /synthetic-orchestrator/);
+    assert.match(textContent(tree), /synthetic-parent/);
     assert.doesNotMatch(textContent(tree), /Native state|running|idle/);
     button(tree, 'Full session names and IDs').props.onClick();
     tree = harness.render();
@@ -1627,10 +1637,10 @@ test('delegation lineage shows parent and lazily reads direct Subtasks without e
     f.requests[2].resolve(response({ items: [{ task_id: childId, title: 'Specific child', status: 'in_progress',
       assignee: 'worker', parent_task_id: taskId, depth: 3,
       sessions: { assignee: sessionInfo('worker', 'Child worker display name'),
-        orchestrator: sessionInfo(result.orchestrator, null) } }], next_cursor: 'children+/=opaque' }));
+        parent_assignee: sessionInfo(result.parent_assignee, null) } }], next_cursor: 'children+/=opaque' }));
     await settle();
     tree = harness.render();
-    assert.match(textContent(tree), /Specific child\s+In progress\s+· Assignee:\s+Child worker display name/);
+    assert.match(textContent(tree), /Specific child\s+In progress\s+·\s+Work mode unavailable\s+· Assignee:\s+Child worker display name/);
     assert.ok(button(tree, 'Specific child'));
     assert.equal(button(tree, childId), undefined, 'child disclosure uses the title rather than its ID');
     assert.equal(f.requests.length, 3);
@@ -1663,5 +1673,574 @@ test('malformed lineage and child lists fail rather than imply a top-level Task 
   ]) {
     const context = { request: async () => response(data) };
     await assert.rejects(readTask(context, request), /invalid|malformed|unexpected/i, JSON.stringify(data));
+  }
+});
+
+test('responsibility labels keep creator history, native activity, mode and cancellation intent separate', () => {
+  for (const [work_mode, expected] of [['undecided', 'Undecided'], ['execute', 'Execute'], ['orchestrate', 'Orchestrate']]) {
+    assert.equal(workModeLabel({ ...rootTask, work_mode }), expected);
+  }
+  assert.match(workModeLabel({ ...rootTask, work_mode: null, legacy: true }), /Legacy.*not recorded/);
+  assert.match(workModeLabel({ ...automatedOverview, work_mode: 'execute' }), /no Agent work mode/);
+  const requested = { ...rootTask, status: 'in_progress', work_mode: 'orchestrate',
+    cancellation_request: { reason: 'Authorized stop' }, children: { total: 3, nonterminal: 2 } };
+  assert.match(cardSummary(requested), /Cancellation requested.*Authorized stop/);
+  assert.equal(statusLabel(requested.status), 'In progress');
+  assert.match(terminalGateLabel(requested), /2 unfinished.*both Done and Cancelled/);
+  assert.match(terminalGateLabel({ ...requested, children: { total: 3, nonterminal: 0 } }), /Done or Cancelled.*does not prove/);
+  assert.match(cardSummary({ ...requested, status: 'cancelled', cancellation: { reason: 'Residuals handled' } }), /^Residuals handled$/);
+});
+
+test('Web mutation builders never invent creator authority or impersonate the viewed assignee', async () => {
+  const task = { ...rootTask, assignee: 'viewed-worker', actor_role: 'assignee', created_by: 'viewed-worker' };
+  for (const action of ['task_start', 'task_convert', 'task_claim', 'task_ack', 'task_report']) {
+    assert.match(webActionUnavailable(task, action), /Web requests act as the signed-in user/);
+    assert.throws(() => webMutationInput(action, task, {}, 'request'), /cannot be performed as the Web user/);
+  }
+  assert.deepEqual(webMutationInput('task_assign', rootTask, {
+    assignee: ' new-worker ', actor: 'viewed-worker', invocation: { sessionId: 'viewed-worker' }, caller: 'viewed-worker',
+  }, 'bind-request'), {
+    request_id: 'bind-request', task_id: taskId, write_context: rootTask.write_context, revision: 1, assignee: 'new-worker',
+  });
+  assert.deepEqual(webMutationInput('task_create', task, { title: 'Root', description: 'Authorized root' }, 'create-root'), {
+    request_id: 'create-root', title: 'Root', description: 'Authorized root',
+  });
+  const parent = { ...task, status: 'in_progress', work_mode: 'orchestrate', acknowledged_revision: 1 };
+  const child = webMutationInput('task_create', parent, { title: 'Child', description: 'Narrower scope', parent_task_id: taskId }, 'create-child');
+  assert.equal(child.parent_task_id, taskId);
+  assert.equal(child.assignee, undefined);
+  assert.equal(child.work_mode, undefined);
+  let requests = 0;
+  for (const action of ['task_start', 'task_convert', 'task_claim']) {
+    await assert.rejects(writeTask({ request: () => requests++ }, action, {}), /cannot supply or impersonate/);
+  }
+  await assert.rejects(writeTask({ request: () => requests++ }, 'task_assign', { actor: 'worker' }), /cannot supply or impersonate/);
+  assert.equal(requests, 0);
+});
+
+test('Web condition evidence, root attachment and explicit subscription inputs preserve exact API boundaries', () => {
+  const dependency_id = '371287b3-bea2-4088-814f-4b3335b5d154';
+  const evidence = webMutationInput('task_resolve_condition', rootTask, {
+    dependency_id, evidence: 'Recorded user answer satisfies the unchanged condition',
+    references: [{ label: 'Decision', target: 'https://example.test/decision' }], blocked_by: [],
+  }, 'evidence-request');
+  assert.equal(evidence.dependency_id, dependency_id);
+  assert.equal(evidence.blocked_by, undefined);
+  assert.equal(evidence.revision, 1);
+  const attachment = webMutationInput('task_attach', rootTask, {
+    parent_task_id: taskId, parent_write_context: 'exact-parent-context', reason: 'Authorized broader responsibility',
+  }, 'attach-request');
+  assert.equal(attachment.parent_write_context, 'exact-parent-context');
+  assert.equal(attachment.write_context, rootTask.write_context);
+  assert.throws(() => webMutationInput('task_subscribe', rootTask, { statuses: ['done'] }, 'no-recipient'), /explicit subscriber/);
+  assert.equal(webMutationInput('task_subscribe', rootTask, { subscriber: 'selected-session', statuses: ['done'] }, 'sub').subscriber,
+    'selected-session');
+});
+
+test('Web cancellation allows intent but reserves bound finalization to the assignee and checks children', () => {
+  const requested = { ...rootTask, cancellation_request: { reason: 'Stop' } };
+  assert.equal(webActionUnavailable(requested, 'task_cancel_finalize'), null);
+  assert.match(webActionUnavailable({ ...requested, assignee: 'bound' }, 'task_cancel_finalize'), /Only the bound assignee/);
+  assert.match(webActionUnavailable({ ...requested, children: { total: 3, nonterminal: 1 } }, 'task_cancel_finalize'), /both Done and Cancelled/);
+  assert.match(webActionUnavailable(rootTask, 'task_cancel_finalize'), /before finalizing/);
+  assert.match(webActionUnavailable(requested, 'task_assign'), /abandoned goal/);
+  assert.match(webActionUnavailable(requested, 'task_attach'), /abandoned goal/);
+  assert.match(webActionUnavailable({ ...rootTask, status: 'cancelled' }, 'task_cancel'), /terminal/);
+  assert.equal(webMutationInput('task_cancel', rootTask, { reason: 'Authorized stop' }, 'cancel-request').status, undefined);
+  assert.equal(webMutationInput('task_cancel_finalize', requested, { summary: 'Residuals handled' }, 'finalize').summary,
+    'Residuals handled');
+});
+
+test('Web writes preserve partial effects and unknown acknowledgement without automatic retry', async () => {
+  const f = fixture();
+  const input = webMutationInput('task_cancel', rootTask, { reason: 'Authorized stop' }, 'stable-request');
+  const promise = writeTask(f.context, 'task_cancel', input);
+  assert.equal(f.requests[0].path, '/tools/task_cancel');
+  assert.deepEqual(JSON.parse(f.requests[0].init.body), input);
+  f.requests[0].resolve(new Response(JSON.stringify({ result: { saved: true }, error: null,
+    notification_error: { message: 'Recipient unavailable' } }), { status: 502 }));
+  const receipt = await promise;
+  assert.equal(receipt.http_status, 502);
+  assert.equal(receipt.result.saved, true);
+  assert.equal(receipt.notification_error.message, 'Recipient unavailable');
+  const unknown = writeTask(f.context, 'task_cancel', input);
+  f.requests[1].resolve(new Response('not a receipt', { status: 502 }));
+  await assert.rejects(unknown, /unknown.*do not retry/);
+  assert.equal(f.requests.length, 2);
+});
+
+const field = (tree, name) => elements(tree).find(node => ['input', 'textarea', 'select'].includes(node.type) && node.props.name === name);
+
+async function mountActions(task) {
+  const f = fixture(), harness = componentHarness(f.context);
+  harness.render();
+  f.requests[0].resolve(response(task));
+  await settle();
+  openCard(harness.render());
+  harness.render();
+  f.requests[1].resolve(response({ ...task, description: 'Full current authorized definition', references: [], metadata: {} }));
+  await settle();
+  button(harness.render(), 'Actions').props.onClick();
+  return { f, harness, tree: harness.render() };
+}
+
+test('mounted Web forms send root/child creation and binding as user with no forged start action', async () => {
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  try {
+    for (const child of [false, true]) {
+      const task = child ? { ...rootTask, assignee: 'parent-worker', status: 'in_progress', work_mode: 'orchestrate', acknowledged_revision: 1 } : rootTask;
+      const { f, harness } = await mountActions(task);
+      try {
+        let tree = harness.render();
+        assert.match(textContent(tree), /Web requests act as the signed-in user/);
+        assert.equal(button(tree, 'Start Task'), undefined);
+        assert.equal(button(tree, 'Convert to orchestrate'), undefined);
+        const title = child ? 'Create child of this Task' : 'Create ordinary root or child';
+        button(tree, title).props.onClick();
+        tree = harness.render();
+        field(tree, 'title').props.onChange({ target: { value: 'New responsibility' } });
+        tree = harness.render();
+        field(tree, 'description').props.onChange({ target: { value: 'Complete authorized scope' } });
+        tree = harness.render();
+        const form = elements(tree).find(node => node.type === 'form');
+        const submitted = form.props.onSubmit({ preventDefault() {} });
+        await form.props.onSubmit({ preventDefault() {} });
+        assert.equal(f.requests.length, 3, 'double submission is blocked before React rerenders');
+        const sent = JSON.parse(f.requests[2].init.body);
+        assert.equal(f.requests[2].path, '/tools/task_create');
+        assert.equal(sent.parent_task_id, child ? taskId : undefined);
+        assert.equal(sent.actor, undefined);
+        assert.equal(sent.created_by, undefined);
+        assert.equal(sent.assignee, undefined);
+        f.requests[2].resolve(response({ task_id: '12d0c092-3580-4cdd-85bf-d7fcf22ab3ff' }));
+        await submitted;
+        tree = harness.render();
+        assert.match(textContent(tree), /acceptance does not prove dispatch/);
+        assert.equal(elements(tree).find(node => node.type === 'button' && node.props.type === 'submit').props.disabled, true);
+      } finally { harness.stop(); f.controller.abort(); }
+    }
+    const { f, harness } = await mountActions(rootTask);
+    try {
+      button(harness.render(), 'Assign a session').props.onClick();
+      let tree = harness.render();
+      field(tree, 'assignee').props.onChange({ target: { value: 'worker-session' } });
+      tree = harness.render();
+      const submitted = elements(tree).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+      assert.equal(f.requests[2].path, '/tools/task_assign');
+      assert.equal(JSON.parse(f.requests[2].init.body).assignee, 'worker-session');
+      f.requests[2].resolve(response(null, { code: 'SESSION_UNAVAILABLE', message: 'Session is busy' }, 409));
+      await submitted;
+      assert.match(textContent(harness.render()), /Session is busy/);
+    } finally { harness.stop(); f.controller.abort(); }
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+  }
+});
+
+test('mounted cancellation intent stays nonterminal and unavailable or offline forms cannot mutate', async () => {
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  const task = { ...rootTask, assignee: 'bound-assignee', status: 'in_progress', work_mode: 'orchestrate',
+    cancellation_request: { reason: 'Stop requested' }, children: { total: 2, nonterminal: 2 } };
+  try {
+    const { f, harness } = await mountActions(task);
+    try {
+      let tree = harness.render();
+      assert.match(textContent(tree), /In progress · Cancellation requested/);
+      button(tree, 'Finalize unbound cancellation').props.onClick();
+      tree = harness.render();
+      assert.match(textContent(tree), /Only the bound assignee can finalize/);
+      assert.match(textContent(tree), /2 unfinished.*both Done and Cancelled/);
+      assert.equal(elements(tree).find(node => node.type === 'button' && node.props.type === 'submit').props.disabled, true);
+      const form = elements(tree).find(node => node.type === 'form');
+      await form.props.onSubmit({ preventDefault() {} });
+      assert.equal(f.requests.length, 2);
+      f.host({ connected: false });
+      tree = harness.render();
+      assert.match(textContent(tree), /cached or disconnected data cannot authorize/);
+      assert.equal(elements(tree).find(node => node.type === 'button' && node.props.type === 'submit').props.disabled, true);
+    } finally { harness.stop(); f.controller.abort(); }
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+  }
+});
+
+test('deep ancestors and filtered browsing use bounded pages and keep opaque cursors and mode filters', async () => {
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  const task = { ...rootTask, parent_task_id: '6f1c0c92-3580-4cdd-85bf-d7fcf22ab3ff', parent_assignee: 'parent-worker', depth: 101 };
+  try {
+    const { f, harness } = await mountActions(task);
+    try {
+      button(harness.render(), 'Relations').props.onClick();
+      let tree = harness.render();
+      button(tree, 'Paged ancestors').props.onClick();
+      harness.render();
+      assert.deepEqual(JSON.parse(f.requests[2].init.body), { view: 'ancestors', task_id: taskId, limit: 50 });
+      f.requests[2].resolve(response({ items: [{ task_id: task.parent_task_id, title: 'Parent responsibility', status: 'in_progress',
+        depth: 100, work_mode: 'orchestrate', assignee: 'parent-worker' }], next_cursor: 'ancestors+/=opaque' }));
+      await settle();
+      tree = harness.render();
+      assert.match(textContent(tree), /Parent responsibility.*Orchestrate/);
+      button(tree, 'Next page').props.onClick();
+      harness.render();
+      assert.equal(JSON.parse(f.requests[3].init.body).cursor, 'ancestors+/=opaque');
+      f.requests[3].resolve(response({ items: [], next_cursor: null }));
+      await settle();
+      tree = harness.render();
+      assert.equal(button(tree, 'Next page').props.disabled, true);
+      button(tree, 'Find Tasks by responsibility').props.onClick();
+      tree = harness.render();
+      assert.deepEqual(JSON.parse(f.requests[4].init.body), { view: 'list', status: 'unfinished', limit: 50 });
+      f.requests[4].resolve(response({ items: [], next_cursor: null }));
+      await settle();
+      tree = harness.render();
+      field(tree, 'work_mode').props.onChange({ target: { value: 'orchestrate' } });
+      tree = harness.render();
+      field(tree, 'root').props.onChange({ target: { value: 'true' } });
+      tree = harness.render();
+      elements(tree).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+      harness.render();
+      assert.deepEqual(JSON.parse(f.requests[5].init.body), { view: 'list', status: 'unfinished', root: true, work_mode: 'orchestrate', limit: 50 });
+      assert.ok(f.requests.every(request => request.path === '/read'));
+    } finally { harness.stop(); f.controller.abort(); }
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+  }
+  await assert.rejects(readTask({ request: async () => response({ items: Array.from({ length: 51 }, () => ({
+    task_id: taskId, title: 'Too many', status: 'in_progress',
+  })), next_cursor: null }) }, { view: 'ancestors', task_id: taskId, limit: 50 }), /invalid result/);
+});
+
+test('filtered lists reconcile Task changes without refreshing unrelated native observations', async () => {
+  const f = fixture();
+  const list = createReadResource(f.context, { view: 'list', root: true, work_mode: 'orchestrate', limit: 50 });
+  const native = createReadResource(f.context, { view: 'native', task_id: taskId });
+  list.start(); native.start();
+  f.requests[0].resolve(response({ items: [], next_cursor: null }));
+  f.requests[1].resolve(nativeResponse());
+  await settle();
+  f.event({ type: 'task/changed', task_id: 'new-root', data_version: dataVersion });
+  assert.equal(f.requests.length, 3);
+  assert.equal(JSON.parse(f.requests[2].init.body).view, 'list');
+  list.stop(); native.stop(); f.controller.abort();
+});
+
+test('mounted attachment reads the prospective parent context once, then sends the exact structural API', async () => {
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  const parentId = '6f1c0c92-3580-4cdd-85bf-d7fcf22ab3ff';
+  try {
+    const { f, harness } = await mountActions(rootTask);
+    try {
+      button(harness.render(), 'Attach this root under a parent').props.onClick();
+      let tree = harness.render();
+      field(tree, 'parent_task_id').props.onChange({ target: { value: parentId } });
+      tree = harness.render();
+      field(tree, 'reason').props.onChange({ target: { value: 'User authorized this larger responsibility' } });
+      tree = harness.render();
+      const submitted = elements(tree).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+      assert.deepEqual(JSON.parse(f.requests[2].init.body), { view: 'overview', task_id: parentId, include: ['context'] });
+      f.requests[2].resolve(response({ ...rootTask, id: parentId, assignee: 'parent-session', work_mode: 'orchestrate',
+        status: 'in_progress', acknowledged_revision: 1, write_context: 'fresh-parent-context' }));
+      await settle();
+      assert.equal(f.requests[3].path, '/tools/task_attach');
+      const input = JSON.parse(f.requests[3].init.body);
+      assert.equal(input.parent_task_id, parentId);
+      assert.equal(input.parent_write_context, 'fresh-parent-context');
+      assert.equal(input.write_context, rootTask.write_context);
+      assert.equal(input.actor, undefined);
+      assert.deepEqual(parseInput('task_attach', input), input);
+      f.requests[3].resolve(response({ task_id: taskId, parent_task_id: parentId }));
+      await submitted;
+    } finally { harness.stop(); f.controller.abort(); }
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+  }
+});
+
+test('mounted condition resolution records evidence and subscriptions require an explicit recipient', async () => {
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  const dependency_id = '371287b3-bea2-4088-814f-4b3335b5d154';
+  const task = { ...rootTask, blocked_by: [{ dependency_id, condition: 'User decision recorded' }], ready: false };
+  try {
+    for (const action of ['task_resolve_condition', 'task_subscribe', 'task_cancel_finalize']) {
+      const current = action === 'task_cancel_finalize' ? { ...task, cancellation_request: { reason: 'Abandoned goal' } } : task;
+      const { f, harness } = await mountActions(current);
+      try {
+        let tree = harness.render();
+        const label = action === 'task_resolve_condition' ? 'Resolve condition: User decision recorded'
+          : action === 'task_subscribe' ? 'Subscribe a session to a future status' : 'Finalize unbound cancellation';
+        button(tree, label).props.onClick();
+        tree = harness.render();
+        if (action === 'task_subscribe') {
+          assert.equal(field(tree, 'subscriber').props.value, '');
+          await elements(tree).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+          assert.equal(f.requests.length, 2);
+          tree = harness.render();
+          assert.match(textContent(tree), /Select an explicit subscriber session/);
+          field(tree, 'subscriber').props.onChange({ target: { value: 'explicit-future-worker' } });
+        } else {
+          field(tree, action === 'task_resolve_condition' ? 'evidence' : 'summary').props.onChange({
+            target: { value: action === 'task_resolve_condition' ? 'User answer already recorded; no repeat approval needed' : 'No residual work remains' },
+          });
+        }
+        tree = harness.render();
+        const submitted = elements(tree).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+        assert.equal(f.requests[2].path, `/tools/${action}`);
+        const input = JSON.parse(f.requests[2].init.body);
+        assert.deepEqual(parseInput(action, input), input);
+        assert.equal(input.actor, undefined);
+        if (action === 'task_subscribe') assert.equal(input.subscriber, 'explicit-future-worker');
+        if (action === 'task_resolve_condition') assert.equal(input.dependency_id, dependency_id);
+        if (action === 'task_cancel_finalize') assert.equal(input.summary, 'No residual work remains');
+        f.requests[2].resolve(response({ task_id: taskId }));
+        await submitted;
+      } finally { harness.stop(); f.controller.abort(); }
+    }
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+  }
+});
+
+test('new context reads reject fabricated counts, cancellation intent and old creator authority fields', async () => {
+  for (const data of [
+    { ...rootTask, created_by: undefined, orchestrator: 'old-owner' },
+    { ...rootTask, parent_assignee: undefined, orchestrator: 'old-owner' },
+    { ...rootTask, work_mode: '__proto__' },
+    { ...rootTask, children: { total: 1, nonterminal: 2 } },
+    { ...rootTask, children: { total: 1, nonterminal: -1 } },
+    { ...rootTask, cancellation_request: 'cancelled' },
+    { ...automatedOverview, work_mode: 'orchestrate' },
+  ]) await assert.rejects(readTask({ request: async () => response(data) }, input), /invalid result/);
+  assert.equal(workModeLabel({ work_mode: '__proto__' }), 'Work mode unavailable');
+  const history = { task_id: taskId, items: [{ task_id: taskId, kind: 'converted', author: 'worker',
+    at: '2026-09-28T00:00:00Z', details: { completed: 'Prior delivery', remaining: 'Child responsibility' } }], next_cursor: null };
+  assert.deepEqual(await readTask({ request: async () => response(history) },
+    { view: 'responsibility_events', task_id: taskId, limit: 10 }), history);
+  const evidence = { task_id: taskId, items: [{ dependency_id: 'condition-id', task_id: taskId, kind: 'condition',
+    condition: 'Decision required', author: 'worker', created_at: '2026-09-27T00:00:00Z',
+    active: false, resolved_at: '2026-09-28T00:00:00Z', resolved_by: 'worker', resolution: 'evidence',
+    evidence: 'Recorded user answer', references: [{ label: 'Decision', target: 'https://example.test/decision' }] }], next_cursor: null };
+  assert.deepEqual(await readTask({ request: async () => response(evidence) },
+    { view: 'dependencies', task_id: taskId, limit: 10 }), evidence);
+});
+
+test('Web child creation requires a current, ready, ACKed orchestrating parent in the mutation helper', () => {
+  const parent = { ...rootTask, assignee: 'parent-session', status: 'in_progress', work_mode: 'orchestrate', acknowledged_revision: 1 };
+  const values = { title: 'Child', description: 'Authorized child responsibility', parent_task_id: taskId };
+  for (const [task, pattern] of [
+    [{ ...parent, ready: false, blocked_by: [{ condition: 'Missing input' }] }, /prerequisites/],
+    [{ ...parent, ready: undefined }, /prerequisites/],
+    [{ ...parent, acknowledged_revision: null }, /ACKed/],
+    [{ ...parent, work_mode: 'execute' }, /orchestrating parent/],
+    [{ ...parent, status: 'todo' }, /orchestrating parent/],
+    [{ ...parent, assignee: null }, /orchestrating parent/],
+    [{ ...parent, cancellation_request: { reason: 'Stop' } }, /abandoned goal/],
+    [{ ...parent, write_context: undefined }, /current prospective parent/],
+  ]) assert.throws(() => webMutationInput('task_create', task, values, 'child-request'), pattern);
+  assert.throws(() => webMutationInput('task_create', parent, values, 'child-request', { current: false }), /stale or disconnected/);
+  const otherId = '6f1c0c92-3580-4cdd-85bf-d7fcf22ab3ff';
+  assert.throws(() => webMutationInput('task_create', rootTask, { ...values, parent_task_id: otherId }, 'child-request'),
+    /Read the current prospective parent/);
+  const input = webMutationInput('task_create', rootTask, { ...values, parent_task_id: otherId }, 'child-request',
+    { parent: { ...parent, id: otherId } });
+  assert.deepEqual(parseInput('task_create', input), input);
+  assert.equal(input.parent_write_context, undefined, 'creation uses its published parent selector, not attachment fields');
+});
+
+test('Web edit, reopen and automation action guards preserve real lifecycle and service authority', () => {
+  const done = { ...rootTask, status: 'done', assignee: 'original-worker', work_mode: 'execute' };
+  const createdAutomation = { ...automatedOverview, ready: true, automation: { ...automation, state: 'created', barrier: false } };
+  const finishedAutomation = { ...createdAutomation, status: 'done', automation: { ...automation, state: 'interrupted', barrier: true } };
+  assert.equal(webActionUnavailable({ ...rootTask, cancellation_request: { reason: 'Cleanup' } }, 'task_edit'), null);
+  assert.match(webActionUnavailable(done, 'task_edit'), /terminal/);
+  assert.equal(webActionUnavailable(createdAutomation, 'task_edit'), null);
+  assert.match(webActionUnavailable(automatedOverview, 'task_edit'), /immutable/);
+  assert.equal(webActionUnavailable(done, 'task_reopen'), null);
+  assert.match(webActionUnavailable({ ...done, work_mode: null, legacy: true }, 'task_reopen'), /migration review/);
+  assert.match(webActionUnavailable({ ...done, assignee: null }, 'task_reopen'), /original bound assignee/);
+  assert.match(webActionUnavailable({ ...done, status: 'cancelled' }, 'task_reopen'), /cannot reopen/);
+  assert.match(webActionUnavailable({ ...done, cancellation_request: { reason: 'Stop' } }, 'task_reopen'), /intent prevents/);
+  assert.match(webActionUnavailable(finishedAutomation, 'task_reopen'), /cannot reopen/);
+  assert.equal(webActionUnavailable(createdAutomation, 'task_automation_start'), null);
+  assert.match(webActionUnavailable({ ...createdAutomation, ready: false }, 'task_automation_start'), /prerequisite/);
+  assert.match(webActionUnavailable(automatedOverview, 'task_automation_start'), /unstarted/);
+  assert.equal(webActionUnavailable(finishedAutomation, 'task_automation_reconcile'), null);
+  assert.match(webActionUnavailable({ ...finishedAutomation, automation: { ...automation, state: 'running', barrier: true } },
+    'task_automation_reconcile'), /running processes must not be bypassed/);
+  assert.match(webActionUnavailable({ ...finishedAutomation, automation: { ...automation, state: 'failed', barrier: false } },
+    'task_automation_reconcile'), /launch barrier/);
+  for (const [action, task, values] of [
+    ['task_edit', rootTask, { description: 'Updated scope', metadata: { key: 'value' }, blocked_by: [], reason: 'Authorized change' }],
+    ['task_reopen', done, { description: 'New complete agreement', reason: 'Explicit rework authorization' }],
+    ['task_automation_start', createdAutomation, {}],
+    ['task_automation_reconcile', finishedAutomation, { reason: 'Effects inspected; check recorded process group absence' }],
+  ]) {
+    const input = webMutationInput(action, task, { ...values, actor: 'worker', work_mode: 'execute', assignee: 'replacement' }, 'request');
+    assert.deepEqual(parseInput(action, input), input);
+    assert.equal(input.actor, undefined);
+    assert.equal(input.work_mode, undefined);
+    assert.equal(input.assignee, undefined);
+    assert.equal(input.revision, action === 'task_automation_reconcile' ? undefined : task.revision);
+  }
+});
+
+test('mounted ongoing editing preserves complete fields and replans prerequisites through the user API', async () => {
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  const task = { ...rootTask, cancellation_request: { reason: 'Cleanup required' }, ready: false,
+    blocked_by: [{ dependency_id: '371287b3-bea2-4088-814f-4b3335b5d154', condition: 'Original condition' }] };
+  try {
+    const { f, harness } = await mountActions(task);
+    try {
+      button(harness.render(), 'Edit current definition and requirements').props.onClick();
+      let tree = harness.render();
+      assert.equal(field(tree, 'description').props.value, 'Full current authorized definition');
+      assert.deepEqual(JSON.parse(field(tree, 'blocked_by').props.value), [{ condition: 'Original condition' }]);
+      for (const [name, value] of [
+        ['description', 'Revised full agreement: arrange residual cleanup'],
+        ['metadata', '{"repository":"synthetic"}'],
+        ['references', '[{"label":"Decision","target":"https://example.test/decision"}]'],
+        ['blocked_by', '[{"condition":"Cleanup evidence recorded"}]'],
+        ['reason', 'User authorized replanning, not condition satisfaction'],
+      ]) {
+        field(tree, name).props.onChange({ target: { value } });
+        tree = harness.render();
+      }
+      const submitted = elements(tree).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+      assert.equal(f.requests[2].path, '/tools/task_edit');
+      const input = JSON.parse(f.requests[2].init.body);
+      assert.deepEqual(parseInput('task_edit', input), input);
+      assert.equal(input.description, 'Revised full agreement: arrange residual cleanup');
+      assert.deepEqual(input.metadata, { repository: 'synthetic' });
+      assert.deepEqual(input.blocked_by, [{ condition: 'Cleanup evidence recorded' }]);
+      assert.equal(input.actor, undefined);
+      assert.equal(input.status, undefined);
+      f.requests[2].resolve(response({ task_id: taskId, revision: 2 }));
+      await submitted;
+    } finally { harness.stop(); f.controller.abort(); }
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+  }
+});
+
+test('open Web drafts cannot silently adopt a newer write context and overwrite unseen changes', async () => {
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  try {
+    const { f, harness } = await mountActions(rootTask);
+    try {
+      button(harness.render(), 'Edit current definition and requirements').props.onClick();
+      let tree = harness.render();
+      field(tree, 'description').props.onChange({ target: { value: 'User draft' } });
+      tree = harness.render();
+      const dialog = elements(tree).find(node => node.type === 'dialog');
+      button(dialog, 'Refresh Task').props.onClick();
+      for (const request of f.requests.slice(2)) {
+        const query = JSON.parse(request.init.body);
+        request.resolve(response({ ...rootTask, revision: 2, write_context: 'newer-write-context',
+          ...(query.view === 'execution' ? { description: 'Someone else changed this', references: [], metadata: {} } : {}) }));
+      }
+      await settle();
+      tree = harness.render();
+      assert.equal(field(tree, 'description').props.value, 'User draft');
+      assert.match(textContent(tree), /facts changed while this form was open/);
+      assert.equal(elements(tree).find(node => node.type === 'button' && node.props.type === 'submit').props.disabled, true);
+      const count = f.requests.length;
+      await elements(tree).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+      assert.equal(f.requests.length, count);
+    } finally { harness.stop(); f.controller.abort(); }
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+  }
+});
+
+test('mounted reopen and automation actions use their exact public schemas without Agent start or mode mutation', async () => {
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  try {
+    for (const [action, label, task] of [
+      ['task_reopen', 'Reopen completed responsibility', { ...rootTask, status: 'done', assignee: 'original-worker', work_mode: 'orchestrate' }],
+      ['task_automation_start', 'Queue automation once', { ...automatedExecution, ready: true, automation: { ...automatedExecution.automation, state: 'created', barrier: false } }],
+      ['task_automation_reconcile', 'Reconcile automation launch barrier', { ...automatedExecution, status: 'done', automation: { ...automatedExecution.automation, state: 'interrupted', barrier: true } }],
+    ]) {
+      const { f, harness } = await mountActions(task);
+      try {
+        button(harness.render(), label).props.onClick();
+        let tree = harness.render();
+        if (action !== 'task_automation_start') {
+          field(tree, 'reason').props.onChange({ target: { value: 'Explicit authorization after inspecting current facts' } });
+          tree = harness.render();
+        }
+        const submitted = elements(tree).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+        assert.equal(f.requests[2].path, `/tools/${action}`);
+        const input = JSON.parse(f.requests[2].init.body);
+        assert.deepEqual(parseInput(action, input), input);
+        assert.equal(input.actor, undefined);
+        assert.equal(input.work_mode, undefined);
+        assert.equal(input.assignee, undefined);
+        f.requests[2].resolve(response({ task_id: taskId }));
+        await submitted;
+        assert.equal(elements(harness.render()).find(node => node.type === 'button' && node.props.type === 'submit').props.disabled, true);
+      } finally { harness.stop(); f.controller.abort(); }
+    }
+    const { f, harness } = await mountActions(rootTask);
+    try {
+      button(harness.render(), 'Create registered automation').props.onClick();
+      let tree = harness.render();
+      for (const [name, value] of [['title', 'Run check once'], ['description', 'Authorized immutable script run'],
+        ['script_id', 'registered-check'], ['parameters', '{"count":2,"enabled":false}']]) {
+        field(tree, name).props.onChange({ target: { value } });
+        tree = harness.render();
+      }
+      const submitted = elements(tree).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+      const input = JSON.parse(f.requests[2].init.body);
+      assert.equal(f.requests[2].path, '/tools/task_create');
+      assert.deepEqual(parseInput('task_create', input), input);
+      assert.deepEqual(input.automation, { script_id: 'registered-check', parameters: { count: 2, enabled: false } });
+      assert.equal(input.work_mode, undefined);
+      assert.equal(input.assignee, undefined);
+      f.requests[2].resolve(response({ task_id: taskId }));
+      await submitted;
+    } finally { harness.stop(); f.controller.abort(); }
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+  }
+});
+
+test('child lists do not mistake retained cancellation intent for a nonterminal cancelled child', async () => {
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  try {
+    const { f, harness } = await mountActions(rootTask);
+    try {
+      button(harness.render(), 'Relations').props.onClick();
+      button(harness.render(), 'Subtasks delegated from this Task').props.onClick();
+      harness.render();
+      f.requests[2].resolve(response({ items: [{
+        ...rootTask, task_id: '6f1c0c92-3580-4cdd-85bf-d7fcf22ab3ff', parent_task_id: taskId,
+        title: 'Closed child', status: 'cancelled', cancellation_request: {
+          reason: 'Authorized stop', author: 'user', at: '2026-09-28T00:00:00Z', request_id: 'original-intent',
+        },
+      }], next_cursor: null }));
+      await settle();
+      const tree = harness.render();
+      assert.match(textContent(tree), /Closed child.*Cancelled/);
+      assert.doesNotMatch(textContent(tree), /Cancellation requested \(not terminal\)/);
+    } finally { harness.stop(); f.controller.abort(); }
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
   }
 });

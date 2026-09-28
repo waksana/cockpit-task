@@ -9,6 +9,9 @@ import { inspectLifecycleMigration, TaskStore } from '../src/task-board/store.js
 import { TaskService } from '../src/task-board/service.js';
 import { LIMITS, parseInput } from '../src/task-board/contracts.js';
 import { restoreV10Operations } from './helpers/operations-v10.js';
+import { serviceOrchestratingRoot, startExecution } from './helpers/responsibility-fixtures.js';
+import { restoreV11Schema } from './helpers/responsibility-v11.js';
+import { responsibilityFingerprint } from '../src/task-board/responsibility-migration.js';
 
 function fixture(t, overrides = {}) {
   const root = join(process.cwd(), '.task-board-tests', randomUUID());
@@ -29,19 +32,29 @@ function fixture(t, overrides = {}) {
     root, sent, inspected, errors, call, context,
     get store() { return store; }, get service() { return service; },
     async create(fields = {}) {
+      await serviceOrchestratingRoot(service, store, fields.actor ?? 'orchestrator');
       const result = await call('task_create', { title: 'Synthetic', description: 'Synthetic requirements', ...fields });
       assert.equal(result.error, null, JSON.stringify(result.error));
       return result.result;
     },
     edit: (id, fields) => call('task_edit', { ...context(id), revision: store.task(id).revision, reason: 'Adjust dependencies', ...fields }),
     assign: (id, assignee = `assignee-${randomUUID()}`, fields = {}) => call('task_assign', { ...context(id), revision: store.task(id).revision, assignee, ...fields }),
-    cancel: id => call('task_cancel', { ...context(id), reason: 'Not needed' }),
+    async cancel(id, actor = 'orchestrator') {
+      if (store.task(id).status === 'cancelled') return call('task_cancel', { actor, ...context(id), reason: 'Not needed' });
+      const requested = await call('task_cancel', { actor, ...context(id), reason: 'Not needed' });
+      assert.equal(requested.error, null, JSON.stringify(requested.error));
+      return call('task_cancel_finalize', {
+        actor: store.task(id).assignee ?? 'user', ...context(id), revision: store.task(id).revision,
+        summary: 'Cancelled before further work; no resources remain.',
+      });
+    },
     async done(id) {
       const assignee = `assignee-${randomUUID()}`;
       assert.equal((await f.assign(id, assignee)).error, null);
       const revision = store.task(id).revision;
       const as = { actor: assignee, request_id: randomUUID(), ...context(id), revision };
       assert.equal((await service.execute('task_ack', as)).error, null);
+      assert.equal((await service.execute('task_start', { ...as, request_id: randomUUID(), work_mode: 'execute' })).error, null);
       const input = { ...as, request_id: randomUUID(), write_context: store.task(id).write_context, status: 'done', outcome: { summary: 'Delivered' }, retro: null };
       const result = await service.execute('task_report', input);
       assert.equal(result.error, null, JSON.stringify(result.error));
@@ -80,7 +93,7 @@ test('create and edit validate blockers: existence, cross-orchestrator, not canc
   await expectError(f.call('task_create', { title: 'x', description: 'x', blocked_by: [randomUUID()] }), 'BLOCKER_NOT_FOUND');
   const cross = await f.service.execute('task_create', { actor: 'other', request_id: randomUUID(), title: 'cross', description: 'x', blocked_by: [a.task_id] });
   assert.equal(cross.error, null);
-  assert.equal(f.store.task(cross.result.task_id).orchestrator, 'other');
+  assert.equal(f.store.task(cross.result.task_id).created_by, 'other');
   await expectError(f.edit(a.task_id, { blocked_by: [a.task_id] }), 'DEPENDENCY_SELF');
   await expectError(f.edit(a.task_id, { blocked_by: [b.task_id] }), 'DEPENDENCY_CYCLE');
   const c = await f.create({ blocked_by: [b.task_id] });
@@ -90,7 +103,7 @@ test('create and edit validate blockers: existence, cross-orchestrator, not canc
   await f.cancel(gone.task_id);
   await expectError(f.call('task_create', { title: 'x', description: 'x', blocked_by: [gone.task_id] }), 'BLOCKER_CANCELLED');
   // A rejected create leaves no Task behind.
-  assert.equal(f.store.read({ view: 'list', orchestrator: 'orchestrator', status: 'all' }).items.length, 4);
+  assert.equal(f.store.read({ view: 'list', parent_assignee: 'orchestrator', status: 'all' }).items.length, 4);
   // Upper-case IDs normalize to the stored Task.
   const upper = await f.create({ blocked_by: [a.task_id.toUpperCase()] });
   assert.deepEqual(ids(upper), [a.task_id]);
@@ -129,6 +142,7 @@ test('edit replaces the set, bumps only the materials context and may update an 
 test('assigning a not-ready Task is rejected before reservation or Assignee inspection', async t => {
   const f = fixture(t);
   const a = await f.create(), d = await f.create({ blocked_by: [a.task_id] });
+  f.inspected.length = 0;
   const request_id = randomUUID();
   const rejected = await f.assign(d.task_id, 'assignee-x', { request_id });
   assert.equal(rejected.error.code, 'TASK_NOT_READY');
@@ -137,10 +151,16 @@ test('assigning a not-ready Task is rejected before reservation or Assignee insp
   assert.deepEqual(f.sent, []);
   assert.throws(() => f.store.operation({ actor: 'orchestrator', request_id }), error => error.code === 'OPERATION_NOT_FOUND');
   assert.equal(f.store.task(d.task_id).assignee, null);
-  // The transactional bind is the authoritative gate even without the service precheck.
   const input = { actor: 'orchestrator', request_id: randomUUID(), task_id: d.task_id, write_context: f.store.task(d.task_id).write_context, revision: 1, assignee: 'assignee-y' };
-  f.store.reserveOperation('task_assign', input);
-  assert.throws(() => f.store.bindAssignment(input), error => error.code === 'TASK_NOT_READY');
+  assert.throws(() => f.store.reserveOperation('task_assign', input), error => error.code === 'TASK_NOT_READY');
+  assert.throws(() => f.store.operation(input), error => error.code === 'OPERATION_NOT_FOUND');
+  // A prerequisite introduced after reservation must still block the authoritative bind transaction.
+  const lateBlocked = await f.create();
+  const pending = { ...input, request_id: randomUUID(), ...f.context(lateBlocked.task_id) };
+  f.store.reserveOperation('task_assign', pending);
+  assert.equal((await f.edit(lateBlocked.task_id, { blocked_by: [a.task_id] })).error, null);
+  assert.throws(() => f.store.bindAssignment(pending), error => error.code === 'TASK_NOT_READY');
+  assert.equal(f.store.task(lateBlocked.task_id).assignee, null);
   await f.done(a.task_id);
   assert.equal((await f.assign(d.task_id, 'assignee-x', { request_id })).error, null);
   assert.equal(f.store.task(d.task_id).assignee, 'assignee-x');
@@ -153,27 +173,35 @@ test('only the last blocker becoming done sends one idempotent ready notice to t
   const unrelated = await f.create({ blocked_by: [a.task_id, b.task_id] });
   await f.cancel(unrelated.task_id);
   const first = await f.done(a.task_id);
-  assert.equal(first.result.result.notice_ids, undefined);
-  assert.equal(f.sent.filter(entry => entry.session === 'orchestrator').length, 0);
+  assert.equal(first.result.result.notice_ids.length, 1, 'The child completion is distinct from dependency readiness');
+  assert.deepEqual(f.sent.filter(entry => entry.session === 'orchestrator').map(entry => entry.text), [
+    `[Subtask cancelled](task:${unrelated.task_id}?event=child_cancelled)`,
+    `[Subtask done](task:${a.task_id}?event=child_done)`,
+  ]);
   assert.equal(f.store.task(d.task_id).ready, false);
   const last = await f.done(b.task_id);
   assert.equal(last.result.notification_error, null);
-  assert.equal(last.result.result.notice_ids.length, 1);
+  assert.equal(last.result.result.notice_ids.length, 2);
   assert.equal(last.result.notifications[0].notification.status, 'accepted');
   const orchestratorCards = () => f.sent.filter(entry => entry.session === 'orchestrator');
-  assert.deepEqual(orchestratorCards(), [{ session: 'orchestrator', text: `[Subtask ready](task:${d.task_id}?event=ready)` }]);
+  assert.deepEqual(orchestratorCards().map(entry => entry.text).sort(), [
+    `[Subtask cancelled](task:${unrelated.task_id}?event=child_cancelled)`,
+    `[Subtask done](task:${a.task_id}?event=child_done)`,
+    `[Subtask done](task:${b.task_id}?event=child_done)`,
+    `[Subtask ready](task:${d.task_id}?event=ready)`,
+  ].sort());
   const [notice] = f.notices(d.task_id);
   assert.equal(notice.kind, 'ready');
-  assert.equal(notice.orchestrator, 'orchestrator');
+  assert.equal(notice.recipient, 'orchestrator');
   assert.equal(notice.blocker_id, b.task_id);
   assert.equal(notice.event.blocker_status, 'done');
   assert.equal(notice.event.request_id, last.input.request_id);
   const replay = await f.service.execute('task_report', last.input);
   assert.deepEqual(replay.result, last.result.result);
-  assert.equal(orchestratorCards().length, 1, 'receipt replay never resends');
+  assert.equal(orchestratorCards().length, 4, 'receipt replay never resends');
   f.restart();
   await f.service.recoverNotifications();
-  assert.equal(orchestratorCards().length, 1, 'restart never resends a delivered notice');
+  assert.equal(orchestratorCards().length, 4, 'restart never resends a delivered notice');
   const task = f.store.task(d.task_id);
   assert.equal(task.status, 'todo');
   assert.equal(task.assignee, null, 'ready never assigns or dispatches');
@@ -183,6 +211,8 @@ test('only the last blocker becoming done sends one idempotent ready notice to t
 
 test('cross-orchestrator blockers are accepted and ready notices go to the dependent orchestrator', async t => {
   const f = fixture(t);
+  await serviceOrchestratingRoot(f.service, f.store, 'blocker-orchestrator');
+  await serviceOrchestratingRoot(f.service, f.store, 'dependent-orchestrator');
   const blocker = (await f.service.execute('task_create', {
     actor: 'blocker-orchestrator', request_id: randomUUID(), title: 'Blocker', description: 'Other tree',
   })).result;
@@ -190,7 +220,7 @@ test('cross-orchestrator blockers are accepted and ready notices go to the depen
     actor: 'dependent-orchestrator', request_id: randomUUID(), title: 'Dependent', description: 'Wait cross-tree',
     blocked_by: [blocker.task_id],
   })).result;
-  assert.equal(f.store.task(dependent.task_id).orchestrator, 'dependent-orchestrator');
+  assert.equal(f.store.task(dependent.task_id).parent_assignee, 'dependent-orchestrator');
   assert.deepEqual(dependent.blocked_by, [{ task_id: blocker.task_id, status: 'todo' }]);
   f.sent.length = 0;
   const assignee = `assignee-${randomUUID()}`;
@@ -203,6 +233,7 @@ test('cross-orchestrator blockers are accepted and ready notices go to the depen
     actor: assignee, request_id: randomUUID(), ...f.context(blocker.task_id),
     revision: f.store.task(blocker.task_id).revision,
   })).error, null);
+  startExecution(f.store, blocker, assignee);
   assert.equal((await f.service.execute('task_report', {
     actor: assignee, request_id: randomUUID(), ...f.context(blocker.task_id),
     revision: f.store.task(blocker.task_id).revision,
@@ -217,13 +248,17 @@ test('a cancelled blocker notifies the Orchestrator once and keeps the dependent
   const f = fixture(t);
   const a = await f.create(), b = await f.create();
   const d = await f.create({ blocked_by: [a.task_id, b.task_id] });
-  const cancelled = await f.call('task_cancel', { actor: 'user', ...f.context(a.task_id), reason: 'Not needed' });
+  const cancelled = await f.cancel(a.task_id, 'user');
   assert.equal(cancelled.error, null);
-  assert.equal(cancelled.result.notice_ids.length, 1);
-  assert.deepEqual(f.sent, [{ session: 'orchestrator', text: `[Subtask blocker cancelled](task:${d.task_id}?event=blocker_cancelled)` }]);
+  assert.equal(cancelled.result.notice_ids.length, 2);
+  assert.deepEqual(f.sent.map(entry => entry.text).sort(), [
+    `[Subtask blocker cancelled](task:${d.task_id}?event=blocker_cancelled)`,
+    `[Subtask cancelled](task:${a.task_id}?event=child_cancelled)`,
+  ].sort());
   assert.equal((await f.cancel(a.task_id)).result.status, 'unchanged');
   await f.done(b.task_id);
-  assert.equal(f.sent.filter(entry => entry.session === 'orchestrator').length, 1, 'no ready notice while a blocker is cancelled');
+  assert.equal(f.sent.filter(entry => entry.session === 'orchestrator').length, 3, 'Only sibling completion is added, not readiness');
+  assert.equal(f.sent.some(entry => entry.text.includes('?event=ready')), false);
   const overview = f.store.read({ view: 'overview', task_id: d.task_id });
   assert.equal(overview.ready, false);
   assert.deepEqual(overview.blocked_by, [{ task_id: a.task_id, status: 'cancelled' }]);
@@ -242,9 +277,9 @@ test('assigned dependents receive update notices for blocker edits, readiness an
     actor: 'dependent-worker', request_id: randomUUID(), ...f.context(dependent.task_id),
     revision: f.store.task(dependent.task_id).revision,
   })).error, null);
-  assert.equal((await f.service.execute('task_report', {
+  assert.equal((await f.service.execute('task_start', {
     actor: 'dependent-worker', request_id: randomUUID(), ...f.context(dependent.task_id),
-    revision: f.store.task(dependent.task_id).revision, status: 'in_progress',
+    revision: f.store.task(dependent.task_id).revision, work_mode: 'execute',
   })).error, null);
   f.sent.length = 0;
 
@@ -256,7 +291,7 @@ test('assigned dependents receive update notices for blocker edits, readiness an
 
   f.sent.length = 0;
   const done = await f.done(blocker.task_id);
-  assert.equal(done.result.result.notice_ids.length, 1);
+  assert.equal(done.result.result.notice_ids.length, 2);
   const readyUpdates = f.sent.filter(entry => entry.text.startsWith('[Task updated]'));
   assert.deepEqual(readyUpdates.map(entry => entry.session), ['dependent-worker']);
   assert.equal(readyUpdates[0].text, `[Task updated](task:${dependent.task_id}?event=updated)`);
@@ -285,7 +320,7 @@ test('list, overview, execution and selected context project blockers and readin
   assert.deepEqual(pick(f.store.read({ view: 'overview', task_id: d.task_id })), expected);
   assert.deepEqual(pick(f.store.read({ view: 'execution', task_id: d.task_id })), expected);
   assert.deepEqual(pick(f.store.read({ view: 'overview', task_id: d.task_id, include: ['context'] })), expected);
-  const listed = f.store.read({ view: 'list', orchestrator: 'orchestrator' }).items.find(item => item.id === d.task_id);
+  const listed = f.store.read({ view: 'list', parent_assignee: 'orchestrator' }).items.find(item => item.id === d.task_id);
   assert.deepEqual(pick(listed), expected);
   assert.deepEqual(pick(f.store.read({ view: 'overview', task_id: a.task_id })), { blocked_by: [], ready: true });
 });
@@ -301,13 +336,17 @@ test('a pending notice survives restart and is recovered exactly once', async t 
   f.store.bindAssignment(input);
   const as = { actor: assignee, task_id: a.task_id, revision: 1 };
   f.store.executeLocal('task_ack', { ...as, request_id: randomUUID(), write_context: f.store.task(a.task_id).write_context });
+  startExecution(f.store, a, assignee);
   f.store.executeLocal('task_report', { ...as, request_id: randomUUID(), write_context: f.store.task(a.task_id).write_context, status: 'done', outcome: { summary: 'Done' }, retro: null });
   assert.equal(f.notices(d.task_id)[0].notification.status, 'pending');
   fail = false;
   f.restart();
   await f.service.recoverNotifications();
   await f.service.recoverNotifications();
-  assert.deepEqual(f.sent, [{ session: 'orchestrator', text: `[Subtask ready](task:${d.task_id}?event=ready)` }]);
+  assert.deepEqual(f.sent.map(entry => entry.text).sort(), [
+    `[Subtask ready](task:${d.task_id}?event=ready)`,
+    `[Subtask done](task:${a.task_id}?event=child_done)`,
+  ].sort());
   assert.equal(f.notices(d.task_id)[0].notification.status, 'accepted');
 });
 
@@ -321,7 +360,7 @@ test('schema keeps existing Tasks without changing dependency facts', t => {
   store.close();
   store = new TaskStore(root);
   try {
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 11);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 12);
     assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
     assert.deepEqual(store.db.prepare('SELECT * FROM operations').all(), receipts);
     const migrated = store.task(task.task_id);
@@ -339,6 +378,7 @@ test('pause stays in_progress; a later condition escalates once and atomically b
   assert.equal((await f.service.execute('task_ack', {
     actor: 'worker', request_id: randomUUID(), ...f.context(dependent.task_id), revision: 1,
   })).error, null);
+  startExecution(f.store, dependent, 'worker');
   assert.equal((await f.service.execute('task_report', {
     actor: 'worker', request_id: randomUUID(), ...f.context(dependent.task_id), revision: 1,
     status: 'in_progress', activity: { text: 'User asked to pause; waiting without changing lifecycle or inventing a blocker.' },
@@ -457,7 +497,9 @@ test('mixed prerequisites, condition authority, silent partial resolution and ca
   assert.equal((await f.edit(dependent.task_id, { description: 'Updated complete blocked agreement.' })).error, null);
   await f.done(blocker.task_id);
   assert.equal(f.sent.filter(item => item.session === 'worker').length, 0);
-  assert.deepEqual(f.store.task(dependent.task_id).blocked_by, [condition]);
+  const [remainingCondition] = f.store.task(dependent.task_id).blocked_by;
+  assert.equal(remainingCondition.condition, condition.condition);
+  assert.match(remainingCondition.dependency_id, /^[0-9a-f-]{36}$/);
   assert.equal((await f.edit(dependent.task_id, { blocked_by: [] })).error, null);
   assert.equal(f.sent.filter(item => item.session === 'worker').length, 1);
   const cancelledBlocker = await f.create();
@@ -497,11 +539,14 @@ test('dependency transitions do not remind their own actor and unknown escalatio
   const waiting = await f.create({ blocked_by: [blocker.task_id] });
   f.sent.length = 0;
   await f.cancel(blocker.task_id);
-  assert.equal(f.sent.length, 0, 'orchestrator does not receive its own cancellation reminder');
+  assert.deepEqual(f.sent.map(entry => entry.text).sort(), [
+    `[Subtask blocker cancelled](task:${waiting.task_id}?event=blocker_cancelled)`,
+    `[Subtask cancelled](task:${blocker.task_id}?event=child_cancelled)`,
+  ].sort(), 'The Web user finalizes an unbound cancellation; its parent receives both distinct transitions');
   assert.equal(f.store.task(waiting.task_id).ready, false);
 });
 
-test('schema v10 preflights every legacy state and migrates all branches only with exact reviewed entries', t => {
+test('legacy lifecycle review migrates every decision branch only to schema10 and cannot bypass responsibility review', t => {
   const root = join(process.cwd(), '.task-board-tests', randomUUID());
   mkdirSync(root, { recursive: true });
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -517,9 +562,16 @@ test('schema v10 preflights every legacy state and migrates all branches only wi
   const review = create('migration-review', 'Legacy review');
   const automation = create('migration-automation', 'Failed automation');
   const consumer = create('migration-consumer', 'Automation consumer', [automation.task_id]);
+  const dependencies = store.db.prepare('SELECT * FROM task_dependencies').all();
   store.close();
 
   const db = new DatabaseSync(join(root, 'task-board.sqlite'));
+  restoreV11Schema(db);
+  for (const { evidence, refs, ...entry } of dependencies) {
+    const columns = Object.keys(entry);
+    db.prepare(`INSERT INTO task_dependencies(${columns.join(',')}) VALUES(${columns.map(() => '?').join(',')})`)
+      .run(...Object.values(entry));
+  }
   const at = new Date().toISOString();
   db.exec('DROP TRIGGER tasks_status_insert; DROP TRIGGER tasks_status_update; DROP TABLE migration_v10_items; DROP TABLE migration_v10_subscriptions;');
   db.prepare("UPDATE tasks SET status='blocked' WHERE id IN (?,?,?,?)")
@@ -577,45 +629,61 @@ test('schema v10 preflights every legacy state and migrates all branches only wi
   writeFileSync(planFile, JSON.stringify(plan));
   const before = readFileSync(join(root, 'task-board.sqlite'));
   const cli = (...args) => execFileSync(process.execPath, ['scripts/migrate-task-v10.js', '--data-root', root, ...args], { encoding: 'utf8' });
-  const preflight = JSON.parse(cli('--preflight', '--plan', planFile));
+  const preflight = JSON.parse(cli('--plan', planFile, '--preflight'));
   assert.equal(preflight.status, 'ready');
   assert.equal(preflight.target_schema, 10);
-  assert.equal(preflight.final_schema, 11);
+  assert.equal(preflight.final_schema, 10);
   assert.deepEqual(readFileSync(join(root, 'task-board.sqlite')), before, 'preflight is read-only');
   const drift = new DatabaseSync(join(root, 'task-board.sqlite'));
   drift.prepare('UPDATE tasks SET editable=editable+1 WHERE id=?').run(condition.task_id);
   drift.close();
   assert.throws(() => new TaskStore(root, { migrationPlan: plan }), error => error.code === 'MIGRATION_REVIEW_REQUIRED');
+  assert.throws(() => inspectLifecycleMigration(root, { plan }), error => error.code === 'MIGRATION_REVIEW_REQUIRED');
   plan.source_fingerprint = inspectLifecycleMigration(root).source_fingerprint;
   writeFileSync(planFile, JSON.stringify(plan));
-  const applied = JSON.parse(cli('--apply', '--plan', planFile));
-  assert.equal(applied.status, 'migrated');
-  assert.equal(applied.schema, 11);
-  store = new TaskStore(root);
-  try {
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 11);
-    assert.equal(store.task(withDependency.task_id).status, 'in_progress');
-    assert.equal(store.task(withDependency.task_id).ready, true);
-    assert.deepEqual(store.task(condition.task_id).blocked_by,
-      [{ condition: 'The user must provide the missing decision before implementation resumes.' }]);
-    assert.equal(store.task(paused.task_id).ready, true);
-    assert.equal(store.task(review.task_id).status, 'in_progress');
-    assert.equal(store.task(automation.task_id).status, 'done');
-    assert.equal(store.task(automation.task_id).automation.state, 'failed');
-    assert.equal(store.task(automation.task_id).automation.barrier, true);
-    assert.equal(store.task(consumer.task_id).ready, true, 'migrated finished automation resolves its old dependencies');
-    assert.match(store.read({ view: 'outcomes', task_id: automation.task_id }).items[0].summary, /Exit code: 7/);
-    assert.equal(store.read({ view: 'subscriptions', task_id: condition.task_id }).items[0].state, 'expired');
-    const mixed = store.read({ view: 'subscriptions', task_id: paused.task_id }).items[0];
-    assert.equal(mixed.state, 'waiting');
-    assert.deepEqual(mixed.statuses, ['done']);
-    assert.equal(store.db.prepare('SELECT count(*) AS count FROM migration_v10_subscriptions').get().count, 2);
-    assert.equal(store.db.prepare('SELECT count(*) AS count FROM migration_v10_items').get().count, 5);
-    assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
-    assert.deepEqual(store.db.prepare('PRAGMA foreign_key_check').all(), []);
-  } finally {
-    store.close();
+  assert.equal(inspectLifecycleMigration(root, { plan }).tasks.length, 5);
+  for (const [id, invalid] of [
+    [withDependency.task_id, { ...tasks[withDependency.task_id], action: 'paused' }],
+    [condition.task_id, { ...tasks[condition.task_id], condition: '' }],
+    [paused.task_id, { ...tasks[paused.task_id], source: '' }],
+    [review.task_id, { ...tasks[review.task_id], revision: 2 }],
+    [automation.task_id, { ...tasks[automation.task_id], action: 'resume' }],
+  ]) {
+    assert.throws(() => inspectLifecycleMigration(root, { plan: { ...plan, tasks: { ...tasks, [id]: invalid } } }),
+      error => error.code === 'MIGRATION_REVIEW_REQUIRED');
   }
+  const preserved = new DatabaseSync(join(root, 'task-board.sqlite'));
+  try {
+    const receipts = preserved.prepare('SELECT * FROM operations ORDER BY request_id').all();
+    const applied = JSON.parse(cli('--plan', planFile, '--apply'));
+    assert.equal(applied.status, 'migrated');
+    assert.equal(applied.schema, 10, 'Lifecycle review does not select responsibility modes or upgrade receipts');
+    assert.equal(preserved.prepare('PRAGMA user_version').get().user_version, 10);
+    assert.deepEqual(preserved.prepare('SELECT * FROM operations ORDER BY request_id').all(), receipts);
+    assert.deepEqual(preserved.prepare("SELECT status FROM tasks WHERE id IN (?,?,?) ORDER BY seq").all(withDependency.task_id, condition.task_id, paused.task_id).map(row => row.status), ['in_progress', 'in_progress', 'in_progress']);
+    assert.equal(preserved.prepare('SELECT status FROM tasks WHERE id=?').get(review.task_id).status, 'in_progress');
+    assert.equal(preserved.prepare('SELECT status FROM tasks WHERE id=?').get(automation.task_id).status, 'done');
+    assert.deepEqual({ ...preserved.prepare('SELECT state,barrier,exit_code FROM automation_runs WHERE task_id=?').get(automation.task_id) },
+      { state: 'failed', barrier: 1, exit_code: 7 });
+    assert.equal(preserved.prepare('SELECT blocker_id FROM task_dependencies WHERE task_id=?').get(consumer.task_id).blocker_id, automation.task_id);
+    assert.equal(preserved.prepare('SELECT resolution FROM task_dependencies WHERE task_id=?').get(consumer.task_id).resolution, 'done');
+    assert.equal(preserved.prepare('SELECT resolution FROM task_dependencies WHERE task_id=?').get(withDependency.task_id).resolution, 'done');
+    assert.equal(preserved.prepare('SELECT condition FROM task_dependencies WHERE task_id=? AND resolved_at IS NULL').get(condition.task_id).condition,
+      'The user must provide the missing decision before implementation resumes.');
+    assert.equal(preserved.prepare('SELECT count(*) AS n FROM task_dependencies WHERE task_id=? AND resolved_at IS NULL').get(paused.task_id).n, 0);
+    assert.match(preserved.prepare('SELECT summary FROM outcomes WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(automation.task_id).summary, /Exit code: 7/);
+    const subscriptions = preserved.prepare('SELECT statuses,state FROM subscriptions ORDER BY seq').all();
+    assert.deepEqual(subscriptions.map(row => [JSON.parse(row.statuses), row.state]), [[[], 'expired'], [['done'], 'waiting']]);
+    assert.deepEqual(preserved.prepare('SELECT prior_statuses FROM migration_v10_subscriptions').all().map(row => row.prior_statuses).sort(),
+      ['["blocked"]', '["blocked","done"]'].sort());
+    assert.equal(preserved.prepare('SELECT count(*) AS n FROM migration_v10_subscriptions').get().n, 2);
+    assert.equal(preserved.prepare('SELECT count(*) AS n FROM migration_v10_items').get().n, 5);
+    const fingerprint = responsibilityFingerprint(preserved);
+    assert.throws(() => new TaskStore(root), error => error.code === 'MIGRATION_REVIEW_REQUIRED');
+    assert.equal(responsibilityFingerprint(preserved), fingerprint, 'Subsequent startup cannot silently cross the responsibility boundary');
+    assert.equal(preserved.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+    assert.deepEqual(preserved.prepare('PRAGMA foreign_key_check').all(), []);
+  } finally { preserved.close(); }
 });
 
 test('v9 startup requires a reviewed plan even without legacy statuses', t => {
@@ -623,20 +691,26 @@ test('v9 startup requires a reviewed plan even without legacy statuses', t => {
   const task = f.store.executeLocal('task_create', {
     actor: 'orchestrator', request_id: randomUUID(), title: 'Current state', description: 'Keep intact',
   });
-  restoreV10Operations(f.store.db);
-  f.store.db.exec(`DROP TRIGGER tasks_status_insert; DROP TRIGGER tasks_status_update;
+  f.service.close();
+  const db = new DatabaseSync(join(f.root, 'task-board.sqlite'));
+  t.after(() => { if (db.isOpen) db.close(); });
+  restoreV11Schema(db);
+  restoreV10Operations(db);
+  db.exec(`DROP TRIGGER tasks_status_insert; DROP TRIGGER tasks_status_update;
     DROP TABLE migration_v10_items; DROP TABLE migration_v10_subscriptions; PRAGMA user_version=9`);
   const inventory = inspectLifecycleMigration(f.root);
   assert.deepEqual(inventory.tasks, []);
   assert.throws(() => new TaskStore(f.root), error => error.code === 'MIGRATION_REVIEW_REQUIRED');
   assert.equal(inspectLifecycleMigration(f.root).source_fingerprint, inventory.source_fingerprint);
-  const migrated = new TaskStore(f.root, { migrationPlan: {
+  const plan = {
     schema: 9, target_schema: 10, source_fingerprint: inventory.source_fingerprint, tasks: {},
-  } });
-  try {
-    assert.equal(migrated.task(task.task_id).description, 'Keep intact');
-    assert.equal(migrated.db.prepare('PRAGMA user_version').get().user_version, 11);
-  } finally { migrated.close(); }
+  };
+  assert.deepEqual(inspectLifecycleMigration(f.root, { plan }).tasks, []);
+  assert.throws(() => new TaskStore(f.root, { migrationPlan: plan }), error => error.code === 'MIGRATION_REVIEW_REQUIRED');
+  assert.equal(db.prepare('SELECT description FROM tasks WHERE id=?').get(task.task_id).description, 'Keep intact');
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 9);
+  assert.equal(inspectLifecycleMigration(f.root).source_fingerprint, inventory.source_fingerprint);
+  db.close();
 });
 
 test('list pagination bounds condition previews without truncating execution requirements', async t => {
@@ -644,10 +718,14 @@ test('list pagination bounds condition previews without truncating execution req
   const older = await f.create();
   const blocked_by = Array.from({ length: 20 }, (_, index) => ({ condition: `${index}${'\u0001'.repeat(1998)}` }));
   const large = await f.create({ blocked_by });
-  const page = f.store.read({ view: 'list', limit: 1 });
+  const page = f.store.read({ view: 'list', parent_assignee: 'orchestrator', limit: 1 });
   assert.equal(page.items[0].task_id, large.task_id);
   assert.ok(page.items[0].blocked_by.every(entry => entry.condition.length === 80 && entry.truncated));
   assert.ok(JSON.stringify(page).length < LIMITS.page);
-  assert.equal(f.store.read({ view: 'list', limit: 1, cursor: page.next_cursor }).items[0].task_id, older.task_id);
-  assert.deepEqual(f.store.read({ view: 'execution', task_id: large.task_id }).blocked_by, blocked_by);
+  const next = f.store.read({ view: 'list', parent_assignee: 'orchestrator', limit: 1, cursor: page.next_cursor });
+  assert.equal(next.items[0].task_id, older.task_id);
+  assert.equal(next.next_cursor, null, 'The root setup fixture must not add an unexpected pagination remainder');
+  const requirements = f.store.read({ view: 'execution', task_id: large.task_id }).blocked_by;
+  assert.deepEqual(requirements.map(({ condition }) => ({ condition })), blocked_by);
+  assert.equal(new Set(requirements.map(entry => entry.dependency_id)).size, blocked_by.length);
 });

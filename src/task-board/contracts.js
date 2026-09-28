@@ -14,7 +14,7 @@ export class TaskError extends Error {
 export const LIMITS = Object.freeze({
   description: 24000, activity: 4000, outcome: 8000, retro: 2000, metadata: 8000, retroNote: 2000,
   references: 20, blockers: 20, blockerCondition: 2000, excerpt: 320, list: 50, history: 10,
-  page: 24000, selection: 48000, definitionPayload: 64000, reportPayload: 16000, delegationDepth: 3,
+  page: 24000, selection: 48000, definitionPayload: 64000, reportPayload: 16000, treeNodes: 10000,
 });
 export const definitionFits = ({ description, references = [], metadata = {} }) =>
   JSON.stringify({ description, references, metadata }).length <= LIMITS.definitionPayload;
@@ -95,6 +95,8 @@ export const scriptSchema = z.strictObject({
   })).max(32).refine(values => new Set(values.map(value => value.name)).size === values.length, 'Parameter names must be unique'),
 }).refine(value => JSON.stringify(value).length <= 12000, 'Script registration exceeds 12000 characters');
 export const TASK_STATUSES = Object.freeze(['todo', 'in_progress', 'done', 'cancelled']);
+export const WORK_MODES = Object.freeze(['undecided', 'execute', 'orchestrate']);
+const workMode = z.enum(WORK_MODES);
 export const RETRO_HANDLING_STATUSES = Object.freeze(['fixed', 'followup', 'watching', 'dismissed']);
 const retroFilter = z.enum(['unhandled', 'watching']);
 export const READ_GROUPS = Object.freeze(['context', 'activity', 'outcome', 'retro', 'definition', 'automation', 'cancellation']);
@@ -104,7 +106,8 @@ const readInclude = z.array(z.enum(READ_GROUPS)).min(1).max(READ_GROUPS.length)
 export const schemas = {
   task_read: z.discriminatedUnion('view', [
     z.strictObject({
-      view: z.literal('list'), orchestrator: session.optional(), assignee: session.optional(), parent_task_id: id.optional(),
+      view: z.literal('list'), parent_assignee: session.optional(), assignee: session.optional(), parent_task_id: id.optional(),
+      root: z.boolean().optional(), work_mode: workMode.optional(),
       retro: retroFilter.optional(),
       status: z.enum(['todo', 'in_progress', 'done', 'cancelled', 'unfinished', 'all']).optional(),
       query: text(200).optional(), limit: z.number().int().min(1).max(LIMITS.list).optional(), cursor: text(2000).optional(),
@@ -113,7 +116,8 @@ export const schemas = {
     ...['execution', 'definition'].map(taskRead),
     z.strictObject({ view: z.literal('changelog'), task_id: id, ...pagination, revision: revision.optional() })
       .refine(x => x.revision === undefined || (x.cursor === undefined && x.limit === undefined), 'A revision selector cannot be paginated'),
-    ...['activity', 'outcomes', 'dependencies', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices'].map(view => z.strictObject({ view: z.literal(view), task_id: id, ...pagination })),
+    ...['activity', 'outcomes', 'dependencies', 'responsibility_events', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices'].map(view => z.strictObject({ view: z.literal(view), task_id: id, ...pagination })),
+    taskRead('ancestors').extend({ limit: z.number().int().min(1).max(LIMITS.list).optional(), cursor: text(2000).optional() }),
     z.strictObject({
       view: z.literal('automation_log'), task_id: id,
       offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
@@ -124,6 +128,7 @@ export const schemas = {
   task_create: z.strictObject({
     ...mutation, title: text(240), description: text(LIMITS.description),
     references: references.optional(), metadata: metadata.optional(), blocked_by: blockedBy.optional(),
+    parent_task_id: id.optional().describe('Web user only: explicit parent for a child. Session callers use their own active orchestrating Task; without one they create an unbound root.'),
     automation: z.strictObject({ script_id: scriptId, parameters }).optional(),
   }).refine(definitionFits, 'Combined serialized description and materials exceed 64000 characters'),
   task_script_register: z.strictObject({ ...mutation, ...scriptSchema.shape })
@@ -140,6 +145,22 @@ export const schemas = {
     ...existing, revision, assignee: session,
     resume_request_id: request.optional().describe('Only to finish a dispatch whose finalized operation in the same calling session shows assignment=applied and message=not_sent: the earlier request_id, same Task and assignee. Pending, queued, accepted, unknown or unattributable legacy sends cannot resume'),
   }),
+  task_claim: z.strictObject({ ...existing, revision }),
+  task_start: z.strictObject({ ...existing, revision, work_mode: z.enum(['execute', 'orchestrate']) }),
+  task_convert: z.strictObject({
+    ...existing, revision, reason: text(2000), completed: text(LIMITS.outcome), remaining: text(LIMITS.outcome),
+  }).refine(value => JSON.stringify({ reason: value.reason, completed: value.completed, remaining: value.remaining }).length <= LIMITS.reportPayload,
+    'Serialized conversion evidence exceeds 16000 characters'),
+  task_attach: z.strictObject({
+    ...existing, revision, parent_task_id: id, parent_write_context: text(1000), reason: text(2000),
+  }),
+  task_resolve_condition: z.strictObject({
+    ...existing, revision, dependency_id: id, evidence: text(LIMITS.activity), references: references.optional(),
+  }).refine(value => JSON.stringify({ evidence: value.evidence, references: value.references }).length <= LIMITS.reportPayload,
+    'Serialized satisfaction evidence exceeds 16000 characters'),
+  task_cancel_finalize: z.strictObject({ ...existing, revision, summary: text(LIMITS.outcome) })
+    .refine(value => JSON.stringify({ summary: value.summary }).length <= LIMITS.reportPayload,
+      'Serialized disposition exceeds 16000 characters'),
   task_edit: z.strictObject({
     ...existing, revision, reason: text(2000), title: text(240).optional(),
     description: text(LIMITS.description).optional(), references: references.optional(), metadata: metadata.optional(),
@@ -166,6 +187,7 @@ export const schemas = {
   task_cancel: z.strictObject({ ...existing, reason: text(2000) }),
   task_subscribe: z.strictObject({
     ...existing,
+    subscriber: session.optional().describe('Web user must select a recipient explicitly. Session callers subscribe themselves and cannot select another subscriber.'),
     statuses: z.array(z.enum(TASK_STATUSES)).min(1).max(TASK_STATUSES.length)
       .refine(values => new Set(values).size === values.length, 'Target statuses must be unique'),
   }),
@@ -180,17 +202,19 @@ export const schemas = {
 };
 // The MCP SDK publishes properties only for object roots, not discriminated unions.
 const readToolSchema = z.strictObject({
-  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'dependencies', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices', 'automation_log', 'operation']),
-  task_id: id.optional().describe('Required for overview, execution, definition, changelog, activity, outcomes, dependencies, retro_handlings, subscriptions, dependency_notices, child_notices, assignee_notices and automation_log'),
+  view: z.enum(['list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'dependencies', 'responsibility_events', 'ancestors', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices', 'automation_log', 'operation']),
+  task_id: id.optional().describe('Required for every view except list and operation'),
   include: readInclude.optional(),
   request_id: request.optional().describe('Required only for the operation view; resolves within the trusted calling session, shared by its main and subagents, never another session. Unattributable legacy IDs return LEGACY_OPERATION_UNSCOPED.'),
-  orchestrator: session.optional().describe('List filter only: Tasks this session orchestrates'),
+  parent_assignee: session.optional().describe('List filter only: Tasks whose current parent is bound to this session; creation history grants no authority'),
   assignee: session.optional().describe('List filter only: Tasks assigned to this session'),
   parent_task_id: id.optional().describe('List filter only: direct Subtasks of this parent Task'),
+  root: z.boolean().optional().describe('List filter only: true for ordinary roots, false for children'),
+  work_mode: workMode.optional().describe('List filter only: Agent responsibility mode, independent of lifecycle and native session mode'),
   retro: retroFilter.optional().describe('List filter only: latest retro has findings and is unhandled, or is marked watching; status then defaults to all'),
   status: z.enum(['todo', 'in_progress', 'done', 'cancelled', 'unfinished', 'all']).optional().describe('List filter only; defaults to unfinished, or all with a retro filter'),
   query: text(200).optional().describe('List title filter only'),
-  limit: z.number().int().min(1).max(8192).optional().describe('List: maximum 50. Histories: maximum 10. automation_log: maximum 8192 characters'),
+  limit: z.number().int().min(1).max(8192).optional().describe('List/ancestors: maximum 50. Histories: maximum 10. automation_log: maximum 8192 characters'),
   offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe('automation_log only: character offset'),
   cursor: text(2000).optional().describe('Continuation cursor for list or history views'),
   revision: revision.optional().describe('Select one complete changelog definition; cannot combine with limit or cursor'),

@@ -1,25 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { TaskStore, TaskError } from '../src/task-board/store.js';
 import { TaskService } from '../src/task-board/service.js';
+import { orchestratingRoot, startExecution, finalizeCancellation } from './helpers/responsibility-fixtures.js';
+import { restoreV11Schema } from './helpers/responsibility-v11.js';
+import { applyResponsibilityMigration, responsibilityInventory } from '../src/task-board/responsibility-migration.js';
 
 function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), 'task-reopen-'));
+  const root = join(process.cwd(), '.task-board-tests', randomUUID());
+  mkdirSync(root, { recursive: true });
   let store = new TaskStore(root);
-  t.after(() => { store.close(); rmSync(root, { recursive: true, force: true }); });
+  t.after(() => { if (store.db.isOpen) store.close(); rmSync(root, { recursive: true, force: true }); });
   const input = (task, fields = {}) => ({
     actor: 'assignee', request_id: randomUUID(),
     task_id: task.task_id, revision: task.revision, write_context: task.write_context, ...fields,
   });
-  const create = () => store.executeLocal('task_create', {
-    actor: 'orchestrator', request_id: randomUUID(),
-    title: 'Rework', description: 'Full agreement',
-    references: [{ label: 'Previous PR', target: 'https://example.test/pr/1' }],
-  });
+  const create = () => {
+    orchestratingRoot(store);
+    return store.executeLocal('task_create', {
+      actor: 'orchestrator', request_id: randomUUID(),
+      title: 'Rework', description: 'Full agreement',
+      references: [{ label: 'Previous PR', target: 'https://example.test/pr/1' }],
+    });
+  };
   const assign = task => {
     const request = input(task, { actor: 'orchestrator', assignee: 'assignee' });
     store.reserveOperation('task_assign', request);
@@ -27,6 +34,7 @@ function fixture(t) {
   };
   const done = task => {
     store.executeLocal('task_ack', input(task));
+    if (store.task(task.task_id).status === 'todo') task = startExecution(store, task);
     return store.executeLocal('task_report', input(task, {
       status: 'done', outcome: { summary: 'Prior delivery', references: [{ label: 'PR', target: 'https://example.test/pr/1' }] },
       retro: 'Observed improvement',
@@ -36,13 +44,43 @@ function fixture(t) {
   return {
     root, get store() { return store; }, input, create, assign, done, reopenInput,
     reopen: (task, fields) => store.executeLocal('task_reopen', reopenInput(task, fields)),
-    restart() { store.close(); store = new TaskStore(root); },
+    restart() { if (store.db.isOpen) store.close(); store = new TaskStore(root); },
   };
 }
 
 function rejects(work, code) {
   assert.throws(work, error => error.code === code);
 }
+
+test('child rework requires an active orchestrating ancestor and never reopens its finished parent implicitly', t => {
+  const f = fixture(t);
+  const child = f.done(f.assign(f.create()));
+  const parentId = f.store.task(child.task_id).parent_task_id;
+  const parent = f.store.task(parentId);
+  const parentDone = f.store.executeLocal('task_report', f.input(parent, {
+    actor: 'orchestrator', status: 'done', outcome: { summary: 'Integrated the completed child' }, retro: null,
+  }));
+  const childBefore = f.store.task(child.task_id);
+  const parentBefore = f.store.task(parentId);
+  rejects(() => f.reopen(child), 'PARENT_NOT_ORCHESTRATING');
+  assert.deepEqual(f.store.task(child.task_id), childBefore);
+  assert.deepEqual(f.store.task(parentId), parentBefore);
+  const reopenedParent = f.store.executeLocal('task_reopen', f.input(parentDone, {
+    actor: 'orchestrator', description: 'Authorized coordination rework', reason: 'Explicitly restore ancestor responsibility',
+  }));
+  assert.equal(reopenedParent.work_mode, 'orchestrate');
+  const reopenedChild = f.reopen(child);
+  assert.equal(reopenedChild.work_mode, 'execute');
+  assert.equal(f.store.task(parentId).status, 'in_progress');
+  const completedAgain = f.done(reopenedChild);
+  const { revision, ...cancellation } = f.input(f.store.task(parentId), { actor: 'user', reason: 'Stop coordination rework' });
+  f.store.executeLocal('task_cancel', cancellation);
+  rejects(() => f.reopen(completedAgain), 'CANCELLATION_REQUESTED');
+  finalizeCancellation(f.store, parentId, 'orchestrator');
+  rejects(() => f.reopen(completedAgain), 'PARENT_NOT_ORCHESTRATING');
+  assert.equal(f.store.task(completedAgain.task_id).status, 'done');
+  assert.equal(f.store.task(parentId).status, 'cancelled');
+});
 
 test('self-reopen atomically creates and ACKs a new revision even with identical text, preserving completion facts', t => {
   const f = fixture(t), assigned = f.assign(f.create());
@@ -57,7 +95,7 @@ test('self-reopen atomically creates and ACKs a new revision even with identical
   assert.equal(reopened.acknowledged_revision, 2);
   assert.notEqual(reopened.write_context, completed.write_context);
   const after = f.store.task(assigned.task_id);
-  for (const key of ['id', 'orchestrator', 'assignee', 'title', 'references', 'metadata', 'created_at', 'description']) {
+  for (const key of ['id', 'created_by', 'parent_assignee', 'assignee', 'title', 'references', 'metadata', 'created_at', 'description', 'work_mode']) {
     assert.deepEqual(after[key], before[key], key);
   }
   assert.equal(after.retro.current, false);
@@ -79,7 +117,7 @@ test('self-reopen atomically creates and ACKs a new revision even with identical
     assert.equal(read.outcome.current, false);
     assert.equal(read.retro.current, false);
   }
-  assert.equal(f.store.read({ view: 'list' }).items[0].outcome.current, false);
+  assert.equal(f.store.read({ view: 'list', parent_assignee: 'orchestrator' }).items[0].outcome.current, false);
   f.restart();
   assert.deepEqual(f.store.executeLocal('task_reopen', request), reopened);
   assert.equal(f.store.read({ view: 'changelog', task_id: assigned.task_id }).items.length, 2);
@@ -108,7 +146,7 @@ test('reopen rejects mismatched/missing actor, state, stale revision and editabl
   const completed = f.done(assigned);
   const g = fixture(t);
   assert.equal(g.reopen(g.done(g.assign(g.create())), { actor: 'orchestrator' }).revision, 2);
-  rejects(() => f.reopen(completed, { actor: 'someone-else' }), 'ORCHESTRATOR_OR_ASSIGNEE_REQUIRED');
+  rejects(() => f.reopen(completed, { actor: 'someone-else' }), 'PARENT_ASSIGNEE_OR_ASSIGNEE_REQUIRED');
   rejects(() => f.reopen(completed, { actor: undefined }), 'INVOCATION_REQUIRED');
   rejects(() => f.reopen(completed, { revision: 2 }), 'DESCRIPTION_UPDATED');
   rejects(() => f.reopen(completed, { write_context: assigned.write_context }), 'TASK_STATE_CONFLICT');
@@ -124,16 +162,45 @@ test('reopen rejects mismatched/missing actor, state, stale revision and editabl
     actor: 'orchestrator', request_id: randomUUID(), task_id: reopened.task_id,
     write_context: reopened.write_context, reason: 'Stop',
   });
-  rejects(() => f.reopen(cancelled), 'TASK_STATE_CONFLICT');
+  const finalized = finalizeCancellation(f.store, cancelled, 'assignee');
+  rejects(() => f.reopen(finalized), 'TASK_STATE_CONFLICT');
 });
 
-test('automation and unassigned done records cannot reopen or gain an Assignee', t => {
-  const f = fixture(t), task = f.create();
-  f.store.db.prepare("UPDATE tasks SET status='done',kind='automation' WHERE id=?").run(task.task_id);
-  rejects(() => f.reopen(task, { actor: 'orchestrator' }), 'AUTOMATION_MANAGED');
-  f.store.db.prepare("UPDATE tasks SET kind='agent' WHERE id=?").run(task.task_id);
-  rejects(() => f.reopen(task, { actor: 'orchestrator' }), 'REOPEN_NOT_ELIGIBLE');
-  assert.equal(f.store.task(task.task_id).assignee, null);
+test('explicitly migrated automation and unassigned legacy completions cannot reopen or gain an Assignee', t => {
+  const f = fixture(t);
+  f.store.close();
+  const db = new DatabaseSync(join(f.root, 'task-board.sqlite'));
+  t.after(() => { if (db.isOpen) db.close(); });
+  restoreV11Schema(db);
+  const at = new Date().toISOString();
+  const agent = randomUUID(), knownUnbound = randomUUID(), automation = randomUUID();
+  for (const [id, kind] of [[agent, 'agent'], [knownUnbound, 'agent'], [automation, 'automation']]) {
+    db.prepare(`INSERT INTO tasks(id,title,description,orchestrator,status,kind,refs,metadata,created_at,updated_at)
+      VALUES(?,?,?,?,'done',?,'[]','{}',?,?)`).run(id, 'Legacy completion', 'Historical requirements', 'historical-creator', kind, at, at);
+    db.prepare('INSERT INTO definitions(task_id,revision,description,reason,author,at) VALUES(?,1,?,?,?,?)')
+      .run(id, 'Historical requirements', 'Synthetic migration fixture', 'historical-creator', at);
+  }
+  db.prepare(`INSERT INTO automation_runs(run_id,task_id,script_id,script,parameters,state,finished_at)
+    VALUES(?,?,'historical','{}','{}','succeeded',?)`).run(randomUUID(), automation, at);
+  const inventory = responsibilityInventory(db);
+  applyResponsibilityMigration(db, {
+    schema: 11, target_schema: 12, source_fingerprint: inventory.source_fingerprint,
+    reviewer: 'synthetic-reviewer', source: 'Explicit review of historical completion fixtures',
+    tasks: Object.fromEntries([agent, knownUnbound, automation].map(id => [id, {
+      revision: 1, work_mode: id === knownUnbound ? 'execute' : null,
+      evidence: id === knownUnbound
+        ? 'The reviewed synthetic agreement explicitly records execute mode but no session binding'
+        : 'Preserve historical completion without inventing binding or mode',
+    }])),
+  });
+  db.close();
+  f.restart();
+  rejects(() => f.reopen(f.store.task(automation), { actor: 'user' }), 'AUTOMATION_MANAGED');
+  rejects(() => f.reopen(f.store.task(agent), { actor: 'user' }), 'MIGRATION_REVIEW_REQUIRED');
+  rejects(() => f.reopen(f.store.task(knownUnbound), { actor: 'user' }), 'REOPEN_NOT_ELIGIBLE');
+  assert.equal(f.store.task(agent).assignee, null);
+  assert.equal(f.store.task(knownUnbound).assignee, null);
+  assert.equal(f.store.task(agent).legacy, true);
 });
 
 test('actual assignment order, not creation/update timestamps or request reservation order, governs eligibility', t => {
@@ -158,17 +225,18 @@ test('later cancelled assignments still disqualify after restart', t => {
     task_id: later.task_id, write_context: later.write_context, actor: 'orchestrator',
     request_id: randomUUID(), reason: 'Later work cancelled',
   });
+  finalizeCancellation(f.store, later, 'assignee');
   f.restart();
   rejects(() => f.reopen(completed), 'REOPEN_NOT_ELIGIBLE');
-  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM task_assignments').get().n, 2);
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM task_assignments WHERE assignee='assignee'").get().n, 2);
 });
 
 test('assignment history preserves reopen eligibility after restart', t => {
   const f = fixture(t), prior = f.done(f.assign(f.create()));
   const history = f.store.read({ view: 'outcomes', task_id: prior.task_id });
   f.restart();
-  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 11);
-  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM task_assignments').get().n, 1);
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 12);
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM task_assignments WHERE assignee='assignee'").get().n, 1);
   assert.deepEqual(f.store.read({ view: 'outcomes', task_id: prior.task_id }), history);
   assert.equal(f.reopen(prior).task_status, 'in_progress');
 });
@@ -285,7 +353,7 @@ test('service checks ready original Assignee but permits its running turn; repla
 test('service rejects wrong attribution before host observation and unavailable readiness without mutation', async t => {
   const f = fixture(t), completed = f.done(f.assign(f.create()));
   const service = new TaskService(f.store, { inspect: () => assert.fail('Mismatched actor must not inspect another session') });
-  assert.equal((await service.execute('task_reopen', f.reopenInput(completed, { actor: 'someone-else' }))).error.code, 'ORCHESTRATOR_OR_ASSIGNEE_REQUIRED');
+  assert.equal((await service.execute('task_reopen', f.reopenInput(completed, { actor: 'someone-else' }))).error.code, 'PARENT_ASSIGNEE_OR_ASSIGNEE_REQUIRED');
   service.host.inspect = async () => ({ ready: false, node: true, idle: true });
   assert.equal((await service.execute('task_reopen', f.reopenInput(completed))).error.code, 'CAPABILITY_UNAVAILABLE');
   assert.equal(f.store.task(completed.task_id).revision, 1);
@@ -297,13 +365,14 @@ test('completion receipt replay after reopen preserves the old notice without an
   const { revision, ...subscriptionInput } = f.input(assigned, { statuses: ['done'], actor: 'orchestrator' });
   f.store.executeLocal('task_subscribe', subscriptionInput);
   f.store.executeLocal('task_ack', f.input(assigned));
+  const started = startExecution(f.store, assigned);
   let sends = 0;
   const service = new TaskService(f.store, {
     inspect: async () => ({ ready: true, node: true, idle: false }),
     sessionExists: async () => true,
     send: async () => { sends++; return { ok: true }; },
   });
-  const completion = f.input(assigned, { status: 'done', outcome: { summary: 'Delivered' }, retro: null });
+  const completion = f.input(started, { status: 'done', outcome: { summary: 'Delivered' }, retro: null });
   const done = await service.execute('task_report', completion);
   assert.equal(sends, 1);
   const reopened = await service.execute('task_reopen', f.reopenInput(done.result));
@@ -319,7 +388,7 @@ test('completion receipt replay after reopen preserves the old notice without an
     status: 'done', outcome: { summary: 'Rework delivered' }, retro: null,
   }));
   assert.equal(completedAgain.error, null);
-  assert.equal(sends, 1);
+  assert.equal(sends, 2, 'A fresh completion informs the still-active parent once');
 });
 
 test('assignment during asynchronous readiness check rejects reopen without an extra revision or ACK', async t => {
@@ -346,9 +415,15 @@ test('competing reopen requests and lost mutation response never duplicate a tra
   const service = new TaskService(f.store, {
     inspect: () => new Promise(resolve => releases.push(resolve)),
   });
+  const competingStore = new TaskStore(f.root);
+  const competingService = new TaskService(competingStore, service.host);
+  t.after(() => competingService.close());
   const request = f.reopenInput(completed);
   const first = service.execute('task_reopen', request);
-  const second = service.execute('task_reopen', f.reopenInput(completed));
+  const sameService = await service.execute('task_reopen', f.reopenInput(completed));
+  assert.equal(sameService.error.code, 'SESSION_OPERATION_IN_PROGRESS');
+  assert.equal(releases.length, 1, 'The per-session guard rejects before a duplicate readiness check');
+  const second = competingService.execute('task_reopen', f.reopenInput(completed));
   releases[0]({ ready: true, node: true });
   releases[1]({ ready: true, node: true });
   const [saved, rejected] = await Promise.all([first, second]);

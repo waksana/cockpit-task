@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 const tables = [
   'tasks', 'definitions', 'acknowledgements', 'activities', 'outcomes', 'task_assignments',
   'task_dependencies', 'subscriptions', 'dependency_notices', 'child_notices',
-  'assignee_notices', 'retro_handlings', 'automation_runs',
+  'assignee_notices', 'retro_handlings', 'automation_runs', 'responsibility_events',
 ];
 
 // Connection-local SQL triggers participate in commits/savepoints without changing the durable schema.
@@ -33,7 +33,8 @@ export class ReadVersions {
         db.exec(`CREATE TEMP TRIGGER task_read_${table}_${operation}
           AFTER ${operation} ON main.${table} ${changed} BEGIN
           ${touch(query)}
-          ${table === 'tasks' && operation === 'DELETE' ? touch('SELECT OLD.parent_task_id AS task_id') : ''}
+          ${table === 'tasks' && operation !== 'INSERT' ? touch('SELECT OLD.parent_task_id AS task_id') : ''}
+          ${table === 'tasks' && operation === 'UPDATE' ? touch('SELECT id AS task_id FROM tasks WHERE parent_task_id=NEW.id') : ''}
           END`);
       }
     }

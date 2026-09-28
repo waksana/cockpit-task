@@ -12,7 +12,9 @@ Agent delivery. Automation needs a Linux (or WSL2) host.
    tool descriptions define the exact argument vector; there is no shell.
 2. **Create.** `task_create` with `automation` saves the complete agreement plus an
    immutable script and typed-input snapshot. Creation runs nothing. An automation Task has
-   no assignee: never assign, ACK or report it.
+   no assignee: never assign, ACK or report it. Its work_mode is null, not an Agent mode.
+   A child requires an active orchestrating parent. Current parent-assignee authority, not
+   creator history, controls its start/reconcile; a root automation is managed by the Web user.
 3. **Subscribe only if needed, then start.** If a necessary follow-up of yours depends on
    the result, subscribe before `task_automation_start` so fast completion cannot race it.
    Start enqueues the run once; replaying the same request never reruns it.
@@ -25,6 +27,11 @@ Agent delivery. Automation needs a Linux (or WSL2) host.
    work: an interrupted run blocks the queue behind a barrier. Review its possible effects
    before `task_automation_reconcile`, which clears the barrier only when the service proves
    the process group is gone. Any repeat needs fresh authorization and a new Task.
+
+Automation cancellation stays service-managed; do not apply Agent cancellation-request,
+ACK or finalization steps. Its terminal state satisfies the parent's child gate, but failed
+execution does not satisfy the parent's goal. A Task-ID blocker waits for done, not success;
+record a success condition when the dependent actually requires one.
 
 This is a same-user trust boundary, not a sandbox. Scripts must not daemonize, detach or
 escape their process group, and the fingerprint covers only the script bytes, not the

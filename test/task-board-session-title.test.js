@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { TaskStore } from '../src/task-board/store.js';
 import { TaskService } from '../src/task-board/service.js';
 import { createHostAdapter } from '../src/task-board/host.js';
+import { seedOrchestratingRoot } from './helpers/service-responsibility-fixtures.js';
 
 function nativeHost(t, { name = null, userSet = false, provenance = true, rename } = {}) {
   const native = { name, userSet };
@@ -40,6 +41,7 @@ function nativeHost(t, { name = null, userSet = false, provenance = true, rename
     request_id: `title-${++sequence}`, actor: actor, ...input,
   });
   const create = async title => {
+    seedOrchestratingRoot(store);
     const created = await write('task_create', { title, description: 'Synthetic work' });
     assert.equal(created.error, null);
     return store.task(created.result.task_id);
@@ -51,6 +53,8 @@ function nativeHost(t, { name = null, userSet = false, provenance = true, rename
   const finish = async task => {
     const bound = store.task(task.id);
     await write('task_ack', { task_id: task.id, revision: bound.revision, write_context: bound.write_context }, 'assignee');
+    const started = await write('task_start', { task_id: task.id, revision: bound.revision, write_context: bound.write_context, work_mode: 'execute' }, 'assignee');
+    assert.equal(started.error, null);
     const acked = store.task(task.id);
     const done = await write('task_report', {
       task_id: task.id, revision: acked.revision, write_context: acked.write_context,

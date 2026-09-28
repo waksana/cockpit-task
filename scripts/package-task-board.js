@@ -20,7 +20,8 @@ const pending = `${stage}.tgz`;
 try {
   for (const path of [
     'cockpit.module.json', 'src/task-board', 'web/task-board',
-    'scripts/migrate-task-v10.js', 'scripts/migrate-task-v11.js',
+    'scripts/migrate-task-v10.js', 'scripts/migrate-task-v11.js', 'scripts/migrate-task-v12.js',
+    'docs/task-responsibility-migration.md', 'docs/releases.md',
     'roles/task-node.md',
     'skills/cockpit-task-tree', 'skills/github-coding', 'node_modules',
   ]) {

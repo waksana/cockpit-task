@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { TaskStore } from '../src/task-board/store.js';
 import { parseInput, TaskError, LIMITS, READ_GROUPS, toolSchemas } from '../src/task-board/contracts.js';
+import { orchestratingRoot, startExecution, finalizeCancellation } from './helpers/responsibility-fixtures.js';
+import { responsibilityFingerprint, inspectResponsibilityMigration } from '../src/task-board/responsibility-migration.js';
 
 function fixture(t) {
   const directory = join(process.cwd(), '.task-board-tests', randomUUID());
@@ -16,20 +18,26 @@ function fixture(t) {
     request_id: randomUUID(), actor: 'orchestrator', task_id: task.task_id,
     write_context: task.write_context, revision: task.revision, ...fields,
   });
-  const create = (fields = {}) => store.executeLocal('task_create', {
-    request_id: randomUUID(), actor: 'orchestrator',
-    title: 'Task', description: 'Complete definition', ...fields,
-  });
+  const create = (fields = {}) => {
+    orchestratingRoot(store, fields.actor ?? 'orchestrator');
+    return store.executeLocal('task_create', {
+      request_id: randomUUID(), actor: 'orchestrator',
+      title: 'Task', description: 'Complete definition', ...fields,
+    });
+  };
   const bind = (task, assignee = 'assignee') => {
     const value = input(task, { assignee });
     store.reserveOperation('task_assign', value);
     return store.bindAssignment(value);
   };
   const ack = task => store.executeLocal('task_ack', input(task, { actor: 'assignee' }));
+  const start = task => startExecution(store, task);
+  const running = task => start(ack(task));
+  const finalize = task => finalizeCancellation(store, task, store.task(task.task_id).assignee ?? 'user');
   const edit = (task, fields = {}) => store.executeLocal('task_edit', input(task, { reason: 'Clarified requirements', ...fields }));
   const report = (task, fields) => store.executeLocal('task_report', input(task, { actor: 'assignee', ...fields }));
   return {
-    get store() { return store; }, directory, input, create, bind, ack, edit, report,
+    get store() { return store; }, directory, input, create, bind, ack, start, running, finalize, edit, report,
     restart() { store.close(); store = new TaskStore(directory); },
   };
 }
@@ -52,7 +60,7 @@ test('independent durable database, initial definition and exact receipt replay'
   f.restart();
   assert.deepEqual(f.create({ request_id }), first);
   rejects(() => f.create({ request_id, title: 'different' }), 'REQUEST_ID_CONFLICT');
-  assert.equal(f.store.read({ view: 'list' }).items.length, 1);
+  assert.equal(f.store.read({ view: 'list', parent_assignee: 'orchestrator' }).items.length, 1);
 });
 
 test('offline data-root relocation preserves Task IDs, contexts, receipts and session bindings without row migration', t => {
@@ -67,7 +75,7 @@ test('offline data-root relocation preserves Task IDs, contexts, receipts and se
   };
   const created = store.executeLocal('task_create', createInput);
   const assignInput = {
-    request_id: randomUUID(), actor: 'original-orchestrator', task_id: created.task_id,
+    request_id: randomUUID(), actor: 'user', task_id: created.task_id,
     assignee: 'original-assignee', revision: created.revision, write_context: created.write_context,
   };
   store.reserveOperation('task_assign', assignInput);
@@ -127,8 +135,9 @@ test('overview include has a strict, unique, bounded allowlist shared by store a
 });
 
 test('selected overview returns only requested full latest records, distinguishing absence from explicit null', t => {
-  const f = fixture(t), task = f.bind(f.create());
-  const read = include => f.store.read({ view: 'overview', task_id: task.id, include });
+  const f = fixture(t);
+  let task = f.bind(f.create());
+  const read = include => f.store.read({ view: 'overview', task_id: task.task_id, include });
   const empty = read([...READ_GROUPS]);
   assert.equal(empty.activity, null);
   assert.equal(empty.outcome, null);
@@ -142,6 +151,7 @@ test('selected overview returns only requested full latest records, distinguishi
   assert.ok(empty.definition.at);
   assert.equal(f.store.task(task.id).acknowledged_revision, null, 'Reading never ACKs');
   f.ack(task);
+  task = f.start(task);
   const text = 'Full activity beyond the overview excerpt. '.repeat(85);
   f.report(task, { activity: { text: 'Earlier report' }, outcome: { summary: 'Earlier outcome' } });
   const blocked = f.report(task, { status: 'in_progress', activity: { text } });
@@ -158,7 +168,7 @@ test('selected overview returns only requested full latest records, distinguishi
   assert.equal(selected.outcome.summary, 'Earlier outcome');
   assert.equal('retro' in selected.outcome, false);
   for (const key of ['retro', 'definition', 'description', 'automation', 'cancellation']) assert.equal(key in selected, false);
-  const legacy = f.store.read({ view: 'overview', task_id: task.id });
+  const legacy = f.store.read({ view: 'overview', task_id: task.task_id });
   assert.equal(legacy.activity.text.length, LIMITS.excerpt);
   assert.equal(legacy.activity.truncated, true);
   assert.equal(legacy.outcome.available, true);
@@ -177,8 +187,9 @@ test('selected overview returns only requested full latest records, distinguishi
   assert.equal(done.retro.outcome_id, done.outcome.id);
   const context = read(['context']);
   assert.deepEqual(Object.keys(context).sort(), [
-    'id', 'task_id', 'title', 'orchestrator', 'assignee', 'status', 'revision', 'acknowledged_revision',
+    'id', 'task_id', 'title', 'created_by', 'parent_assignee', 'assignee', 'status', 'revision', 'acknowledged_revision',
     'created_at', 'updated_at', 'write_context', 'kind', 'parent_task_id', 'depth', 'blocked_by', 'ready',
+    'work_mode', 'legacy', 'cancellation_request', 'children',
   ].sort());
   assert.equal(context.status, 'done');
   f.edit(context, { description: 'Revised after completion' });
@@ -198,6 +209,7 @@ test('selected cancellation is explicit and current Task context never implies a
   const f = fixture(t), task = f.create();
   const { revision, ...input } = f.input(task, { reason: 'No longer required' });
   f.store.executeLocal('task_cancel', input);
+  f.finalize(task);
   const selected = f.store.read({ view: 'overview', task_id: task.task_id, include: ['cancellation', 'outcome'] });
   assert.equal(selected.status, 'cancelled');
   assert.equal(selected.outcome, null);
@@ -205,8 +217,7 @@ test('selected cancellation is explicit and current Task context never implies a
 });
 
 test('selection uses one SQLite read snapshot even when another connection commits new requirements and reports', t => {
-  const f = fixture(t), task = f.bind(f.create());
-  f.ack(task);
+  const f = fixture(t), task = f.running(f.bind(f.create()));
   f.report(task, { activity: { text: 'Revision one' }, outcome: { summary: 'Revision one result' } });
   const other = new TaskStore(f.directory);
   const prepare = f.store.db.prepare.bind(f.store.db);
@@ -231,18 +242,18 @@ test('selection uses one SQLite read snapshot even when another connection commi
     return statement;
   };
   try {
-    const selected = f.store.read({ view: 'overview', task_id: task.id, include: ['activity', 'outcome', 'retro', 'definition'] });
+    const selected = f.store.read({ view: 'overview', task_id: task.task_id, include: ['activity', 'outcome', 'retro', 'definition'] });
     assert.equal(changed, true);
     assert.equal(selected.revision, 1);
-    assert.equal(selected.status, 'todo');
+    assert.equal(selected.status, 'in_progress');
     assert.equal(selected.activity.text, 'Revision one');
     assert.equal(selected.activity.current, true);
     assert.equal(selected.outcome.summary, 'Revision one result');
     assert.equal(selected.outcome.current, true);
     assert.deepEqual(selected.retro, { status: 'not_recorded' });
     assert.equal(selected.definition.description, 'Complete definition');
-    assert.equal(f.store.task(task.id).revision, 2);
-    assert.equal(f.store.task(task.id).status, 'done');
+    assert.equal(f.store.task(task.task_id).revision, 2);
+    assert.equal(f.store.task(task.task_id).status, 'done');
   } finally {
     f.store.db.prepare = prepare;
     other.close();
@@ -255,15 +266,16 @@ test('selection does not load unrequested bodies or histories, including definit
   f.store.db.prepare = sql => { queries.push(sql); return prepare(sql); };
   f.store.read({ view: 'overview', task_id: task.task_id, include: ['context'] });
   f.store.definitionCheck({ task_id: task.task_id, actor: 'orchestrator' });
-  // Context includes the compact dependency projection: one bounded blocker-status query.
-  assert.equal(queries.length, 3);
-  assert.match(queries[1], /FROM task_dependencies d/);
-  for (const query of queries) assert.doesNotMatch(query, /\*|description|refs|metadata|activities|outcomes|automation_runs|cancellation/);
+  // Context adds bounded responsibility and blocker projections, not full bodies or histories.
+  assert.ok(queries.length <= 8);
+  assert.equal(queries.filter(query => query.includes('FROM task_dependencies d')).length, 1);
+  for (const query of queries) assert.doesNotMatch(query, /SELECT \*|description|refs|metadata|activities|outcomes|automation_runs/);
   queries.length = 0;
   f.store.read({ view: 'overview', task_id: task.task_id, include: ['retro'] });
-  assert.equal(queries.length, 3);
-  assert.match(queries[2], /retro_recorded=1 ORDER BY seq DESC LIMIT 1/);
-  assert.doesNotMatch(queries[2], /\*|summary|refs/);
+  assert.ok(queries.length <= 8);
+  const retroQuery = queries.find(query => query.includes('retro_recorded=1'));
+  assert.match(retroQuery, /retro_recorded=1 ORDER BY seq DESC LIMIT 1/);
+  assert.doesNotMatch(retroQuery, /\*|summary|refs/);
 });
 
 test('selection budget includes JSON escaping and fails explicitly without truncating valid definitions', t => {
@@ -285,13 +297,12 @@ test('selection budget includes JSON escaping and fails explicitly without trunc
 });
 
 test('notification-sized selection fits large legal activity, outcome and retro without a second read', t => {
-  const f = fixture(t), task = f.bind(f.create());
-  f.ack(task);
+  const f = fixture(t), task = f.running(f.bind(f.create()));
   const activity = { text: '\u0001'.repeat(2600) };
   const outcome = { summary: '\u0001'.repeat(600) };
   const retro = '\u0001'.repeat(2000);
   f.report(task, { status: 'done', activity, outcome, retro });
-  const selected = f.store.read({ view: 'overview', task_id: task.id, include: ['activity', 'outcome', 'retro'] });
+  const selected = f.store.read({ view: 'overview', task_id: task.task_id, include: ['activity', 'outcome', 'retro'] });
   assert.equal(selected.activity.text, activity.text);
   assert.equal(selected.outcome.summary, outcome.summary);
   assert.equal(selected.retro.text, retro);
@@ -353,6 +364,7 @@ test('definition reminders describe Assignee ACK responsibility without instruct
   });
   const { revision, ...cancel } = f.input(changed, { reason: 'User cancelled' });
   f.store.executeLocal('task_cancel', cancel);
+  f.finalize(changed);
   assert.equal(f.store.definitionCheck({ task_id: task.id, actor: 'orchestrator' }).tasks[0].message, undefined);
 });
 
@@ -426,14 +438,14 @@ test('separate lifecycle/editable/revision generations protect only relevant dep
   const definition = f.edit(metadata, { description: 'New definition' });
   assert.equal(f.report(task, { activity: { text: 'Description does not invalidate historical activity' } }).status, 'applied');
   const ack = f.ack(definition);
-  const progress = f.report(ack, { status: 'in_progress' });
+  const progress = f.start(ack);
   rejects(() => f.report(ack, { activity: { text: 'Late lifecycle' } }), 'TASK_STATE_CONFLICT');
   rejects(() => f.edit(ack, { description: 'Late edit' }), 'TASK_STATE_CONFLICT');
   assert.equal(f.ack(progress).status, 'unchanged');
 });
 
 test('terminal Tasks reject execution and ACK, preserve outcomes and permit definition edits without ACK', t => {
-  const f = fixture(t), task = f.ack(f.bind(f.create()));
+  const f = fixture(t), task = f.running(f.bind(f.create()));
   f.report(task, { outcome: { summary: 'Draft' } });
   rejects(() => f.report(task, { status: 'done', activity: { text: 'No fresh outcome' } }), 'INVALID_INPUT');
   const done = f.report(task, { status: 'done', outcome: { summary: 'Delivered' }, retro: null });
@@ -449,12 +461,14 @@ test('terminal Tasks reject execution and ACK, preserve outcomes and permit defi
   assert.equal(f.store.read({ view: 'outcomes', task_id: task.task_id }).items.length, 2);
 });
 
-test('cancel needs no ACK, late reports cannot overwrite it, repeated cancel is unchanged', t => {
+test('cancellation intent needs no ACK, preserves responsibility until finalization and rejects abandoned progress', t => {
   const f = fixture(t), task = f.bind(f.create());
   const { revision, ...input } = f.input(task, { reason: 'User cancelled' });
-  const cancelled = f.store.executeLocal('task_cancel', input);
-  assert.equal(cancelled.task_status, 'cancelled');
+  const intent = f.store.executeLocal('task_cancel', input);
+  assert.equal(intent.task_status, 'todo');
   rejects(() => f.report(task, { status: 'in_progress' }), 'TASK_STATE_CONFLICT');
+  const cancelled = f.finalize(intent);
+  assert.equal(cancelled.task_status, 'cancelled');
   rejects(() => f.report(cancelled, { activity: { text: 'Cancelled' } }), 'TASK_STATE_CONFLICT');
   const { revision: ignored, ...again } = f.input(cancelled, { reason: 'Already cancelled' });
   assert.equal(f.store.executeLocal('task_cancel', again).status, 'unchanged');
@@ -474,6 +488,8 @@ test('fixed Assignee occupancy is durable, atomic across connections and release
   rejects(() => f.store.bindAssignment(replace), 'ASSIGNMENT_CONFLICT');
   const { revision, ...cancel } = f.input(first, { reason: 'Release assignee' });
   f.store.executeLocal('task_cancel', cancel);
+  rejects(() => other.bindAssignment(input), 'ASSIGNEE_OCCUPIED');
+  f.finalize(first);
   assert.equal(other.bindAssignment(input).assignee, 'assignee');
 });
 
@@ -564,7 +580,7 @@ test('activity totals count all durable reports, not page length or other record
   assert.equal(read('execution').activity_count, 0);
   assert.equal(read('execution').activity, null);
   assert.equal(read('execution').outcome, null);
-  const assigned = f.ack(f.bind(created));
+  const assigned = f.running(f.bind(created));
   for (let n = 0; n < 8; n++) f.report(assigned, { activity: { text: `Report ${n}` } });
   const input = f.input(assigned, { actor: 'assignee', activity: { text: 'Saved exactly once' } });
   f.store.executeLocal('task_report', input);
@@ -572,7 +588,7 @@ test('activity totals count all durable reports, not page length or other record
   const completed = f.report(assigned, { status: 'done', outcome: { summary: 'Delivered', references: [] }, retro: null });
   assert.equal(read('activity').items.length, 5);
   for (const view of ['overview', 'execution']) assert.equal(read(view).activity_count, 9);
-  assert.equal(f.store.read({ view: 'list', status: 'all' }).items[0].activity_count, 9);
+  assert.equal(f.store.read({ view: 'list', parent_assignee: 'orchestrator', status: 'all' }).items[0].activity_count, 9);
   const before = read('execution').outcome;
   assert.equal(before.current, true);
   f.store.executeLocal('task_reopen', f.input(completed, {
@@ -633,14 +649,15 @@ for (const view of ['overview', 'execution']) test(`${view} reads outcome and ac
 test('opaque keyset pagination is stable under insertions and rejects task/filter/view mismatch', t => {
   const f = fixture(t);
   for (let n = 0; n < 23; n++) f.create({ title: `Task ${n}` });
-  const first = f.store.read({ view: 'list' });
+  const first = f.store.read({ view: 'list', root: false });
+  assert.ok(first.items.every(item => item.parent_task_id !== null), 'The root fixture is not a pagination subject');
   assert.equal(first.items.length, 20);
   f.create({ title: 'Inserted later' });
-  const next = f.store.read({ view: 'list', cursor: first.next_cursor });
+  const next = f.store.read({ view: 'list', root: false, cursor: first.next_cursor });
   assert.equal(next.items.length, 3);
   assert.equal(next.next_cursor, null);
   assert.equal(new Set([...first.items, ...next.items].map(x => x.id)).size, 23);
-  rejects(() => f.store.read({ view: 'list', orchestrator: 'someone', cursor: first.next_cursor }), 'INVALID_CURSOR');
+  rejects(() => f.store.read({ view: 'list', root: false, parent_assignee: 'someone', cursor: first.next_cursor }), 'INVALID_CURSOR');
   rejects(() => f.store.read({ view: 'list', cursor: 'malformed' }), 'INVALID_CURSOR');
   const a = f.ack(f.bind(f.create())), b = f.create();
   for (let n = 0; n < 3; n++) f.report(a, { activity: { text: `${n}` } });
@@ -654,10 +671,11 @@ test('list defaults unfinished, filters are explicit and never interpreted as ac
   const f = fixture(t), unfinished = f.create({ actor: 'other' }), ended = f.create();
   const { revision, ...cancel } = f.input(ended, { reason: 'Ended' });
   f.store.executeLocal('task_cancel', cancel);
-  assert.equal(f.store.read({ view: 'list', actor: 'unrelated' }).items.length, 1);
-  assert.equal(f.store.read({ view: 'list', orchestrator: 'other' }).items[0].id, unfinished.task_id);
+  f.finalize(ended);
+  assert.equal(f.store.read({ view: 'list', root: false, actor: 'unrelated' }).items.length, 1);
+  assert.equal(f.store.read({ view: 'list', parent_assignee: 'other' }).items[0].id, unfinished.task_id);
   assert.equal(f.store.read({ view: 'list', status: 'cancelled' }).items[0].id, ended.task_id);
-  assert.equal(f.store.read({ view: 'list', status: 'all' }).items.length, 2);
+  assert.equal(f.store.read({ view: 'list', root: false, status: 'all' }).items.length, 2);
   assert.equal(f.store.read({ view: 'list', query: '%' }).items.length, 0);
 });
 
@@ -724,7 +742,7 @@ test('list pages respect serialized budget rather than multiplying large summari
   let cursor;
   const ids = [];
   do {
-    const page = f.store.read({ view: 'list', limit: 50, ...(cursor ? { cursor } : {}) });
+    const page = f.store.read({ view: 'list', root: false, limit: 50, ...(cursor ? { cursor } : {}) });
     assert.ok(JSON.stringify(page).length <= LIMITS.page);
     assert.ok(page.items.length < 50);
     ids.push(...page.items.map(item => item.id));
@@ -773,7 +791,7 @@ test('completion requires fresh explicit retro and rejects invalid reports befor
 test('text and explicit null retro survive restart, exact replay and later definition edits', t => {
   const f = fixture(t);
   for (const text of ['Automate the repeated deterministic fixture setup.', null, 'r'.repeat(LIMITS.retro)]) {
-    const task = f.ack(f.bind(f.create()));
+    const task = f.running(f.bind(f.create()));
     const request = f.input(task, { actor: 'assignee', status: 'done', outcome: { summary: 'Delivered' }, retro: text });
     const done = f.store.executeLocal('task_report', request);
     assert.equal(done.retro.status, 'saved');
@@ -817,7 +835,7 @@ test('text and explicit null retro survive restart, exact replay and later defin
 });
 
 test('completion transaction rolls back outcome, retro, activity and subscriptions on status failure', t => {
-  const f = fixture(t), task = f.ack(f.bind(f.create()));
+  const f = fixture(t), task = f.running(f.bind(f.create()));
   const { revision, ...subscriptionInput } = f.input(task, { statuses: ['done'] });
   f.store.executeLocal('task_subscribe', subscriptionInput);
   f.store.db.exec(`CREATE TRIGGER fail_completion BEFORE UPDATE OF status ON tasks
@@ -828,7 +846,7 @@ test('completion transaction rolls back outcome, retro, activity and subscriptio
   assert.throws(() => f.store.executeLocal('task_report', request), /synthetic completion failure/);
   assert.equal(f.store.readVersions.token(task.task_id), version);
   assert.deepEqual(f.store.readVersions.pending(), []);
-  assert.equal(f.store.task(task.task_id).status, 'todo');
+  assert.equal(f.store.task(task.task_id).status, 'in_progress');
   assert.deepEqual(f.store.task(task.task_id).retro, { status: 'not_recorded' });
   assert.equal(f.store.read({ view: 'outcomes', task_id: task.task_id }).items.length, 0);
   assert.equal(f.store.read({ view: 'activity', task_id: task.task_id }).items.length, 0);
@@ -841,10 +859,12 @@ test('completion transaction rolls back outcome, retro, activity and subscriptio
 });
 
 test('competing stores preserve one completion and reject changed lifecycle or unacknowledged revisions', t => {
-  const f = fixture(t), task = f.bind(f.create());
+  const f = fixture(t);
+  let task = f.bind(f.create());
   const fields = { status: 'done', outcome: { summary: 'Delivered' }, retro: null };
   rejects(() => f.report(task, fields), 'ACK_REQUIRED');
   f.ack(task);
+  task = f.start(task);
   const other = new TaskStore(f.directory);
   t.after(() => other.close());
   const input = f.input(task, { actor: 'assignee', ...fields, retro: 'Winner retrospective' });
@@ -855,7 +875,7 @@ test('competing stores preserve one completion and reject changed lifecycle or u
 });
 
 test('completion payload bounds retain every full history entry including escaped retro', t => {
-  const f = fixture(t), task = f.ack(f.bind(f.create()));
+  const f = fixture(t), task = f.running(f.bind(f.create()));
   const text = '\0'.repeat(1999) + 'r';
   rejects(() => f.report(task, { status: 'done', outcome: { summary: 's'.repeat(8000) }, retro: text }), 'INVALID_INPUT');
   for (let i = 0; i < 3; i++) f.report(task, { outcome: { summary: 's'.repeat(8000) } });
@@ -873,7 +893,7 @@ test('completion payload bounds retain every full history entry including escape
   assert.ok(outcomes.slice(1).every(item => item.retro.status === 'not_recorded'));
 });
 
-test('v8 migration renames Task vocabulary, events and assignment receipts', t => {
+test('v8 startup refuses implicit migration while the isolated historical vocabulary stage preserves identities', t => {
   const directory = join(process.cwd(), '.task-board-tests', randomUUID());
   mkdirSync(directory, { recursive: true });
   let store;
@@ -1001,32 +1021,54 @@ test('v8 migration renames Task vocabulary, events and assignment receipts', t =
       null, at, at);
   db.close();
 
-  store = new TaskStore(directory);
-  assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 11);
-  const execution = store.read({ view: 'execution', task_id: taskId, actor: 'old-executor' });
-  assert.equal(execution.orchestrator, 'old-owner');
-  assert.equal(execution.assignee, 'old-executor');
-  assert.equal(execution.actor_role, 'assignee');
-  const subscription = store.read({ view: 'subscriptions', task_id: taskId }).items[0];
-  assert.equal(subscription.subscriber, 'old-owner');
-  assert.equal(subscription.author, 'old-executor');
-  assert.equal(subscription.event.actor, 'old-executor');
-  assert.equal('actor_session_id' in subscription.event, false);
-  rejects(() => store.read({ view: 'operation', request_id: 'assign-old', actor: 'old-owner' }), 'LEGACY_OPERATION_UNSCOPED');
-  const rawOperation = store.db.prepare('SELECT * FROM operations WHERE request_id=?').get('assign-old');
-  assert.equal(rawOperation.actor, null);
-  assert.ok(rawOperation.legacy_reason);
-  assert.equal(JSON.parse(rawOperation.result).operation.assignee, 'old-executor');
-  assert.equal('executor' in JSON.parse(rawOperation.result).operation, false);
-  assert.equal(JSON.parse(rawOperation.input).assignee, 'old-executor');
-  assert.equal('executor' in JSON.parse(rawOperation.input), false);
-  assert.equal('invocation' in rawOperation, true);
-  const second = store.task(secondId);
-  const assign = {
-    actor: 'other-owner', request_id: 'assign-second', task_id: secondId,
-    assignee: 'old-executor', revision: 1, write_context: second.write_context,
-  };
-  store.reserveOperation('task_assign', assign);
-  rejects(() => store.bindAssignment(assign), 'ASSIGNEE_OCCUPIED');
-  assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+  const historical = new DatabaseSync(join(directory, 'task-board.sqlite'));
+  try {
+    const fingerprint = responsibilityFingerprint(historical);
+    rejects(() => new TaskStore(directory), 'MIGRATION_REVIEW_REQUIRED');
+    rejects(() => inspectResponsibilityMigration(directory), 'MIGRATION_REVIEW_REQUIRED');
+    assert.equal(responsibilityFingerprint(historical), fingerprint, 'No schema, identity or historical JSON is rewritten');
+    assert.equal(historical.prepare('PRAGMA user_version').get().user_version, 8);
+    const row = historical.prepare('SELECT * FROM tasks WHERE id=?').get(taskId);
+    assert.equal(row.owner, 'old-owner');
+    assert.equal(row.executor, 'old-executor');
+    const subscription = historical.prepare('SELECT * FROM subscriptions WHERE id=?').get(subscriptionId);
+    assert.equal(subscription.owner, 'old-owner');
+    assert.equal(subscription.actor_session_id, 'old-executor');
+    assert.deepEqual(JSON.parse(subscription.event), { task_id: taskId, status: 'done', actor_session_id: 'old-executor' });
+    const receipt = historical.prepare('SELECT * FROM operations WHERE request_id=?').get('assign-old');
+    assert.equal(receipt.fingerprint, 'legacy');
+    assert.deepEqual(JSON.parse(receipt.input), { request_id: 'assign-old', task_id: taskId, executor: 'old-executor' });
+    assert.deepEqual(JSON.parse(receipt.result), { operation: { request_id: 'assign-old', task_id: taskId, executor: 'old-executor' } });
+    assert.throws(() => historical.prepare('UPDATE tasks SET executor=? WHERE id=?').run('old-executor', secondId), /UNIQUE constraint failed/);
+    assert.equal(responsibilityFingerprint(historical), fingerprint, 'Rejected duplicate occupancy changes nothing');
+    assert.equal(historical.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+    historical.exec('BEGIN IMMEDIATE');
+    try {
+      TaskStore.prototype.migrateVocabulary.call({ db: historical });
+      historical.exec('PRAGMA user_version=9; COMMIT');
+    } catch (error) {
+      if (historical.isTransaction) historical.exec('ROLLBACK');
+      throw error;
+    }
+    const renamed = historical.prepare('SELECT * FROM tasks WHERE id=?').get(taskId);
+    const { owner, executor, ...originalFacts } = row;
+    assert.deepEqual({ ...renamed }, { ...originalFacts, orchestrator: owner, assignee: executor });
+    const renamedSubscription = historical.prepare('SELECT * FROM subscriptions WHERE id=?').get(subscriptionId);
+    assert.equal(renamedSubscription.subscriber, 'old-owner');
+    assert.equal(renamedSubscription.author, 'old-executor');
+    assert.deepEqual(JSON.parse(renamedSubscription.event), { task_id: taskId, status: 'done', actor: 'old-executor' });
+    assert.equal(Object.hasOwn(renamedSubscription, 'actor_session_id'), false);
+    const renamedReceipt = historical.prepare('SELECT * FROM operations WHERE request_id=?').get('assign-old');
+    assert.deepEqual(JSON.parse(renamedReceipt.input), { request_id: 'assign-old', task_id: taskId, assignee: 'old-executor' });
+    assert.deepEqual(JSON.parse(renamedReceipt.result), { operation: { request_id: 'assign-old', task_id: taskId, assignee: 'old-executor' } });
+    assert.equal(renamedReceipt.fingerprint, receipt.fingerprint);
+    assert.equal(renamedReceipt.invocation, null);
+    assert.equal(historical.prepare('SELECT assignee FROM task_assignments WHERE task_id=?').get(taskId).assignee, 'old-executor');
+    assert.throws(() => historical.prepare('UPDATE tasks SET assignee=? WHERE id=?').run('old-executor', secondId), /UNIQUE constraint failed/);
+    const migratedFingerprint = responsibilityFingerprint(historical);
+    rejects(() => new TaskStore(directory), 'MIGRATION_REVIEW_REQUIRED');
+    assert.equal(responsibilityFingerprint(historical), migratedFingerprint, 'Vocabulary migration does not authorize responsibility migration');
+    assert.equal(historical.prepare('PRAGMA user_version').get().user_version, 9);
+    assert.equal(historical.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+  } finally { historical.close(); }
 });
