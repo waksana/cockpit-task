@@ -2,13 +2,14 @@
 
 A Task is a continuing responsibility within the user's authorization. Its assignee
 either delivers directly (`execute`) or organizes narrower child responsibilities and
-integrates their results (`orchestrate`). Both modes may use internal helpers; a helper
-does not take over responsibility. Orchestrating keeps sustained implementation in
+integrates their results (`orchestrate`). Both modes may use helpers: they only read Task
+tools and return results; the main agent alone maintains Tasks, including activity.
+Orchestrating keeps sustained implementation in
 children, not in the parent. Explicitly convert before dividing executing responsibility.
 
 Only the Task's own session is bound. Its parent’s assignee coordinates the result;
-creation history grants no control. A root is simply a Task without a parent, not a
-special role or an owner outside the tree. No required binding may be guessed.
+creation history grants no control. A root is a parentless Task, not a special role
+or tree-external owner. Never guess bindings.
 
 Task is the only channel between formal Task nodes; the service sends notices.
 Do not message another Task node, even through a helper. Keep Task records work-specific:

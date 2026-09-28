@@ -2,6 +2,7 @@ import { TaskError, parseInput } from './contracts.js';
 import { assignTask, createNodeSession, prepareNodeSession } from './operations.js';
 import { deliverNotification } from './notifications.js';
 import { AutomationRunner } from './automation-runner.js';
+import { READ_ONLY_TOOL_NAMES } from './tool-names.js';
 
 export class TaskService {
   constructor(store, host, { invalidate = () => {}, publish, report = () => {} } = {}) {
@@ -73,6 +74,17 @@ export class TaskService {
       const effectiveActor = external ? effectiveInvocation?.sessionId ?? actor : effectiveInvocation?.sessionId ?? actor ?? inputActor;
       if (typeof effectiveActor !== 'string' || !effectiveActor) {
         throw new TaskError('INVOCATION_REQUIRED', 'Task tools need the calling session from host MCP invocation metadata (_meta["cockpit/invocation"]); this host did not provide it and nothing was done', 400);
+      }
+      if (!READ_ONLY_TOOL_NAMES.includes(name)) {
+        if (effectiveInvocation?.subagent === true) {
+          throw new TaskError('SUBAGENT_WRITE_FORBIDDEN', 'Internal helpers may only read Tasks and scripts. Return results to the main agent for all Task maintenance, including activity; nothing was done', 403);
+        }
+        // Check provenance before validation, receipt replay, storage or host operations.
+        // Only the trusted Web entry and internal service calls can omit invocation.
+        if ((effectiveInvocation || external && actor !== 'user')
+          && (effectiveInvocation?.subagent !== false || effectiveInvocation?.runtimeSessionId !== effectiveActor)) {
+          throw new TaskError('INVOCATION_REQUIRED', 'Task writes require host invocation metadata proving a main agent: subagent=false and runtimeSessionId=sessionId; nothing was done', 400);
+        }
       }
       input = { ...parseInput(name, publicInput), actor: effectiveActor, ...(effectiveInvocation ? { invocation: effectiveInvocation } : {}) };
       if (signal?.aborted) throw new TaskError('REQUEST_CANCELLED', 'Task request was cancelled before execution', 409);
@@ -209,7 +221,7 @@ export class TaskService {
       actor: typeof input?.actor === 'string' ? input.actor : typeof actor === 'string' ? actor : undefined,
     };
     const definition_check = this.store.definitionCheck(context);
-    if (!['task_read', 'task_script_read'].includes(name) && outcome.result !== null) this.invalidate();
+    if (!READ_ONLY_TOOL_NAMES.includes(name) && outcome.result !== null) this.invalidate();
     return {
       ...outcome, definition_check,
       ...(notifications ? { notifications, notification_error: notification_error ?? null } : {}),

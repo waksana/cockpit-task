@@ -3,6 +3,9 @@
 Task 是 Cockpit 的持续责任模块（module/MCP key：`cockpit-task`）。
 一个 Agent Task 只绑定自己的 assignee：亲自交付 `execute`，或组织更具体子责任并整合
 结果 `orchestrate`。两种模式均可使用 helper；helper 不接管正式责任。
+Internal helpers are read-only: they may call `task_read` and `task_script_read`,
+but return work results to the main agent for all Task maintenance, including activity.
+Independent child-Task main agents retain their own authority.
 上级负责人从当前 parent 的绑定派生，`created_by` 只是历史。root 只是无 parent 的普通
 Task，没有树外 owner、特殊角色或隐藏控制权。唯一模块角色为 `node`。
 

@@ -17,6 +17,9 @@ Task 保存本项工作特有的目标、决定、边界和完成要求。讨论
 正式节点间只通过 Task 记录与服务通知协作，不私聊，不通过 helper 传话。
 
 工具选择与履责方式正交：**execute 与 orchestrate 都可用 helper**，结果仍由调用者整合。
+Internal helpers only read Task context and return work results. The main agent
+performs all Task maintenance, including activity; independent child-Task main
+agents retain their authority. No helper activity exception or new identity model.
 独立审查可以是 helper；不是每次调用工具都要建 Task。只有需要独立持续交付责任时才建子 Task。
 不以工具名、调用数、子节点数量判断模式，也不追求更多 session 或更少 Task。
 

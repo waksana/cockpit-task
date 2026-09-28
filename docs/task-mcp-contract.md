@@ -12,6 +12,16 @@ MCP 必须有宿主 `_meta["cockpit/invocation"].sessionId`，否则连读取也
 `INVOCATION_REQUIRED`；不接受参数 actor/invocation。helper 归因到 containing
 session。HTTP 固定内部 actor=user，不是可冒充的 session。
 
+Internal helpers may only call `task_read` and `task_script_read`. Every other
+tool, including activity-only reports, subscriptions, script registration and session
+preparation, rejects `subagent: true` with `SUBAGENT_WRITE_FORBIDDEN` (403).
+The shared service checks this before receipts, replay, Task writes or host effects.
+MCP writes require explicit boolean `subagent: false` and a valid
+`runtimeSessionId === sessionId`; missing, malformed or inconsistent main-agent
+provenance returns `INVOCATION_REQUIRED` (400), never a default main-agent identity.
+Web-user operations and service-managed automation retain their existing authority.
+An independent child Task's main agent is not an internal helper.
+
 Agent 只绑定 own assignee；parent_assignee 动态从 parent 得到。created_by 只为历史，
 没有旧 orchestrator 输入/当前字段/授权 fallback。root 无 parent，无额外 owner。
 actor_role 为 assignee、parent_assignee、user 或 none；所需 parent 未绑定明确失败。
@@ -21,6 +31,7 @@ actor_role 为 assignee、parent_assignee、user 或 none；所需 parent 未绑
 `request_id,task_id,write_context`；**current** 指 existing 加当前 `revision`。
 write_context 从结果原样传回；结构、模式、意图/状态及资料代次保护并发，不自行构造。
 同一 caller 与其 helpers 共用 `(actor,request_id)` 空间，不同 session 可复用 ID。
+Helpers may inspect receipts through `task_read`, but may not replay any mutation.
 原 ID 重放保持输入完全一致，换输入冲突；operation/resume 不能读另一个 caller 的回执。
 历史无可靠 caller 的 ID 保留 `LEGACY_OPERATION_UNSCOPED`，不得换 ID 重复不确定效果。
 

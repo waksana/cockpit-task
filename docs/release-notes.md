@@ -1,5 +1,17 @@
 # Cockpit Task responsibility model
 
+## Internal helpers are read-only
+
+- Helpers may call `task_read` and `task_script_read`, but cannot maintain Tasks,
+  even through activity-only reports or write replay. The main agent integrates
+  helper results and records progress, outcomes and responsibility changes.
+- The service returns `SUBAGENT_WRITE_FORBIDDEN` before Task or host effects.
+  MCP writes require explicit, consistent main-agent invocation metadata; missing
+  provenance is not treated as a main agent.
+- Formal child-Task main agents, Web users, service-managed automation and
+  session-scoped historical receipts retain their existing identities and authority.
+  No schema migration or per-activity helper attribution is introduced.
+
 ## Recursive responsibility (schema12)
 
 - One Agent assignee binding; parent responsibility derives from current parent,

@@ -95,7 +95,8 @@ test('fixed prompt quotas stay unchanged; coding guidance does not grow past its
   assert.ok(usages.every(usage => !usage.exceeded), formatQuotaReport(usages));
   assert.ok(markdownBody(read(codingDirectory, 'SKILL.md'), true).length <= 10183);
   const role = prose(read('roles/task-node.md'));
-  for (const pattern of [/continuing responsibility/, /Both modes may use internal helpers/,
+  for (const pattern of [/continuing responsibility/, /Both modes may use helpers/,
+    /they only read Task tools and return results/, /main agent alone maintains Tasks, including activity/,
     /creation history grants no control/i, /ACK its exact revision/, /task_start/,
     /all direct children must be terminal/, /Cancellation records intent first/,
     /Load `cockpit-task-tree` when first needed/]) assert.match(role, pattern);
@@ -113,7 +114,9 @@ test('Task Skill is an operational responsibility model with ordered recovery bo
     /continuing responsibility/, /Splitting never removes responsibility/,
     /Task is the only channel between formal Task nodes/, /`created_by` is history, not control/,
     /`parent_assignee`/, /Both modes may use tools and helpers/,
-    /independent continuing delivery responsibility/, /not based on tool names/,
+    /independent continuing responsibility/, /not tool names/,
+    /Helpers may only read Task tools/, /main agent for all maintenance, including activity/,
+    /Child Task main agents retain their authority/,
     /first `task_convert` with reason, completed results and remaining work/,
     /sustained implementation\/deep investigation in children/, /never downgrade/,
     /todo\/undecided/, /Binding, ACK and activity do not start/,

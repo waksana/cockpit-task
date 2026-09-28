@@ -53,10 +53,10 @@ mode are separate; do not synchronize them.
 `execute` delivers research, implementation or review. `orchestrate` divides responsibility,
 arranges interfaces/dependencies, handles blockers and integrates results.
 
-**Both modes may use tools and helpers.** You integrate helper results; calls do not change
-mode or ownership. Independent review need not create a Task/session. Use children for
-independent continuing delivery responsibility, not based on tool names. No fixed priority
-or per-use approval gate chooses between these means.
+**Both modes may use tools and helpers.** Helpers may only read Task tools; return results
+to the main agent for all maintenance, including activity. Child Task main agents retain
+their authority. Use children for independent continuing responsibility, not tool names.
+Review needs no Task; no per-use approval or fixed priority.
 
 If executing, first `task_convert` with reason, completed results and remaining work, then
 put remaining implementation in narrower children. Keep Task and assignee; no unchanged

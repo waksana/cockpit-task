@@ -20,7 +20,7 @@ export const definitionFits = ({ description, references = [], metadata = {} }) 
   JSON.stringify({ description, references, metadata }).length <= LIMITS.definitionPayload;
 const text = max => z.string().min(1).max(max).refine(value => value.trim().length > 0, 'Must not be blank');
 const session = text(200);
-const request = text(200).describe('Stable request ID within the trusted calling session; main and subagents share it. Different sessions may reuse IDs, but changed input in one session conflicts. Unattributable legacy IDs remain reserved.');
+const request = text(200).describe('Stable request ID within the trusted calling session. Helpers may read its receipts, not replay writes. Different sessions may reuse IDs, but changed input in one session conflicts. Unattributable legacy IDs remain reserved.');
 const id = z.uuid();
 const revision = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 const reference = z.strictObject({ label: text(200), target: text(2000) });
@@ -254,8 +254,8 @@ export function invocationFromMeta(meta) {
     || !value.sessionId.trim() || value.sessionId.length > 200) return null;
   return {
     sessionId: value.sessionId,
-    ...(typeof value.runtimeSessionId === 'string' ? { runtimeSessionId: value.runtimeSessionId.slice(0, 200) } : {}),
-    subagent: value.subagent === true,
+    ...(session.safeParse(value.runtimeSessionId).success ? { runtimeSessionId: value.runtimeSessionId } : {}),
+    ...(typeof value.subagent === 'boolean' ? { subagent: value.subagent } : {}),
     ...(typeof value.agentName === 'string' ? { agentName: value.agentName.slice(0, 200) } : {}),
   };
 }
