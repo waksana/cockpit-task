@@ -86,8 +86,9 @@ not permission for current ordinary activation to upgrade older data.
 The idempotency key is `(actor, request_id)`. For MCP the service derives `actor`
 only from the trusted main session ID in host invocation metadata; a subagent uses
 that containing session, not its runtime session ID or transport connection ID.
-Module HTTP uses the existing internal `user` namespace. No new caller argument,
-identity fallback, authorization rule or subagent write restriction is introduced.
+Module HTTP uses the existing internal `user` namespace. That migration introduced
+no new caller argument, identity fallback or authorization rule. The current
+[helper read-only policy](#helper-read-only-policy) preserves these receipt identities.
 
 Schema v11 rebuilds `operations` with a monotonic `seq`, nullable `actor`,
 `legacy_reason` and `UNIQUE(actor,request_id)`. Normal writes require a valid actor
@@ -278,8 +279,9 @@ Every write has a stable `request_id` within its trusted caller namespace.
 Different sessions may reuse the same ID independently. Its fingerprint covers
 the tool and complete validated input plus the derived actor, not invocation
 runtime details. Same-session changed input fails with `REQUEST_ID_CONFLICT`;
-exact replay by that session or its subagents returns the original effects without
-repeating them. The first invocation audit remains unchanged on replay.
+exact replay by that session's main agent returns the original effects without
+repeating them. Helpers may read receipts, not replay mutations. The first invocation
+audit remains unchanged on replay, including historical helper-created receipts.
 All local writes (including registration and automation), external reservation,
 step updates, finalization, operation reads and dispatch recovery use the same key.
 Original fingerprints are preserved during migration; incompatible historical
@@ -420,6 +422,24 @@ returns INVOCATION_REQUIRED. Actor is sessionId, helpers use the containing sess
 and full invocation remains receipt audit. HTTP uses internal actor=user, not a native
 session. Creation provenance does not become a notice recipient: parent notices use
 current parent bindings, and Web subscriptions require an explicit subscriber session.
+
+### Helper read-only policy
+
+`READ_ONLY_TOOL_NAMES` is the shared read allowlist for service authorization and
+MCP annotations: only `task_read` and `task_script_read`. Any other tool from
+`subagent: true` fails with `SUBAGENT_WRITE_FORBIDDEN` (403), including activity,
+subscriptions, recovery/replays, session preparation and automation control.
+The guard precedes input validation, receipt reservation, Task writes, host calls
+and notification delivery; rejection creates no operation receipt or invalidation.
+Helpers return their work to the main agent, which integrates and maintains Task facts.
+
+MCP writes additionally require explicit boolean `subagent: false` and a valid
+`runtimeSessionId === sessionId`. Parsing never coerces missing/malformed flags
+to false or truncates a runtime ID into a matching one. Unconfirmed main provenance
+fails with `INVOCATION_REQUIRED` (400). The trusted Web `user` entry and internal
+service operations need no native invocation; their existing checks remain unchanged.
+An independent child Task's primary session retains its own relation-based authority.
+This adds no schema, activity-origin field or new identity namespace.
 
 ## External operation receipts
 

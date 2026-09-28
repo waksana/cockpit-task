@@ -39,6 +39,8 @@
 `PARENT_UNBOUND`，不使用 creator、旧通知或历史 JSON 回退。一个 session 最多
 绑定一项 unfinished Agent；Automation 没有 Agent binding、ACK、mode 或容量占用。
 工具可见性与业务关系授权分开；内部 helper 归因到 containing session，不取得独立责任。
+Helpers are read-only; main agents maintain Task records. This policy changes no
+schema or receipt namespace, and preserves historical invocation attribution.
 
 ## 2. 生命周期与履责方式
 

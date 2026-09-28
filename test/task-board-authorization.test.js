@@ -167,20 +167,21 @@ test('historical root creators have no management rights and a separate claim es
   assert.deepEqual(f.store.read({ view: 'list', parent_task_id: id, status: 'all' }).items, []);
 });
 
-test('subagent invocations act as their containing session for assignee-only operations', async t => {
+test('helper writes are refused even when their containing session has authority', async t => {
   const f = fixture(t);
   const task = await f.assign(await f.create());
   const input = { task_id: task.task_id, write_context: f.store.task(task.task_id).write_context, revision: 1 };
-  const allowed = await f.service.execute('task_ack', { request_id: 'ack-subagent', ...input }, {
+  const ack = await f.service.execute('task_ack', { request_id: 'ack-subagent', ...input }, {
     external: true,
     invocation: { sessionId: 'assignee', runtimeSessionId: 'assignee-worker', subagent: true },
   });
-  assert.equal(allowed.error, null, JSON.stringify(allowed.error));
-  assert.equal(f.store.task(task.task_id).acknowledged_revision, 1);
+  assert.equal(ack.error.code, 'SUBAGENT_WRITE_FORBIDDEN');
+  assert.equal(f.store.task(task.task_id).acknowledged_revision, null);
+  await f.ack(task);
   const rejected = await f.service.execute('task_report', { request_id: 'report-subagent', ...input, activity: { text: 'wrong container' } }, {
     external: true,
     invocation: { sessionId: 'other-session', runtimeSessionId: 'other-worker', subagent: true },
   });
-  assert.equal(rejected.error.code, 'ASSIGNEE_REQUIRED');
+  assert.equal(rejected.error.code, 'SUBAGENT_WRITE_FORBIDDEN');
   assert.equal(f.store.read({ view: 'activity', task_id: task.task_id }).items.length, 0);
 });

@@ -28,6 +28,9 @@ todo 只澄清与轻发现；不能直接 done 或以 report 开工。
 | orchestrate | 拆分更具体责任、接口/依赖安排、处理阻塞、必要判断与结果整合 |
 
 两种方式均可用内部 helper；调用者整合结果，helper 不取得独立责任。
+Helpers may only read through `task_read` and `task_script_read`. Return results
+to the main agent for every Task write, including activity; no helper maintenance
+or write replay. Independent child-Task main agents retain their own authority.
 是否创建 child 取决于独立持续交付责任，不是工具名或调用次数；
 独立 review 不强制新 Task/session，不以 Task 数量或新 session 为目标。
 orchestrator 可为协调判断轻调研，但持续实施/深度专项调查交给 child。
@@ -88,6 +91,7 @@ result / error 描述原操作效果；definition_check 在响应检查点独立
 notifications / notification_error 与已保存效果分开。检查 unavailable 不等于未变化。
 未知/失败先读 operation 或 Task，稳定 request_id 重放原输入，新写入使用当前 write_context。
 Main/helper 共用调用 session 的回执空间；其他 session 可用相同 ID。
+Helpers may inspect these receipts but only the main agent may replay mutations.
 只有 final assignment=applied/message=not_sent 的回执才可按契约恢复固定发送；
 pending/unknown/queued/accepted 不可。不能换 Task、换 session 或私写状态绕过。
 

@@ -37,6 +37,9 @@ One session has at most one unfinished Agent Task. Modes and native activity are
 | orchestrate (in_progress) | Narrower children, dependencies, blockers, decisions and result integration |
 
 Both modes may use internal helpers, whose results remain the caller's responsibility.
+Helpers may only call `task_read` and `task_script_read`. All maintenance, including
+activity, belongs to the main agent; helper writes fail with `SUBAGENT_WRITE_FORBIDDEN`
+before effects. This does not restrict independent child-Task main agents.
 Formal children are for independent continuing responsibility, not a tool-count rule.
 Orchestrators keep sustained implementation/deep investigations in children. Convert
 explicitly before splitting execution; preserve prior results and remaining responsibility,
@@ -95,7 +98,10 @@ the assignee bypass this evidence path or remove Task-ID dependencies through it
 
 ## Writes, failures and recovery
 
-Mutations use caller-scoped request_id; containing session and helpers share it.
+Mutations use caller-scoped request_id; helpers may read that session's receipts,
+but cannot replay writes. MCP writes require explicit `subagent: false` and
+`runtimeSessionId === sessionId`; missing or inconsistent provenance fails with
+`INVOCATION_REQUIRED`. Web-user and service-managed automation paths are unchanged.
 Replay original inputs; new writes return current opaque write_context. Structure/mode/intent
 changes participate in concurrency guards. Read result/error/definition_check separately.
 Saved old ACK activity may coexist with rejected stale outcome/status; do not repeat it.

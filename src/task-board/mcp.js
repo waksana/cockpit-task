@@ -7,6 +7,7 @@ import { z } from 'zod/v4';
 import { invocationFromMeta } from './contracts.js';
 import { toolDescriptions } from './tool-descriptions.js';
 import { developmentVersion } from './version.js';
+import { READ_ONLY_TOOL_NAMES } from './tool-names.js';
 
 export function createMcpRoutes({ execute, schemas, signal, report }) {
   const connections = new Set();
@@ -14,7 +15,7 @@ export function createMcpRoutes({ execute, schemas, signal, report }) {
   const tools = Object.entries(schemas).map(([name, schema]) => ({
     name, description: toolDescriptions[name], inputSchema: z.toJSONSchema(schema, { target: 'draft-7' }),
     annotations: {
-      readOnlyHint: ['task_read', 'task_script_read'].includes(name), destructiveHint: !['task_read', 'task_script_read'].includes(name),
+      readOnlyHint: READ_ONLY_TOOL_NAMES.includes(name), destructiveHint: !READ_ONLY_TOOL_NAMES.includes(name),
       idempotentHint: true, openWorldHint: ['task_assign', 'task_claim', 'task_session_create', 'task_session_prepare', 'task_report', 'task_cancel', 'task_cancel_finalize', 'task_start', 'task_attach', 'task_resolve_condition', 'task_automation_start'].includes(name),
     },
   }));

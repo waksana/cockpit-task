@@ -227,6 +227,14 @@ Task 普通 HTTP API 和 HTTP MCP 共用业务服务及 SQLite。宿主只负责
 
 MCP `POST /mcp` 的每个 tool call 必须携带 host-injected `_meta["cockpit/invocation"]`，至少包含 `sessionId`，并可包含 `runtimeSessionId`、`subagent`、`agentName`。Task 不信任工具输入中的身份字段；缺少 invocation 时 `INVOCATION_REQUIRED`（400）且不写入，包括 reads。subagent 调用归因到 containing session，完整 invocation 存入 operation receipt，供 `task_read(view=operation)` 返回 `actor` 和 `invocation`。request fingerprint 覆盖工具、已验证输入和派生 actor，不覆盖完整 invocation。该契约来自 waksana/cockpit#205，因此本模块必须与包含该宿主能力的 Cockpit 联合部署。
 
+For writes, `runtimeSessionId` and boolean `subagent` are required, not optional:
+only explicit `subagent: false` with `runtimeSessionId === sessionId` proves a
+main-agent call. Missing/malformed/inconsistent provenance fails with
+`INVOCATION_REQUIRED`. Internal helpers (`subagent: true`) may only use `task_read`
+and `task_script_read`; every write fails with `SUBAGENT_WRITE_FORBIDDEN` before
+receipt reservation/replay or any Task/host effect. The host marks provenance;
+the Task service enforces this policy. No new host hook or database migration is needed.
+
 模块 HTTP 路由没有 native session 身份，固定 actor=user；不是名为 user 的隐藏
 orchestrator session。Web user 可按契约管理 root/parent 关系，subscription 必须显式
 选择 subscriber session。当前 parent/binding 决定通知，created_by 历史从不路由。
@@ -240,9 +248,9 @@ orchestrator session。Web user 可按契约管理 root/parent 关系，subscrip
 transport 按 MCP session 隔离，后续 POST 的 cancellation 能关联原在途调用。
 HTTP request ID、协议 session ID 与持久 request_id 的业务幂等是不同层次。
 Business idempotency uses `(trusted sessionId, request_id)`, not the runtime
-session ID, JSON-RPC ID or MCP connection ID. Reconnecting or retrying from another
-subagent in the same main session reuses its receipt; a different main session can
-use the same request ID independently. Operation reads and `resume_request_id`
+session ID, JSON-RPC ID or MCP connection ID. Main-agent reconnects reuse its receipt;
+helpers can read it but cannot replay writes. A different main session can use
+the same request ID independently. Operation reads and `resume_request_id`
 remain in that caller namespace. Module HTTP keeps its internal `user` namespace,
 without an actor-selection input. Unattributable historical IDs remain reserved
 with `LEGACY_OPERATION_UNSCOPED`; the host must not turn this into a fresh retry.

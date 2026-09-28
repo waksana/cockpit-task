@@ -6,6 +6,8 @@ export const TOOL_NAMES = Object.freeze([
   'task_subscribe', 'task_unsubscribe', 'task_retro_handle',
 ]);
 
+export const READ_ONLY_TOOL_NAMES = Object.freeze(['task_read', 'task_script_read']);
+
 export function completeToolEntries(values, label) {
   const missing = TOOL_NAMES.filter(name => !Object.hasOwn(values, name));
   const unexpected = Object.keys(values).filter(name => !TOOL_NAMES.includes(name));

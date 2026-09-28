@@ -112,7 +112,8 @@ test('overlapping external calls with the same ID save and replay only their own
   const replay = await f.call('first', 'task_session_create', firstInput, {
     runtimeSessionId: 'first-subagent', subagent: true,
   });
-  assert.equal(replay.error.code, 'OPERATION_UNCONFIRMED');
+  assert.equal(replay.error.code, 'SUBAGENT_WRITE_FORBIDDEN');
+  assert.equal((await f.call('first', 'task_session_create', firstInput)).error.code, 'OPERATION_UNCONFIRMED');
   assert.equal(pending.size, 2, 'An in-flight replay must not call the host again');
   pending.get('/second')({ sessionId: 'second-created' });
   const secondResult = await second;
@@ -265,7 +266,11 @@ test('explicit v10 receipt migration preserves attribution and pending or unknow
   assert.deepEqual(f.store.operation(createdInput).invocation, invocation);
   for (const input of [pendingInput, unknownInput]) {
     const { actor, invocation: ignored, ...fields } = input;
-    const replay = await f.call(actor, 'task_session_create', fields, { runtimeSessionId: 'another-child', subagent: true });
+    const helper = { runtimeSessionId: 'another-child', subagent: true };
+    assert.equal((await f.call(actor, 'task_session_create', fields, helper)).error.code, 'SUBAGENT_WRITE_FORBIDDEN');
+    const read = await f.call(actor, 'task_read', { view: 'operation', request_id: fields.request_id }, helper);
+    assert.deepEqual(read.result.invocation, invocation, 'Historical helper attribution is preserved');
+    const replay = await f.call(actor, 'task_session_create', fields);
     assert.equal(replay.error.code, 'OPERATION_UNCONFIRMED');
     assert.equal(replay.result.operation.creation, 'unknown');
     assert.equal(f.store.operation(input).status, input === pendingInput ? 'pending' : 'final');

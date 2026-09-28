@@ -98,6 +98,12 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     for (const tool of tools) {
       assert.deepEqual(tool.inputSchema, z.toJSONSchema(toolSchemas[tool.name], { target: 'draft-7' }));
       assert.equal(tool.description, toolDescriptions[tool.name]);
+      if (!['task_read', 'task_script_read'].includes(tool.name)) {
+        assert.match(tool.description, /Internal helpers cannot call this tool/);
+        assert.equal(tool.annotations.readOnlyHint, false);
+      } else {
+        assert.equal(tool.annotations.readOnlyHint, true);
+      }
       const usage = measureToolDescriptionQuota(tool);
       assert.equal(usage.exceeded, false, formatQuotaReport([usage]));
       if (tool.inputSchema.properties.request_id) {
@@ -385,6 +391,34 @@ test('MCP invocation metadata supplies caller identity and rejects identity argu
     }
     assert.equal(store.db.prepare('SELECT count(*) AS n FROM operations').get().n, 0);
 
+    for (const provenance of [
+      {}, { subagent: false }, { runtimeSessionId: 'orchestrator' },
+      { subagent: 'false', runtimeSessionId: 'orchestrator' },
+      { subagent: null, runtimeSessionId: 'orchestrator' },
+      { subagent: false, runtimeSessionId: '' },
+      { subagent: false, runtimeSessionId: 'child' },
+      { subagent: false, runtimeSessionId: 'orchestrator'.repeat(30) },
+    ]) {
+      const response = await f.client.callTool({
+        name: 'task_session_create', arguments: { request_id: randomUUID(), cwd: '/must-not-create' },
+        _meta: { 'cockpit/invocation': { sessionId: 'orchestrator', ...provenance } },
+      });
+      assert.equal(response.isError, true);
+      assert.equal(response.structuredContent.error.code, 'INVOCATION_REQUIRED');
+      assert.equal(response.structuredContent.result, null);
+    }
+    const helperMeta = { 'cockpit/invocation': { sessionId: 'orchestrator', runtimeSessionId: 'helper', subagent: true } };
+    const denied = await f.client.callTool({
+      name: 'task_session_create', arguments: { request_id: 'helper-session', cwd: '/must-not-create' }, _meta: helperMeta,
+    });
+    assert.equal(denied.isError, true);
+    assert.equal(denied.structuredContent.error.code, 'SUBAGENT_WRITE_FORBIDDEN');
+    for (const [name, args] of [['task_read', { view: 'list' }], ['task_script_read', {}]]) {
+      const read = await f.client.callTool({ name, arguments: args, _meta: helperMeta });
+      assert.notEqual(read.isError, true);
+    }
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM operations').get().n, 0);
+
     const created = await f.client.callTool({
       name: 'task_create',
       arguments: { request_id: 'with-meta', title: 'With meta', description: 'Caller wins' },
@@ -419,25 +453,23 @@ test('MCP business request IDs follow the trusted containing session, not connec
     await peer.connect();
     assert.notEqual(f.transport.sessionId, peer.transport.sessionId);
     const input = { request_id: 'same-id', title: 'Scoped identity', description: 'Synthetic transport test' };
-    const first = await call(f.client, 'main', 'task_create', input, {
-      runtimeSessionId: 'child-a', subagent: true, agentName: 'worker-a',
-    });
+    const first = await call(f.client, 'main', 'task_create', input);
     assert.equal(first.error, null);
     assert.deepEqual((await call(peer.client, 'main', 'task_create', input)).result, first.result);
-    assert.deepEqual((await call(f.client, 'main', 'task_create', input, {
+    assert.equal((await call(f.client, 'main', 'task_create', input, {
       runtimeSessionId: 'child-b', subagent: true, agentName: 'worker-b',
-    })).result, first.result);
+    })).error.code, 'SUBAGENT_WRITE_FORBIDDEN');
     assert.equal((await call(f.client, 'main', 'task_create', { ...input, title: 'Changed' })).error.code, 'REQUEST_ID_CONFLICT');
-    const independent = await call(f.client, 'other-main', 'task_create', input, {
-      runtimeSessionId: 'child-a', subagent: true,
-    });
+    const independent = await call(f.client, 'other-main', 'task_create', input);
     assert.equal(independent.error, null);
     assert.notEqual(independent.result.task_id, first.result.task_id);
     const selector = { view: 'operation', request_id: input.request_id };
-    const receipt = await call(peer.client, 'main', 'task_read', selector);
+    const receipt = await call(peer.client, 'main', 'task_read', selector, {
+      runtimeSessionId: 'child-a', subagent: true, agentName: 'worker-a',
+    });
     assert.deepEqual(receipt.result.result, first.result);
     assert.deepEqual(receipt.result.invocation, {
-      sessionId: 'main', runtimeSessionId: 'child-a', subagent: true, agentName: 'worker-a',
+      sessionId: 'main', runtimeSessionId: 'main', subagent: false,
     });
     assert.deepEqual((await call(peer.client, 'other-main', 'task_read', selector)).result.result, independent.result);
     assert.equal((await call(peer.client, 'unrelated', 'task_read', selector)).error.code, 'OPERATION_NOT_FOUND');

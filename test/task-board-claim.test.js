@@ -19,7 +19,7 @@ function fixture(t, inspect = async () => ({ ready: true, node: true, idle: fals
   let sequence = 0;
   const call = (name, input, actor) => service.execute(name, {
     request_id: `claim-test-${++sequence}`, ...input,
-  }, { invocation: { sessionId: actor }, external: true });
+  }, { invocation: { sessionId: actor, runtimeSessionId: actor, subagent: false }, external: true });
   const context = task_id => {
     const task = store.task(task_id);
     return { task_id, revision: task.revision, write_context: task.write_context };

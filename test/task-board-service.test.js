@@ -285,13 +285,16 @@ test('Task storage is private and a newer schema is rejected rather than overwri
   } finally { f.close(); }
 });
 
-test('subagent invocations attribute to the containing session and replay by session actor', async () => {
+test('helpers can read containing-session receipts but cannot write or replay mutations', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'task-board-service-invocation-'));
   const store = new TaskStore(directory);
   const service = new TaskService(store, {});
   try {
-    const invocation = { sessionId: 'container', runtimeSessionId: 'subagent-a', subagent: true, agentName: 'worker-a' };
-    const input = { request_id: 'subagent-create', title: 'Subagent Task', description: 'Record invocation' };
+    const invocation = { sessionId: 'container', runtimeSessionId: 'container', subagent: false };
+    const helper = { sessionId: 'container', runtimeSessionId: 'subagent-a', subagent: true, agentName: 'worker-a' };
+    const input = { request_id: 'main-create', title: 'Main Task', description: 'Record invocation' };
+    assert.equal((await service.execute('task_create', input, { invocation: helper })).error.code, 'SUBAGENT_WRITE_FORBIDDEN');
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM operations').get().n, 0);
     const created = await service.execute('task_create', input, { invocation });
     assert.equal(created.error, null);
     assert.equal(store.task(created.result.task_id).created_by, 'container');
@@ -300,14 +303,15 @@ test('subagent invocations attribute to the containing session and replay by ses
     const replay = await service.execute('task_create', input, {
       invocation: { sessionId: 'container', runtimeSessionId: 'subagent-b', subagent: true, agentName: 'worker-b' },
     });
-    assert.deepEqual(replay.result, created.result);
-    assert.equal(replay.error, null);
+    assert.equal(replay.result, null);
+    assert.equal(replay.error.code, 'SUBAGENT_WRITE_FORBIDDEN');
+    assert.deepEqual((await service.execute('task_create', input, { invocation })).result, created.result);
     const independent = await service.execute('task_create', input, {
-      invocation: { sessionId: 'other-container', runtimeSessionId: 'subagent-c', subagent: true, agentName: 'worker-c' },
+      invocation: { sessionId: 'other-container', runtimeSessionId: 'other-container', subagent: false },
     });
     assert.equal(independent.error, null);
     assert.notEqual(independent.result.task_id, created.result.task_id);
-    const operation = await service.execute('task_read', { view: 'operation', request_id: input.request_id }, { actor: 'container' });
+    const operation = await service.execute('task_read', { view: 'operation', request_id: input.request_id }, { invocation: helper });
     assert.equal(operation.result.actor, 'container');
     assert.deepEqual(operation.result.invocation, invocation);
   } finally {
