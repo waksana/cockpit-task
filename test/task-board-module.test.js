@@ -8,6 +8,7 @@ import { activate } from '../src/task-board/module.js';
 import { createHostAdapter } from '../src/task-board/host.js';
 import { TOOL_NAMES } from '../src/task-board/contracts.js';
 import { TaskStore } from '../src/task-board/store.js';
+import { seedOrchestratingRoot, responsibilityContext } from './helpers/service-responsibility-fixtures.js';
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'task-board-module-'));
@@ -70,14 +71,16 @@ function fixture() {
         signal: controller.signal,
       });
     },
-    seedAssigned({ title = 'Seeded', description = 'Synthetic only', orchestrator = 'orchestrator', assignee = 'user' } = {}) {
+    seedAssigned({ title = 'Seeded', description = 'Synthetic only', orchestrator = null, assignee = 'user' } = {}) {
       const store = new TaskStore(root);
       try {
+        if (orchestrator) seedOrchestratingRoot(store, orchestrator);
+        const actor = orchestrator ?? 'user';
         const created = store.executeLocal('task_create', {
-          actor: orchestrator, request_id: `seed-create-${++request}`, title, description,
+          actor, request_id: `seed-create-${++request}`, title, description,
         });
         const assignment = {
-          actor: orchestrator, request_id: `seed-assign-${++request}`, task_id: created.task_id,
+          actor, request_id: `seed-assign-${++request}`, task_id: created.task_id,
           revision: 1, write_context: created.write_context, assignee,
         };
         store.reserveOperation('task_assign', assignment);
@@ -98,13 +101,16 @@ test('HTTP completion requires explicit valid retro with atomic effects and dura
       const task = (await f.read(id)).body.result;
       const base = { task_id: id, revision: 1, write_context: task.write_context };
       await f.write('task_ack', base);
+      const started = await f.write('task_start', { ...base, work_mode: 'execute' });
+      assert.equal(started.body.error, null);
+      base.write_context = started.body.result.write_context;
       const report = { ...base, status: 'done', outcome: { summary: 'Delivered' }, activity: { text: 'Final activity' } };
       for (const value of [undefined, '', ' \n', true, {}, 'r'.repeat(2001)]) {
         const response = await f.write('task_report', { ...report, ...(value === undefined ? {} : { retro: value }) });
         assert.equal(response.status, 400);
         assert.equal(response.body.error.code, 'INVALID_INPUT');
       }
-      assert.equal((await f.read(id)).body.result.status, 'todo');
+      assert.equal((await f.read(id)).body.result.status, 'in_progress');
       assert.equal((await f.read(id, 'outcomes')).body.result.items.length, 0);
       assert.equal((await f.read(id, 'activity')).body.result.items.length, 0);
       assert.equal((await f.write('task_report', { ...report, retro })).body.result.retro.status, 'saved');
@@ -131,7 +137,24 @@ test('HTTP tool calls reject body identity fields and create Tasks as the signed
     const created = await create({ title: 'Plain HTTP', description: 'Records web user' });
     assert.equal(created.status, 200);
     const task = (await f.read(created.body.result.task_id)).body.result;
-    assert.equal(task.orchestrator, 'user');
+    assert.equal(task.created_by, 'user');
+    assert.equal(task.parent_assignee, null);
+    assert.equal(task.assignee, null);
+  } finally { f.close(); }
+});
+
+test('Web root subscriptions require an explicit recipient and never infer one from creation history', async () => {
+  const f = fixture();
+  try {
+    const created = (await f.write('task_create', { title: 'Root wait', description: 'Wait for authorized closure.' })).body.result;
+    const { revision, ...base } = responsibilityContext(created);
+    const missing = await f.write('task_subscribe', { ...base, statuses: ['cancelled'] });
+    assert.equal(missing.body.error.code, 'SUBSCRIBER_REQUIRED');
+    assert.deepEqual((await f.read(created.task_id, 'subscriptions')).body.result.items, []);
+    const subscribed = await f.write('task_subscribe', { ...base, statuses: ['cancelled'], subscriber: 'observer' });
+    assert.equal(subscribed.body.error, null);
+    assert.equal(subscribed.body.result.subscription.subscriber, 'observer');
+    assert.deepEqual(f.calls, []);
   } finally { f.close(); }
 });
 
@@ -147,7 +170,7 @@ test('Web reads resolve session titles passively with explicit unavailable metad
     for (const view of ['overview', 'execution']) {
       const result = (await f.read(seeded.task_id, view)).body.result;
       assert.deepEqual(result.sessions, {
-        orchestrator: { session_id: 'planner', title: 'Title planner', available: true },
+        parent_assignee: { session_id: 'planner', title: 'Title planner', available: true },
         assignee: { session_id: 'worker', title: 'Title worker', available: true },
       });
     }
@@ -166,7 +189,7 @@ test('Web reads resolve session titles passively with explicit unavailable metad
     const failed = await f.read(seeded.task_id, 'overview');
     assert.equal(failed.status, 200);
     assert.equal(failed.body.error, null);
-    assert.deepEqual(failed.body.result.sessions.orchestrator, {
+    assert.deepEqual(failed.body.result.sessions.parent_assignee, {
       session_id: 'planner', title: null, available: false,
       error: { code: 'SESSION_NOT_FOUND', message: 'The session is no longer known to the host' },
     });
@@ -175,10 +198,10 @@ test('Web reads resolve session titles passively with explicit unavailable metad
     assert.equal(failed.body.result.sessions.assignee.title, null);
     f.host.call = async (_name, { sessionId }) => ({ meta: { sessionId, loaded: false, status: 'unloaded', title: '' } });
     const missing = (await f.read(seeded.task_id)).body.result;
-    assert.equal(missing.sessions.orchestrator.error.code, 'SESSION_TITLE_UNAVAILABLE');
+    assert.equal(missing.sessions.parent_assignee.error.code, 'SESSION_TITLE_UNAVAILABLE');
     assert.equal(missing.sessions.assignee.available, false);
     const web = await f.write('task_create', { title: 'Web', description: 'Unassigned' });
-    assert.deepEqual((await f.read(web.body.result.task_id)).body.result.sessions, { orchestrator: null, assignee: null });
+    assert.deepEqual((await f.read(web.body.result.task_id)).body.result.sessions, { parent_assignee: null, assignee: null });
     assert.deepEqual(f.errors, []);
   } finally { f.close(); }
 });
@@ -220,10 +243,16 @@ test('child changes and blocker transitions publish the affected parents and dep
   const f = fixture();
   try {
     const parent = f.seedAssigned({ assignee: 'user' });
-    const child = (await f.write('task_create', { title: 'Child', description: 'Child agreement' })).body.result;
+    await f.write('task_ack', responsibilityContext(parent));
+    await f.write('task_start', { ...responsibilityContext(parent), work_mode: 'orchestrate' });
+    f.events.length = 0;
+    const child = (await f.write('task_create', {
+      title: 'Child', description: 'Child agreement', parent_task_id: parent.task_id,
+    })).body.result;
     assert.deepEqual(new Set(f.events.map(event => event.task_id)), new Set([parent.task_id, child.task_id]));
     const dependent = (await f.write('task_create', {
       title: 'Dependent', description: 'Wait for child', blocked_by: [{ task_id: child.task_id }],
+      parent_task_id: parent.task_id,
     })).body.result;
     f.events.length = 0;
     const before = (await f.read(dependent.task_id)).body.result.data_version;
@@ -231,6 +260,13 @@ test('child changes and blocker transitions publish the affected parents and dep
       task_id: child.task_id, write_context: child.write_context, reason: 'Explicit cancellation',
     });
     assert.equal(cancelled.body.error, null);
+    assert.equal((await f.read(child.task_id)).body.result.status, 'todo');
+    f.events.length = 0;
+    const intent = (await f.read(child.task_id)).body.result;
+    const finalized = await f.write('task_cancel_finalize', {
+      ...responsibilityContext(intent), summary: 'No work was launched; cancellation completed.',
+    });
+    assert.equal(finalized.body.error, null);
     assert.deepEqual(new Set(f.events.map(event => event.task_id)), new Set([parent.task_id, child.task_id, dependent.task_id]));
     assert.equal(f.events.length, 3, 'One final change event per affected Task');
     for (const event of f.events) {
@@ -321,6 +357,9 @@ test('HTTP reopen checks real host readiness while the Assignee is running and d
     const task = (await f.read(seeded.task_id)).body.result;
     const base = { task_id: task.id, revision: 1, write_context: task.write_context };
     await f.write('task_ack', base);
+    const started = await f.write('task_start', { ...base, work_mode: 'execute' });
+    assert.equal(started.body.error, null);
+    base.write_context = started.body.result.write_context;
     const completed = (await f.write('task_report', { ...base, status: 'done', outcome: { summary: 'Original result' }, retro: null })).body.result;
     f.meta = { ...f.meta, sessionId: 'user', status: 'running', nativeProcessing: true, activeOperations: 1 };
     f.capability = {
@@ -358,6 +397,9 @@ test('HTTP selective reads preserve legacy defaults, errors, revision checks and
     assert.deepEqual(fresh.body.result.retro, { status: 'not_recorded' });
     assert.equal(fresh.body.definition_check.tasks[0].needs_ack, true);
     await f.write('task_ack', base);
+    const started = await f.write('task_start', { ...base, work_mode: 'execute' });
+    assert.equal(started.body.error, null);
+    base.write_context = started.body.result.write_context;
     const text = `${'Activity '.repeat(90)}Asked the user directly.`;
     const blocked = await f.write('task_report', { ...base, status: 'in_progress', activity: { text } });
     const selected = await f.read(id, 'overview', { include: ['activity', 'outcome'] });

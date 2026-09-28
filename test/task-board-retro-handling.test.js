@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { TaskStore } from '../src/task-board/store.js';
 import { TaskService } from '../src/task-board/service.js';
 import { parseInput } from '../src/task-board/contracts.js';
+import { serviceOrchestratingRoot } from './helpers/responsibility-fixtures.js';
 
 function fixture(t) {
   const root = join(process.cwd(), '.task-board-tests', randomUUID());
@@ -27,11 +28,13 @@ function fixture(t) {
     get service() { return service; },
     restart() { service.close(); store = new TaskStore(root); service = new TaskService(store, host, { report: () => {} }); },
     async start(orchestrator, assignee) {
+      await serviceOrchestratingRoot(f.service, store, orchestrator);
       const created = await as(orchestrator, 'task_create', { title: `Task by ${orchestrator}`, description: 'Synthetic requirements' });
       assert.equal(created.error, null, JSON.stringify(created.error));
       const id = created.result.task_id;
       assert.equal((await as(orchestrator, 'task_assign', { ...context(id), assignee })).error, null);
       assert.equal((await as(assignee, 'task_ack', context(id))).error, null);
+      assert.equal((await as(assignee, 'task_start', { ...context(id), work_mode: 'execute' })).error, null);
       return id;
     },
     async finish(assignee, id, retro) {
@@ -40,7 +43,7 @@ function fixture(t) {
       return done.result.outcome.id;
     },
     handle: (actor, id, outcome_id, fields) => as(actor, 'task_retro_handle', { task_id: id, outcome_id, ...fields }),
-    list: fields => store.read({ view: 'list', orchestrator: 'orchestrator', ...fields }).items.map(item => item.id),
+    list: fields => store.read({ view: 'list', parent_assignee: 'orchestrator', ...fields }).items.map(item => item.id),
   };
   return f;
 }
@@ -56,7 +59,10 @@ test('the Orchestrator records fixed, followup, watching and dismissed handling 
   assert.equal(watching.result.status, 'applied');
   assert.equal(watching.result.handling.status, 'watching');
   assert.equal(watching.notifications, undefined);
-  assert.equal(f.sent.length, 1, 'Only the assignment card was sent; handling sends nothing');
+  assert.deepEqual(f.sent.map(entry => entry.text), [
+    `[Task assigned](task:${id}?event=assigned)`,
+    `[Subtask done](task:${id}?event=child_done)`,
+  ], 'Handling adds no card to assignment and child completion notices');
   assert.equal(f.store.task(id).status, 'done');
 
   const followup = await f.handle('orchestrator', id, outcomeId, {
@@ -146,16 +152,16 @@ test('list filters find unhandled and watching retros across statuses without au
   assert.deepEqual(f.list({ retro: 'unhandled' }), [unhandled]);
   assert.deepEqual(f.list({ retro: 'watching' }), [watched]);
   assert.deepEqual(f.list({ retro: 'unhandled', status: 'unfinished' }), []);
-  assert.deepEqual(f.store.read({ view: 'list', orchestrator: 'other', retro: 'unhandled' }).items, []);
-  const listed = f.store.read({ view: 'list', orchestrator: 'orchestrator', status: 'done' }).items.find(item => item.id === watched);
+  assert.deepEqual(f.store.read({ view: 'list', parent_assignee: 'other', retro: 'unhandled' }).items, []);
+  const listed = f.store.read({ view: 'list', parent_assignee: 'orchestrator', status: 'done' }).items.find(item => item.id === watched);
   assert.equal(listed.retro.handling.status, 'watching');
   assert.equal('note' in listed.retro.handling, false);
   assert.throws(() => parseInput('task_read', { view: 'list', retro: 'fixed' }));
 
-  const page = f.store.read({ view: 'list', orchestrator: 'orchestrator', retro: 'unhandled', limit: 1 });
+  const page = f.store.read({ view: 'list', parent_assignee: 'orchestrator', retro: 'unhandled', limit: 1 });
   assert.equal(page.next_cursor, null);
-  const all = f.store.read({ view: 'list', orchestrator: 'orchestrator', status: 'all', limit: 1 });
-  assert.throws(() => f.store.read({ view: 'list', orchestrator: 'orchestrator', retro: 'unhandled', status: 'all', cursor: all.next_cursor }), error => error.code === 'INVALID_CURSOR');
+  const all = f.store.read({ view: 'list', parent_assignee: 'orchestrator', status: 'all', limit: 1 });
+  assert.throws(() => f.store.read({ view: 'list', parent_assignee: 'orchestrator', retro: 'unhandled', status: 'all', cursor: all.next_cursor }), error => error.code === 'INVALID_CURSOR');
 });
 
 test('retro handling survives restart without backfilling completed outcomes', async t => {
@@ -163,7 +169,7 @@ test('retro handling survives restart without backfilling completed outcomes', a
   const id = await f.start('orchestrator', 'worker');
   await f.finish('worker', id, 'Legacy finding');
   f.restart();
-  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 11);
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 12);
   assert.deepEqual(f.store.read({ view: 'overview', task_id: id }).retro.handling, { status: 'unhandled' });
   const outcomeId = f.store.task(id).retro.outcome_id;
   assert.equal((await f.handle('orchestrator', id, outcomeId, { status: 'dismissed', note: 'Legacy' })).error, null);

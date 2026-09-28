@@ -20,6 +20,18 @@ injects the run-number version into an isolated stage, never main. Read the
 prevent this publication side effect. Local dev packages are not installable
 immutable release identities; never replace installed bytes under the same version.
 
+## Schema 12 responsibility migration
+
+Schema 12 is an incompatible, forward-only responsibility-model boundary.
+Ordinary loading refuses every existing pre-12 database; the Rolling descriptor's
+`migrations: []` declares no automatic upgrade path. Follow the complete
+[schema-12 migration procedure](docs/releases.md#schema-12-migration), also shipped
+in the archive, for explicit inventory, per-Task review, isolated-copy validation,
+historical stages and recovery. Merge/publication does not authorize migration,
+deployment or restart; switching packages back is not data rollback.
+
+## Historical migration boundaries
+
 Released 0.3.2 packages compact Task cards, progressive details,
 identity-scoped refresh and their declared browser assets. It retains schema v11
 without a new persistent migration. Released 0.3.1 introduced caller-scoped idempotency.

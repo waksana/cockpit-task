@@ -8,13 +8,15 @@ export function createReadCache(context, read) {
   let connected = context.state?.host?.getSnapshot().connected !== false;
   const hostState = () => context.state?.host?.getSnapshot() ?? { visible: true, connected: true };
   const matches = (entry, taskId) => entry.input.view !== 'native' &&
-    (entry.input.task_id === taskId || (entry.input.view === 'list' && entry.input.parent_task_id === taskId));
+    (entry.input.task_id === taskId || (entry.input.view === 'list' &&
+      (!entry.input.parent_task_id || entry.input.parent_task_id === taskId)));
   const reconcile = (taskId, version, source) => {
     const related = [...entries.values()].filter(entry => matches(entry, taskId));
     if (!related.length) return;
     if (version && versions.get(taskId) === version) return;
     const previous = versions.get(taskId);
-    if (version) versions.set(taskId, version);
+    const tracksIdentity = related.some(entry => entry.input.task_id === taskId || entry.input.parent_task_id === taskId);
+    if (version && tracksIdentity) versions.set(taskId, version);
     // The first successful read establishes a baseline, not a change event.
     if (source && !previous) return;
     for (const entry of related) if (entry !== source) entry.invalidate();
@@ -26,7 +28,7 @@ export function createReadCache(context, read) {
       entries.delete(key);
     }
     for (const taskId of versions.keys()) {
-      if (![...entries.values()].some(entry => matches(entry, taskId))) versions.delete(taskId);
+      if (![...entries.values()].some(entry => entry.input.task_id === taskId || entry.input.parent_task_id === taskId)) versions.delete(taskId);
     }
   };
   const scheduleTrim = () => {

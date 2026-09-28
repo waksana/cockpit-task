@@ -5,6 +5,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TaskStore } from '../src/task-board/store.js';
 import { TaskService } from '../src/task-board/service.js';
+import { serviceOrchestratingRoot } from './helpers/responsibility-fixtures.js';
 
 function fixture(t) {
   const root = join(process.cwd(), '.task-board-tests', randomUUID());
@@ -21,6 +22,7 @@ function fixture(t) {
   const as = (actor, name, input, options = {}) => service.execute(name, { actor, request_id: randomUUID(), ...input }, options);
   const context = id => ({ task_id: id, write_context: store.task(id).write_context, revision: store.task(id).revision });
   async function create(actor = 'orchestrator', fields = {}) {
+    await serviceOrchestratingRoot(service, store, actor);
     const created = await as(actor, 'task_create', { title: 'Auth target', description: 'Requirements', ...fields });
     assert.equal(created.error, null, JSON.stringify(created.error));
     return created.result;
@@ -37,6 +39,7 @@ function fixture(t) {
   }
   async function done(task, actor = 'assignee', retro = null) {
     await ack(task, actor);
+    assert.equal((await as(actor, 'task_start', { ...context(task.task_id), work_mode: 'execute' })).error, null);
     const result = await as(actor, 'task_report', { ...context(task.task_id), status: 'done', outcome: { summary: 'Delivered' }, retro });
     assert.equal(result.error, null, JSON.stringify(result.error));
     return result.result;
@@ -58,9 +61,9 @@ test('relationship permissions allow the right actor and reject third parties wi
   const f = fixture(t);
 
   const assignTarget = await f.create();
-  assert.equal((await f.as('third', 'task_assign', { ...f.context(assignTarget.task_id), assignee: 'worker' })).error.code, 'ORCHESTRATOR_REQUIRED');
+  assert.equal((await f.as('third', 'task_assign', { ...f.context(assignTarget.task_id), assignee: 'worker' })).error.code, 'PARENT_ASSIGNEE_REQUIRED');
   assert.equal(f.store.task(assignTarget.task_id).assignee, null);
-  assert.equal((await f.as('user', 'task_assign', { ...f.context(assignTarget.task_id), assignee: 'worker' })).error, null, 'Web user counts as orchestrator');
+  assert.equal((await f.as('user', 'task_assign', { ...f.context(assignTarget.task_id), assignee: 'worker' })).error, null, 'Web user has explicit management authority');
 
   const ackTarget = await f.assign(await f.create(), 'orchestrator', 'ack-assignee');
   assert.equal((await f.as('third', 'task_ack', f.context(ackTarget.task_id))).error.code, 'ASSIGNEE_REQUIRED');
@@ -75,32 +78,32 @@ test('relationship permissions allow the right actor and reject third parties wi
   assert.equal((await f.as('report-assignee', 'task_report', { ...f.context(reportTarget.task_id), activity: { text: 'allowed' } })).error, null);
 
   const editTarget = await f.assign(await f.create(), 'orchestrator', 'edit-assignee');
-  assert.equal((await f.as('third', 'task_edit', { ...f.context(editTarget.task_id), reason: 'bad', title: 'Bad' })).error.code, 'ORCHESTRATOR_OR_ASSIGNEE_REQUIRED');
+  assert.equal((await f.as('third', 'task_edit', { ...f.context(editTarget.task_id), reason: 'bad', title: 'Bad' })).error.code, 'PARENT_ASSIGNEE_OR_ASSIGNEE_REQUIRED');
   assert.equal(f.store.task(editTarget.task_id).title, 'Auth target');
   assert.equal((await f.as('orchestrator', 'task_edit', { ...f.context(editTarget.task_id), reason: 'ok', title: 'By orchestrator' })).error, null);
   assert.equal((await f.as('edit-assignee', 'task_edit', { ...f.context(editTarget.task_id), reason: 'ok', title: 'By assignee' })).error, null);
 
   const cancelTarget = await f.assign(await f.create(), 'orchestrator', 'cancel-assignee');
-  assert.equal((await f.as('third', 'task_cancel', { task_id: cancelTarget.task_id, write_context: f.store.task(cancelTarget.task_id).write_context, reason: 'bad' })).error.code, 'ORCHESTRATOR_OR_ASSIGNEE_REQUIRED');
+  assert.equal((await f.as('third', 'task_cancel', { task_id: cancelTarget.task_id, write_context: f.store.task(cancelTarget.task_id).write_context, reason: 'bad' })).error.code, 'PARENT_ASSIGNEE_OR_ASSIGNEE_REQUIRED');
   assert.equal(f.store.task(cancelTarget.task_id).status, 'todo');
   assert.equal((await f.as('cancel-assignee', 'task_cancel', { task_id: cancelTarget.task_id, write_context: f.store.task(cancelTarget.task_id).write_context, reason: 'ok' })).error, null);
 
   const reopenTarget = await f.done(await f.assign(await f.create()));
-  assert.equal((await f.as('third', 'task_reopen', { ...f.context(reopenTarget.task_id), description: 'Rework', reason: 'bad' })).error.code, 'ORCHESTRATOR_OR_ASSIGNEE_REQUIRED');
+  assert.equal((await f.as('third', 'task_reopen', { ...f.context(reopenTarget.task_id), description: 'Rework', reason: 'bad' })).error.code, 'PARENT_ASSIGNEE_OR_ASSIGNEE_REQUIRED');
   assert.equal(f.store.task(reopenTarget.task_id).status, 'done');
   assert.equal((await f.as('orchestrator', 'task_reopen', { ...f.context(reopenTarget.task_id), description: 'Rework', reason: 'ok' })).error, null);
 
   const autoStart = await f.automationTask();
-  assert.equal((await f.as('third', 'task_automation_start', f.context(autoStart.task_id))).error.code, 'ORCHESTRATOR_REQUIRED');
+  assert.equal((await f.as('third', 'task_automation_start', f.context(autoStart.task_id))).error.code, 'PARENT_ASSIGNEE_REQUIRED');
   assert.equal(f.store.task(autoStart.task_id).automation.state, 'created');
   const autoReconcile = await f.automationTask();
   f.store.automation.claim(autoReconcile.task_id);
   assert.equal((await f.as('third', 'task_automation_reconcile', {
     task_id: autoReconcile.task_id, write_context: f.store.task(autoReconcile.task_id).write_context, reason: 'bad',
-  })).error.code, 'ORCHESTRATOR_REQUIRED');
+  })).error.code, 'PARENT_ASSIGNEE_REQUIRED');
 });
 
-test('unrestricted operations accept non-orchestrators and user subscriptions target the orchestrator', async t => {
+test('unrestricted operations accept unrelated callers and Web subscriptions require an explicit recipient', async t => {
   const f = fixture(t);
   const task = await f.create();
   assert.equal((await f.service.execute('task_read', { view: 'overview', task_id: task.task_id }, { actor: 'third' })).error, null);
@@ -110,17 +113,58 @@ test('unrestricted operations accept non-orchestrators and user subscriptions ta
   });
   assert.equal(subscribed.error, null);
   assert.equal(subscribed.result.subscription.subscriber, 'third');
-  const web = await f.as('user', 'task_subscribe', {
+  const missingRecipient = await f.as('user', 'task_subscribe', {
     task_id: task.task_id, write_context: f.store.task(task.task_id).write_context, statuses: ['done'],
   });
+  assert.equal(missingRecipient.error.code, 'SUBSCRIBER_REQUIRED');
+  const web = await f.as('user', 'task_subscribe', {
+    task_id: task.task_id, write_context: f.store.task(task.task_id).write_context, statuses: ['done'], subscriber: 'chosen-observer',
+  });
   assert.equal(web.error, null);
-  assert.equal(web.result.subscription.subscriber, 'orchestrator');
+  assert.equal(web.result.subscription.subscriber, 'chosen-observer');
 
   const retroTask = await f.done(await f.assign(await f.create(), 'orchestrator', 'retro-assignee'), 'retro-assignee', 'Finding to handle');
   const outcomeId = f.store.read({ view: 'outcomes', task_id: retroTask.task_id }).items[0].id;
   const handled = await f.as('third', 'task_retro_handle', { task_id: retroTask.task_id, outcome_id: outcomeId, status: 'fixed', note: 'Handled by observer' });
   assert.equal(handled.error, null);
   assert.equal(handled.result.handling.author, 'third');
+});
+
+test('historical root creators have no management rights and a separate claim establishes responsibility', async t => {
+  const f = fixture(t);
+  const created = await f.as('creator', 'task_create', { title: 'Unbound root', description: 'Await a responsible Node' });
+  assert.equal(created.error, null);
+  const id = created.result.task_id;
+  assert.equal(f.store.task(id).created_by, 'creator');
+  for (const [name, fields, code] of [
+    ['task_assign', { assignee: 'worker' }, 'PARENT_ASSIGNEE_REQUIRED'],
+    ['task_edit', { title: 'Unauthorized', reason: 'Created it' }, 'PARENT_ASSIGNEE_OR_ASSIGNEE_REQUIRED'],
+  ]) {
+    assert.equal((await f.as('creator', name, { ...f.context(id), ...fields })).error.code, code);
+  }
+  assert.equal(f.store.read({ view: 'overview', task_id: id, actor: 'creator' }).actor_role, 'none');
+  assert.equal((await f.as('worker', 'task_claim', f.context(id))).error, null);
+  assert.equal(f.store.task(id).status, 'todo');
+  assert.equal(f.store.task(id).acknowledged_revision, null);
+  assert.equal(f.store.task(id).work_mode, 'undecided');
+  assert.deepEqual(f.sent, [], 'Claim does not dispatch to its own caller');
+  await f.ack(f.store.task(id), 'worker');
+  for (const fields of [
+    { status: 'in_progress' },
+    { status: 'done', outcome: { summary: 'Cannot complete unstarted work' }, retro: null },
+  ]) {
+    assert.equal((await f.as('worker', 'task_report', { ...f.context(id), ...fields })).error.code, 'START_REQUIRED');
+    assert.equal(f.store.task(id).status, 'todo');
+    assert.equal(f.store.task(id).work_mode, 'undecided');
+    assert.equal(f.store.read({ view: 'outcomes', task_id: id }).items.length, 0);
+  }
+  assert.equal((await f.as('worker', 'task_start', { ...f.context(id), work_mode: 'undecided' })).error.code, 'INVALID_INPUT');
+  assert.equal(f.store.task(id).status, 'todo');
+  assert.equal((await f.as('worker', 'task_start', { ...f.context(id), work_mode: 'execute' })).error, null);
+  assert.equal(f.store.task(id).status, 'in_progress');
+  assert.equal(f.store.task(id).work_mode, 'execute');
+  assert.equal((await f.as('worker', 'task_create', { title: 'Illegal child', description: 'Execute is not orchestration' })).error.code, 'PARENT_NOT_ORCHESTRATING');
+  assert.deepEqual(f.store.read({ view: 'list', parent_task_id: id, status: 'all' }).items, []);
 });
 
 test('subagent invocations act as their containing session for assignee-only operations', async t => {

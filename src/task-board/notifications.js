@@ -7,7 +7,7 @@ const detail = (error, code) => ({
 
 export async function deliverNotification({ store, host, id, stopped }) {
   const channel = store.notificationChannel(id);
-  const recipient = channel.recipient ?? 'orchestrator';
+  const recipient = channel.recipient;
   const label = recipient.toUpperCase();
   let subscription = channel.read();
   if (subscription.notification.status !== 'pending' || stopped()) return subscription;

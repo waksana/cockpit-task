@@ -10,7 +10,8 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const hostWorktree = process.env.TASK_BOARD_HOST_WORKTREE;
 const fixtureModel = 'gpt-6-astra';
 const orchestratorTools = ['task_read', 'task_create', 'task_script_register', 'task_script_read', 'task_automation_start', 'task_automation_reconcile', 'task_session_create', 'task_session_prepare', 'task_assign', 'task_edit', 'task_cancel', 'task_subscribe', 'task_unsubscribe', 'task_retro_handle'];
-const assigneeTools = ['task_read', 'task_edit', 'task_ack', 'task_reopen', 'task_report', 'task_cancel'];
+const assigneeTools = ['task_read', 'task_edit', 'task_ack', 'task_reopen', 'task_report', 'task_cancel',
+  'task_claim', 'task_start', 'task_convert', 'task_attach', 'task_resolve_condition', 'task_cancel_finalize'];
 const allTools = [...new Set([...orchestratorTools, ...assigneeTools])].sort();
 
 async function removeIsolatedTree(root) {
@@ -181,10 +182,16 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
               toolCall = call('task_ack', 'ack', { ...input, request_id: `native-ack-${event}-${taskId}` });
             } else {
               nativeTaskAcks.set(eventKey, envelopeFor(ackReply));
+              const startReply = replyFor('start');
               const reportReply = replyFor('report');
-              if (event === 'assigned' && !reportReply) {
+              if (event === 'assigned' && !startReply) {
+                toolCall = call('task_start', 'start', {
+                  ...input, request_id: `native-start-${taskId}`, work_mode: 'execute',
+                });
+              } else if (event === 'assigned' && !reportReply) {
+                const started = envelopeFor(startReply).result;
                 toolCall = call('task_report', 'report', {
-                  ...input, request_id: `native-report-${taskId}`, status: 'in_progress',
+                  ...input, write_context: started.write_context, request_id: `native-report-${taskId}`, status: 'in_progress',
                   activity: { text: 'Native Assignee began the assigned Task.' },
                 });
               } else if (reportReply) {
@@ -221,7 +228,8 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
           const overview = step('task_read', 'overview', { view: 'overview' });
           if (overview) {
             assert.equal(overview.id, taskId);
-            assert.equal(overview.orchestrator, actor[1]);
+            assert.equal(Object.hasOwn(overview, 'orchestrator'), false);
+            if (overview.parent_task_id) assert.equal(overview.parent_assignee, actor[1]);
             if (orchestratorSubscription) {
               step('task_subscribe', 'subscription', {
                 write_context: overview.write_context, request_id: `native-subscribe-${taskId}`, statuses: ['done'],
@@ -568,6 +576,22 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal((await engine.roleReadiness(assigneeId, [node])).ready, true);
 
     stage = 'assigning exactly one native Task reference';
+    const root = (await tool('task_create', {
+      request_id: 'integration-root', actor: orchestratorId,
+      title: 'Synthetic integration coordination', description: 'Own and integrate the isolated Task exercise.',
+    })).result;
+    const claimed = (await tool('task_claim', {
+      request_id: 'integration-root-claim', actor: orchestratorId,
+      task_id: root.task_id, revision: root.revision, write_context: root.write_context,
+    })).result;
+    await tool('task_ack', {
+      request_id: 'integration-root-ack', actor: orchestratorId,
+      task_id: root.task_id, revision: claimed.revision, write_context: claimed.write_context,
+    });
+    await tool('task_start', {
+      request_id: 'integration-root-start', actor: orchestratorId,
+      task_id: root.task_id, revision: claimed.revision, write_context: claimed.write_context, work_mode: 'orchestrate',
+    });
     const created = await tool('task_create', {
       request_id: 'integration-task-create', actor: orchestratorId,
       title: 'Synthetic packaged integration', description: 'Synthetic complete requirements. No external work.',
@@ -758,7 +782,8 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     await waitFor(async () => nativeMessages.some(message => message.sessionId === orchestratorId && message.content === statusCard)
       && nativeOrchestratorWorkflows.has(`status_changed:${taskId}`)
       && await engine.busyCount() === 0, 'one-shot Orchestrator notification native completion');
-    assert.deepEqual(nativeMessages.slice(beforeStatusMessages), [{ sessionId: orchestratorId, content: statusCard }]);
+    assert.deepEqual(nativeMessages.slice(beforeStatusMessages), [{ sessionId: orchestratorId, content: statusCard }],
+      'The explicit parent subscription covers its child-terminal card without a duplicate message');
     const orchestratorEvidence = nativeOrchestratorWorkflows.get(`status_changed:${taskId}`);
     assert.equal(orchestratorEvidence.overview.status, 'done');
     assert.equal(orchestratorEvidence.outcomes.items[0].summary, 'Synthetic isolated completion');
@@ -787,7 +812,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const seed = new PackagedTaskStore(dataRoot);
     const seedCrashGap = label => {
       const task = seed.executeLocal('task_create', {
-        actor: orchestratorId, request_id: `cold-create-${label}`,
+        actor: 'user', request_id: `cold-create-${label}`,
         title: `Synthetic ${label} recovery`, description: 'Synthetic cold-recovery fixture only.',
       });
       const subscription = seed.executeLocal('task_subscribe', {
@@ -797,6 +822,12 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       seed.executeLocal('task_cancel', {
         actor: 'user', request_id: `cold-cancel-${label}`, task_id: task.task_id,
         write_context: task.write_context, reason: 'Synthetic gap between durable transition and external send',
+      });
+      const requested = seed.task(task.task_id);
+      seed.executeLocal('task_cancel_finalize', {
+        actor: 'user', request_id: `cold-finalize-${label}`, task_id: task.task_id,
+        revision: requested.revision, write_context: requested.write_context,
+        summary: 'Synthetic unbound responsibility closed without external work.',
       });
       return subscription;
     };

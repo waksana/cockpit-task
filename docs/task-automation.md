@@ -1,7 +1,7 @@
 # Lightweight automation Tasks
 
 Agent is the default: one independent assignee delivers a complete authorized
-outcome. orchestrator may instead choose automation for an already known, trusted,
+outcome. An active orchestrating parent may instead choose automation for an already known, trusted,
 repeatable local script. This is not arbitrary task-to-script conversion, a
 workflow/dependency engine, a scheduler, or permission to invent Subtasks outside
 authorized delegation scope.
@@ -28,12 +28,12 @@ ordinary Agent Tasks are unaffected.
    authorized orchestrator action, register a
    one-shot subscription **before start**. Prefer `done`, adding
    `cancelled` only when necessary. There is no automatic subscription.
-5. Explicitly call `task_automation_start` with actor, stable request ID, Task ID,
+5. Explicitly call `task_automation_start` with stable request ID, Task ID,
    latest `revision` and returned `write_context`. This enqueues once in the
    service's persistent single queue, not in an Agent session.
 
-All required arguments and real JSON examples are in the independently packaged
-[orchestrator reference](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md).
+Operational safeguards are in the independently packaged
+[automation reference](../skills/cockpit-task-tree/cockpit-task-tree/references/automation.md).
 Exact schemas and bounds are in the [MCP contract](task-mcp-contract.md).
 
 Execution uses `executable [...argv, script_path, ...typedStrings]` with no shell.
@@ -45,10 +45,13 @@ script behavior safe.
 
 ## Records and results
 
-Reads expose `kind=agent|automation`; automation has no assignee, fabricated ACK,
+Reads expose `kind=agent|automation`; automation has null work_mode, no assignee, fabricated ACK,
 assignment prompt or session occupancy. `task_assign`, `task_ack` and `task_report`
-reject automation. orchestrator alone receives the four script/start/reconcile tools;
-assignee retains existing read/edit/cancel access, not create/start or Subtask authority.
+reject automation, as do Agent claim/start/convert/cancel_finalize. Current parent-assignee
+or Web-user authority manages automation, never historical creator ownership.
+A root automation has no invented Agent owner and is managed by Web user.
+Child creation/start requires a valid active orchestrating parent and ancestors without
+cancellation intent. Cancellation stays service-managed, not Agent intent/finalize.
 Definitions and editable materials freeze in `queued`, `starting`, `running`.
 
 Run states are `created`, `queued`, `starting`, `running`, `succeeded`, `failed`,
@@ -93,7 +96,7 @@ Restart never reruns started work: recovered starting/running runs become interr
 done with an outcome (or remain cancelled), and hold a persistent queue barrier.
 Prelaunch queued work may resume, but cannot pass that barrier.
 
-`task_automation_reconcile` requires actor, stable request ID, Task ID,
+`task_automation_reconcile` requires stable request ID, Task ID,
 `write_context` and a reason. For a recorded process group, it clears an
 interrupted/finished barrier only after the Linux kernel process-group probe
 `kill(-pgid,0)` returns `ESRCH`, proving that the recorded group no longer exists.
@@ -115,25 +118,12 @@ cannot account for escaped processes. Immutable configuration and script SHA256
 do not freeze runtime/interpreter bytes, imports, dependencies or external state.
 Do not put secrets in Task inputs or retained output.
 
-Current source/package version is **0.3.2**, adding compact cards and progressive details
-with identity-scoped refresh, retaining completion retro for Agent Tasks,
-selective Task reads, the coding/deployment Skill boundary clarification,
-orchestrator request follow-through (#45), immediate assignee update notices (#47),
-Agent reopen (#49), orchestrator sequential subscription follow-up (#53), assignee
-session titles (#55), native Task dependencies and github-coding Skill updates,
-per-Task hierarchical delegation and the tree-node model from #71/#72/#74 via #75,
-schema v8 retro handling and the schema v9 vocabulary/invocation switch.
-It packages schema v10's four-state lifecycle and durable prerequisites. Finished
-automation is done even when the run failed or was interrupted; run facts and barriers
-remain authoritative. The incompatible migration is roll-forward only; installed
-0.2.0 cannot open v10. Every existing v9 database needs the
-[reviewed migration procedure](task-implementation.md#schema-v10-migration).
-Schema v11 scopes registration, start and reconcile receipts to the trusted
-calling session like all other writes. Migration retains run facts and uncertain
-effects, and quarantines unattributable legacy IDs without executing scripts.
-Released 0.3.0 cannot open v11; see the
-[receipt migration contract](task-implementation.md#caller-scoped-receipts-and-schema-v11).
-Automation Tasks remain ineligible for reopen. Automation remains exempt from retro. Source
-changes and isolated validation are not installation, production tests, deployment
-or restart authorization; no existing installation is replaced or upgraded by
-this feature's documentation.
+Current source stays **0.0.0-dev**, with schema12 responsibility semantics.
+Ordinary loading refuses existing pre-12 data; use the separately authorized
+[reviewed migration](task-responsibility-migration.md). Migration preserves script/run
+facts, barriers and caller-scoped receipts without executing anything.
+Automation remains ineligible for reopen and exempt from Agent retro.
+Its terminal state satisfies a parent's child gate, not the parent's goal.
+A Task-ID prerequisite waits for done even on failure; record an explicit success
+condition where success is actually needed. Source, validation and automatic Rolling
+publication do not authorize installation, production migration, deployment or restart.

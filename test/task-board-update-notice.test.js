@@ -5,6 +5,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { TaskStore } from '../src/task-board/store.js';
 import { TaskService } from '../src/task-board/service.js';
+import { serviceOrchestratingRoot } from './helpers/responsibility-fixtures.js';
 
 function fixture(t, { sessionExists = async () => true, send } = {}) {
   const root = join(process.cwd(), '.task-board-tests', randomUUID());
@@ -26,9 +27,11 @@ function fixture(t, { sessionExists = async () => true, send } = {}) {
     get service() { return service; },
     restart() { service.close(); store = new TaskStore(root); service = new TaskService(store, host, { report: () => {} }); return service; },
     async assigned(assignee = 'assignee') {
+      await serviceOrchestratingRoot(service, store);
       const id = (await as('orchestrator', 'task_create', { title: 'Update target', description: 'v1' })).result.task_id;
       assert.equal((await as('orchestrator', 'task_assign', { ...context(id), assignee })).error, null);
       assert.equal((await as(assignee, 'task_ack', context(id))).error, null);
+      assert.equal((await as(assignee, 'task_start', { ...context(id), work_mode: 'execute' })).error, null);
       sent.length = 0;
       return id;
     },
@@ -63,10 +66,13 @@ test('a description change by the orchestrator sends one link-only immediate upd
 
 test('edits that need no update notice save normally and send nothing', async t => {
   const f = fixture(t);
+  await serviceOrchestratingRoot(f.service, f.store);
   const unassigned = (await f.as('orchestrator', 'task_create', { title: 'Draft', description: 'v1' })).result.task_id;
   const assigned = await f.assigned();
   const done = await f.assigned('finisher');
   assert.equal((await f.as('finisher', 'task_report', { ...f.context(done), status: 'done', outcome: { summary: 'Delivered' }, retro: null })).error, null);
+  assert.deepEqual(f.sent.map(entry => entry.text), [`[Subtask done](task:${done}?event=child_done)`]);
+  f.sent.length = 0;
   const cases = [
     ['unassigned', unassigned, 'orchestrator', { description: 'v2' }, 2],
     ['unchanged description', assigned, 'orchestrator', { description: 'v1' }, 1],
@@ -107,10 +113,11 @@ test('cancel notifies the assignee only when someone else cancels', async t => {
   assert.equal(cancelled.result.notice_ids.length, 1);
   assert.deepEqual(f.sent, [{
     session: 'cancelled-worker', mode: 'immediate',
-    text: `[Task cancelled](task:${byOrchestrator}?event=cancelled)`,
+    text: `[Task cancellation requested](task:${byOrchestrator}?event=cancellation_requested)`,
   }]);
   const [notice] = f.store.read({ view: 'assignee_notices', task_id: byOrchestrator }).items;
-  assert.equal(notice.kind, 'cancelled');
+  assert.equal(notice.kind, 'cancellation_requested');
+  assert.equal(f.store.task(byOrchestrator).status, 'in_progress');
   assert.equal(notice.assignee, 'cancelled-worker');
 
   f.sent.length = 0;
@@ -165,7 +172,7 @@ test('Web user cancel, reopen and edit send assignee notices without auto-ACKing
   assert.equal(cancel.error, null, JSON.stringify(cancel.error));
   assert.deepEqual(f.sent, [{
     session: 'web-cancel-worker', mode: 'immediate',
-    text: `[Task cancelled](task:${cancelled}?event=cancelled)`,
+    text: `[Task cancellation requested](task:${cancelled}?event=cancellation_requested)`,
   }]);
 
   const reopened = await f.assigned('web-reopen-worker');

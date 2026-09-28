@@ -1,181 +1,130 @@
-# Task 产品设计
+# Task 产品设计：递归责任
 
-Task 是 Cockpit 内的独立任务协作模块。模块 ID 与 MCP key 为 `cockpit-task`，
-展示名称为 Task；orchestrator / assignee 是每条 Task 的协作关系，不是项目身份或可选 session 角色；服务按关系授权写入。
+Task 是用户授权范围内的一份持续责任，跨回复、压缩、卸载仍存在。
+一个 Agent Task 只绑定自己的 `assignee`；负责人亲自交付（`execute`），
+或通过更具体的子责任组织交付并整合结果（`orchestrate`）。拆分不免除整体责任。
+创建来源 `created_by` 只是历史；上级负责人从当前 parent 的 assignee 派生，
+没有独立当前 `orchestrator` 绑定，更没有树外长期 owner。
 
-使用与打包见 [Task](task-board.md)，记录语义见 [Schema](task-schema.md)，
-调用接口见 [MCP 契约](task-mcp-contract.md)，行为指导见
-[角色 Skills](task-tools-skills.md)。隔离验证方法见
-[生命周期回放](task-lifecycle-testing.md)。
+使用见 [Task](task-board.md)，字段见 [Schema](task-schema.md)，
+工具见 [MCP 契约](task-mcp-contract.md)，行为见 [Skills](task-tools-skills.md)。
 
-## 1. 一个 Task，一个完整结果
+## 1. 责任、授权、工具分开
 
-用户可以先与 orchestrator 讨论想法、澄清范围，再明确登记或授权执行。讨论、调查、
-记录想法和启动交付是不同决定；不为闲聊自动建 Task，也不把登记等同于派单。
+Task 保存本项工作特有的目标、决定、边界和完成要求。讨论、调研、登记、准备资源
+不是开工授权。用户可以直接与任何节点沟通；面对决定的节点直接问用户，不逐级上报
+问题或重复提问。影响约定的回答写回 Task；跨责任影响由当前父负责人据已授权事实安排。
+正式节点间只通过 Task 记录与服务通知协作，不私聊，不通过 helper 传话。
 
-上下文已在手且直接处理合适时自己做；并行、分担上下文或独立判断可用内部 subagent，
-结果由当前负责人整合；需要独立负责人持续推进、独立交付或依赖协调时派 Task。
-这些是判断依据，不设固定优先级、逐次审批或 Task 数量目标，也不偏向新建 session。
-正式 Agent Task 由 assignee 完整负责；独立 review 可用内部 helper，不强制另建 Task/session。
+工具选择与履责方式正交：**execute 与 orchestrate 都可用 helper**，结果仍由调用者整合。
+独立审查可以是 helper；不是每次调用工具都要建 Task。只有需要独立持续交付责任时才建子 Task。
+不以工具名、调用数、子节点数量判断模式，也不追求更多 session 或更少 Task。
 
-对于已授权、可信、可重复的已知脚本，orchestrator 可显式选择 automation Task；
-服务持久单队列执行，没有 assignee、ACK 或 session 占用。登记和创建不执行，
-可选必要订阅之后才显式 start；不是把任意工作脚本化或增加工作流引擎。
-成功、失败或中断均以 done+outcome 结束本次执行，真实结果看 run facts，不自动重跑；详见
-[轻量自动化](task-automation.md)。以下指派、ACK 和 Agent 协作规则不套用于 automation。
+execute 包括深入研究、实施和审阅，不只写代码。orchestrate 的交付包括拆分、
+接口/依赖安排、阻塞处理、必要决策、成果判断和整体收口；为这些判断可做有限调研，
+持续实施与深入专项调查放在子责任中。执行者需要独立委派时，先显式转换，
+记录原因、已有成果与剩余责任，再分解；不是原样逐级转包。
+转换保留 Task 和 assignee，不扩大授权，且不降回 execute/undecided。
 
-- Task 可有委派谱系与显式 `blocked_by` 关系，但没有自动调度或级联状态。
-- 一个 session 同时最多执行一项未结束 Task，完成或取消后可承接其他 Task。
-- 首次绑定后不能替换 assignee；orchestrator 或符合条件的原 assignee 可在用户明确授权返工时
-  用 `task_reopen` 将 done Agent Task 重开，工作仍由原 assignee 继续；cancelled / automation 不适用。
-- orchestrator 信任 assignee 完整交付，不增加默认上游审批或逐阶段重新派单；
-  review 是工作步骤，不是 lifecycle 状态。
-- 新建或 fork session 不自动隔离共享资源，也不继承额外授权。
+工作方法另由项目指令及 [github-coding](../skills/github-coding/github-coding/SKILL.md)
+等 Skill 指导；两种模式不是通用工具沙箱，也不改变 native interactive/plan/autopilot。
 
-协作选择不扩大授权或接管已指派的工作。内部 helper 向当前节点交回结果；
-正式 Task 节点之间只通过 Task 记录协作，不能直接或借 helper 传话。
-使用 Task 委派编码时，orchestrator 说明本项要求并引用 Issue，assignee 自行建立和清理 worktree；
-直接实施也遵循独立 [github-coding Skill](../skills/github-coding/github-coding/SKILL.md)
-的隔离、独立审查及授权交付要求，不为非编码工作增加步骤。
+## 2. 初始化、绑定和原子开工
 
-## 2. Task 是共同工作记录
-
-Task 保存本项工作特有且影响交付的当前约定；外部资料引用即可，不复制通用规则、
-流程、无必要的实现细节或历史。聊天与通知不维护第二份要求或进度账。用户可以直接与 assignee 澄清；
-影响范围、约束或交付条件的结论应写回 Task，不要求 orchestrator 转述。
-
-| 记录 | 职责 |
+| 事实 | 含义 |
 | --- | --- |
-| `description` | 本项工作的当前目标、决定、边界和完成要求 |
-| `revision` / `changelog` | 仅对 description 版本化；保留每版正文、作者、时间与原因 |
-| `acknowledged_revision` | 固定 assignee 已确认的 description 版本；逐版确认另有记录 |
-| `activity` | assignee 报告的重要变化，保留实际依据与已确认的 revision |
-| `status` / `outcome` | 明确的工作状态、实际交付、遗留和证据入口；不从 activity 或 session 状态推断 |
-| `retro` | Agent 交付后的轻量复盘，独立于成果，随同次完成记录保存 |
-| `references` / `metadata` | 补充资料；不形成依赖或新的 Task 子类型，不隐藏工作要求 |
+| `task_create` | 登记 `todo/undecided` Agent 意图，不绑定、不发消息、不执行 |
+| `task_claim` | 就绪 Node 承接普通未绑定 root，不自派单、不改标题、不 ACK |
+| `task_assign` | 当前父负责人或 Web user 外部派发；准备、绑定、消息受理分别记录 |
+| execution + ACK | 对完整当前约定的精确版本确认，不开工、不解除条件 |
+| `task_start` | assignee 对当前已 ACK 且 ready 的 todo，原子选择 execute/orchestrate 并进入 in_progress |
+| `task_convert` | 已开工 execute 显式转为 orchestrate，保留成果与剩余责任审计 |
 
-orchestrator 修改 description 不替 assignee ACK，也不生成 assignee activity。当前
-assignee 亲自成功修改未结束 Task 的正文时，同时确认新 revision；相同正文、
-仅资料编辑或终态编辑均不自动 ACK。ACK 本身不开始执行、不解除阻塞、不生成活动。
+todo 期间只做必要澄清和轻度发现，不实施、不建子任务。不能 `todo→done`，
+也不能用普通 report 绕过 start；未开始的意图仍可取消。
+状态不是 native 忙闲、加载、工具运行或交付成功的推断。
 
-状态、归属、动态和 ACK 不推进 description revision。旧成果保留原版本；
-定义改变后，旧成果不能冒充新要求已交付的证明。终态定义可以编辑，但不会重开执行。
-独立的 `task_reopen` 是窄例外：同一 Task/orchestrator/assignee 原子进入 in_progress，
-强制新建定义版本（正文相同也递增）；原 assignee 调用时自 ACK，orchestrator/Web-user 调用时不 auto-ACK 并给 assignee 发送 `[Task updated]`。保留旧成果、复盘、资料及所有历史。
-新交付仍需新 outcome 和显式 retro，不把旧 ACK/成果当作新版交付。
+一个 session 最多承担一项未结束 Agent Task；首次绑定不替换。
+派发要求目标能力与原生空闲，claim 是当前 caller 承接，不要求其调用时 idle。
+claim 可承接 blocked root 用于澄清，不代表 Task ready、ACK 或开始。
+准备资源不授予责任，角色标签不证明工具实际可用，ACK 不证明真实理解。
 
-资格由 schema v5 后的持久单调指派序号判定：自原指派后未承接其他 Task，
-后来已 done/cancelled 也会永久使该旧 Task 不符合条件；同时不得占用其他未结束 Task。
-升级前已经指派的全部不符合资格，无时间戳推断或历史回填。
-原 assignee 在当前执行轮次可自助重开，只查能力就绪、不套首次派单 idle 门槛；
-不派单、不恢复已结束订阅或补发通知。orchestrator 重开仍使用同一原 assignee，不创建替代执行者。
-orchestrator 不为可合法继续的原 assignee 建替代 Task；不符合条件则采用适当的新授权 Task。
-不新增通用状态日志、强制 activity 或轮次状态机。
+## 3. 同一单元递归成树
 
-assignee 完成交付后、done 前简短回顾：保留有证据、可行动的自动化候选、具体慢点或
-重复卡点、Skill/MCP 发现/契约/能力验证缺口；区分观察、假设、外部等待，不编造耗时。
-不要求多段模板或填充内容；无有用发现传 null。Agent done 同次必须显式提交新
-outcome 和 `retro` 文本或 null，普通报告不传；服务保证提交，不保证思考或文本质量。
-轻量视图只显示状态、归因与处理状态；历史未记录不冒充无发现。复盘不代替成果和阻塞、
-不授权改进或扩大范围，服务不新增通知、派单或完成门槛；有 Subtask 的节点在自己 done 前把 Subtask retro 折入自己的 retro。
-`task_retro_handle` 只是可选记录工具，任意调用者可用，Skill 不规定使用时机。脚本 automation 不运行 Agent、也不需要 retro；现有服务成果和生命周期保持不变。
+没有 parent 就是普通 root，没有专用角色、标志或权限。长期 root 可以暂时无子任务，
+继续承担已约定的管理责任；不因为树暂时空了自动结束，也不为了保活自动找工作。
+未绑定 root 不猜隐藏负责人：就绪 Node 用 claim 承接，Web user 可外部指派。
+创建者与其他 Node 一样，只能在明确授权且满足 claim 契约时承接，不保留额外管理权。
 
-## 3. 登记、准备和指派是独立操作
+有 active Task 的 caller 只能在其已绑定、in_progress、orchestrate、当前 ACK、
+前置满足且无取消意图时创建 child。祖先链也必须是有效的 active orchestrate 责任。
+父负责人不能同时承担 child，不能向祖先派发或形成环。
 
-```text
-澄清并登记 Task
-  → 明确选择工作资源，新建 assignee 或准备符合条件的既有 session
-  → 指派工具检查能力和原生可接单状态，固定执行归属
-  → 发送一次 assigned 引用
-  → assignee 读取完整当前约定并 ACK
-  → 明确开始执行，持续维护 Task，完整交付
-```
+用户授权增加更大范围的 parent 时，`task_attach` 把已有未结束 root 接到另一 session
+承担的 active orchestrate parent 下，保留原 Task、绑定、范围、子树和历史。
+当前权限、通知与读取随 parent 派生；创建来源不参与回退。
+不支持 detach、任意 reparent 或以删除关系逃避收口。
+没有固定三层业务上限；结构操作最多检查 10,000 个节点，超限明确
+`TREE_RESOURCE_LIMIT`，读回分页且不嵌入无界树。资源保护不是新业务层级。
 
-`task_create` 只登记，backlog 无需派单；`task_session_create` 通过宿主新建并装配
-Task assignee，可显式准备所选 Skill/MCP。`task_session_prepare` 为已加载空闲、
-无未结束 Task、已应用 assignee 且无待重载角色的既有 session 准备资源。
-两者不关联 Task 或发送消息；不强制优先新建或复用，也不自动匹配候选者。
-选择限于已存在可发现的原生名称，不从 description 推断，不安装、认证或改全局默认值。
-旧创建省略选择时保持兼容；显式准备须有独立宿主能力标记，缺失在副作用前拒绝。
-`task_assign` 只指派 orchestrator 选定的已有 session，
-不追加角色、安装 Skill、启用 MCP、重载或创建替代者。
+## 4. 子终态、整体结果、依赖不是一回事
 
-宿主提供角色选择、组合、持久化、冷恢复及已有 session 的角色管理。
-Task 自身不暴露已有 session 的角色变更；宿主角色变化不等于 Task 指派，
-也不改变现有交付责任。orchestrator / assignee 可以同时具备，工具取并集，
-但多角色不放宽单项未结束执行的限制。
+父进入 `done` 或最终 `cancelled` 前，所有直接 child 必须 `done` 或 `cancelled`。
+这是共同结构门槛，不自动转状态，不判断父目标已达成。
+子 cancelled 满足终态门槛但不是成功成果；缺失交付应继续安排，或经用户授权调整父约定。
+父 done 仍需满足自己的前置、完整成果、新 outcome 及显式 retro（有证据文本或 null），
+并整合有用子复盘。需要集成代码时安排执行责任，不让父重回持续实施。
 
-角色标签表示配置，不证明当前能力就绪。创建后和指派前显式检查能力；
-原生运行、队列、待决问题和后台工作另行检查，不持续采集或展示 readiness badge。
-工具能力是装配范围，不是逐 Task ACL；`actor` 为自报归因，
-不能宣称验证了身份、用户授权或实际阅读。
+`blocked_by` 表示真实前置，不表示包含关系。不能把所有 child 自动变成父 blocker，
+否则会阻止仍必要的编排。`{task_id}` 等待那次执行的 done，不保证成功；
+automation 失败的 done 同样可解除它。若需要成功结果，明确写成功条件。
+cancelled 不解除 Task-ID blocker，已解除关系不因日后 reopen 复活。
 
-## 4. 主动同步，默认静默
+负责人可用 `task_resolve_condition` 对自己的具体文字条件记录用户答案或客观满足证据，
+按精确 dependency_id 解除；parent assignee / Web user 也可办理。
+这不是改写条件含义、删除 Task-ID 依赖或扩大授权的入口。普通 description 更新
+不等于解除；父无需重复问同一个用户决定。涉及重新规划仍审计其原因及授权。
 
-orchestrator 按需读取 Task 了解情况，不向 assignee 聊天追问进展或索要确认。
-assignee 在自己的 session 向用户提出真实决策问题，把进展、阻塞和成果写回 Task，
-不直接或通过 subagent 向 orchestrator 发消息。面向用户的简洁总结允许，但不是另一份持续账本。
+## 5. 取消与返工保持责任连续
 
-assignee 在开工、恢复、重要阶段之间、重要外部操作前和交付前读取最新定义，
-理解变化并 ACK 精确版本。每次 Task 业务调用的 `definition_check` 都需处理，
-包括读取、失败和重放；提醒不等于自动确认或后台通知，不要求忙循环轮询。
+Agent `task_cancel` 先持久记录 `cancellation_request`，即使叶子也不直接终态。
+收到意图后停止推进放弃的目标，但仍可读/ACK、编辑、记录善后活动并安排子任务收口。
+不能继续 start、创建/派发 child、convert、attach 或 done；祖先取消也约束后代普通进展。
+但祖先仍有绑定且 active orchestrate 时，其取消意图或 blockers 不阻止既有 child
+按自己的当前 ACK、ready、无自身意图及成果/子终态门槛 done 收口。
+服务不盲目级联。所有直接 child 终态后，绑定 assignee 用 `task_cancel_finalize`
+记录处置并最终 cancelled；未绑定 Agent 由 Web user finalize。
+最终取消不要求实现已放弃的执行前置或 ACK，也不证明外部进程退出或回滚。
 
-消息用途严格区分：
+用户明确返工时，`task_reopen` 保留原 assignee、模式及历史并创建新 revision。
+只允许有可靠指派序号、之后未承接其他 Task、无其他未结束责任且能力就绪的原 session。
+祖先必须先合法恢复为 active orchestrate 且无取消意图；不能自动重开祖先。
+cancelled、automation、未知 legacy mode 或资格不符时拒绝原位恢复，
+不暗换人、另建替代责任、猜模式或恢复旧订阅。另行工作须独立明确授权。
 
-| 用途 | 消息 |
-| --- | --- |
-| 普通引用 | `[Task](task:<uuid>)` |
-| 首次派单，由 `task_assign` 发送一次 | `[Task assigned](task:<uuid>?event=assigned)` |
-| assignee 之外的调用者在 ready 时修改已指派未结束 Agent Task 的 description，或使其 ready/blocked 边界变化 | `[Task updated](task:<uuid>?event=updated)`，完整正文仅为该链接 |
-| assignee 之外的调用者取消已指派未结束 Agent Task | `[Task cancelled](task:<uuid>?event=cancelled)`，完整正文仅为该链接 |
-| assignee 为自己的 Task 新增具体 condition | `[Task blocked](task:<uuid>?event=blocked)`，发给 orchestrator |
-| 显式一次性状态订阅，由系统通知 subscriber | `[Subscribed Task status changed](task:<uuid>?event=status_changed)` |
-| 依赖方最后一个 active blocker 已解除，由系统通知 orchestrator | `[Subtask ready](task:<uuid>?event=ready)` |
-| 待派发依赖方的 blocker 被取消，由系统通知 orchestrator | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` |
-| Subtask 进入 done，由系统通知其 orchestrator（父 Task 的 assignee） | `[Subtask done](task:<uuid>?event=child_done)` |
-| 历史 Subtask blocked 事件 | `[Subtask blocked](task:<uuid>?event=child_blocked)`；仅兼容旧记录，不再产生 |
-| Subtask 进入 cancelled，由系统通知其 orchestrator（父 Task 的 assignee） | `[Subtask cancelled](task:<uuid>?event=child_cancelled)` |
+## 6. 恢复和证据
 
-首次派单不复制 description，orchestrator 不重复发单。普通编辑与报告静默。
-已指派 Task 在 `ready→blocked` 或 `blocked→ready` 时通知 assignee；阻塞期间的普通
-description 更新、部分 blocker 解除保持静默。assignee 新增 condition 时只向 orchestrator
-上行一次。assignee 之外的调用者对已指派未结束 Agent Task 在 ready 时改 description、重开或取消时，服务自动用
-`mode:"immediate"` 发送固定 updated/cancelled 引用和读取/ACK 或停止工作要求。
-不整理或重放队列、不为通知中断工作；受理不等于消费或 ACK，未知效果不盲重试或手写补发。
+开始、恢复、重要外部动作、交付前读完整 execution、ACK 精确 revision，
+处理每次响应的 definition_check。已确认旧版 activity 可保留真实版本，
+不能拿旧成果证明新要求已交付。新绑定、结构、模式、意图变更进入并发保护。
 
-状态订阅默认不使用。只有未来状态使 orchestrator 必须采取具体、必要的后续行动时
-才登记；单纯看进度或确认完成不是理由。不虚构后续工作或审批关卡，
-选择最少必要目标，后续行动不再需要时取消等待。首次匹配后结束，
-不自动续订；assignee 不等待订阅或通知被读才执行。登记时已匹配则失败，
-不即时补发；通知投递与已保存的 Task 成果分别记录。
+不确定操作先读原 caller-scoped receipt 和当前事实；相同 request_id 重放保持输入不变，
+不盲重试、重派或换 Task。只有 final 回执明确 assignment=applied/message=not_sent
+才允许契约限定的 resume_request_id；unknown/accepted/queued 都不行。
+通知失败不抹去保存效果，投递不证明消费、ACK 或运行。
 
-## 5. 如实保留冲突与不确定性
+默认不订阅；必要后续动作才显式一次性等待，不轮询进度、不等通知被读。
+Child 与依赖通知保存收件人快照，发送前核对当前关系；过时不改投他人或重试。
+Web subscription 明确给 subscriber，不从 creator/root 猜接收者。
 
-Task 保护版本、逐版 ACK、生命周期、首次绑定、单 session 单项执行及请求幂等。
-这些是数据一致性，不是按 orchestrator/assignee 归属鉴权。
+## 7. 服务与历史边界
 
-已实际 ACK 的旧版 activity 可保留原 revision；同次请求的过期状态或成果拒绝，
-必须明确部分应用。读过或确认更高版本不证明被跳过的版本已获确认。
+automation 只运行已授权的现有可信脚本，由服务管理，无 Agent assignee/mode/ACK，
+不临时造脚本绕过责任。取消仍走既有进程组与屏障协议；done 是尝试结束，
+真实成败、退出及残留看 run facts，见 [automation](task-automation.md)。
 
-session 已创建、资源准备、能力就绪、归属已绑定、消息被接受、ACK 和实际执行是不同事实。
-Skill enabled 不等于正文已读，MCP connected 不等于工具 offered；assignee 仍须在
-首次需要时自行加载相关 Skill 正文。准备分步效果和最终 readiness 分开保留，
-已知失败先检查回执及当前状态，再明确继续；未知准备不允许盲重试或替换。
-稳定 `request_id` 的相同输入重放不重复副作用；部分失败保留已创建/绑定资源。
-未知、queued 或 accepted 发送不能自动重发。只有已完成且未被消费的回执证明
-固定指派 `assignment=applied`、`message=not_sent` 时，才允许通过
-`resume_request_id` 显式恢复该次发送；这不是换人或重开 Task。
-
-## 6. 模块边界
-
-Task 后端维护记录，普通 HTTP 与 HTTP MCP 共用业务服务和 `task-board.sqlite`。
-宿主负责模块挂载、角色能力和原生 session；模块只通过公开
-`context.host.call` 接入，不访问私有 runtime、聊天、凭据或其他数据库。
-
-前端是聊天中的内联引用卡片与按需打开的当前数据详情，不是独立 dashboard、
-编辑器或调度界面。消息 event 固定，卡片数据重新读取；Task 报告和按需原生
-session 观察分开显示，不伪造实时业务进度。
-
-宿主兼容性、启动后通知恢复和关闭保护见
-[宿主契约](task-host-contract.md)与[实现契约](task-implementation.md)。
-打包、测试或文档更新不执行安装、真实 session 操作或生产部署。
+schema 12 把当前责任与旧创建来源分开。普通加载拒绝自动猜迁移；
+未完成历史责任必须显式审阅，终态未知模式保留 legacy，不伪造既往合规。
+旧 JSON、回执、成果及不确定效果保留。升级方法只有
+[schema 12 procedure](task-responsibility-migration.md)；
+源码、合并与自动 Rolling 都不授权部署、重启或现有数据迁移。

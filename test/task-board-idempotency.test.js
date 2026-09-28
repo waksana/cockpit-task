@@ -7,6 +7,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { TaskStore } from '../src/task-board/store.js';
 import { TaskService } from '../src/task-board/service.js';
 import { restoreV10Operations, v10OperationColumns } from './helpers/operations-v10.js';
+import { migrateOperationScopes } from '../src/task-board/operation-scopes.js';
+import { seedOrchestratingRoot } from './helpers/service-responsibility-fixtures.js';
 
 function fixture(t, host = {}) {
   const root = mkdtempSync(join(tmpdir(), 'task-idempotency-'));
@@ -36,7 +38,7 @@ function fixture(t, host = {}) {
 }
 
 const createInput = request_id => ({ request_id, title: 'Synthetic Task', description: 'Scoped durable effects' });
-const context = task => ({ task_id: task.task_id, revision: task.revision, write_context: task.write_context });
+const context = task => ({ task_id: task.task_id ?? task.id, revision: task.revision, write_context: task.write_context });
 const receipts = db => db.prepare(`SELECT rowid AS insertion_seq,${v10OperationColumns.join(',')} FROM operations ORDER BY rowid`).all();
 
 function v10Fixture(f, seed = () => {}) {
@@ -45,8 +47,21 @@ function v10Fixture(f, seed = () => {}) {
   try {
     restoreV10Operations(db);
     seed(db);
-    db.exec('PRAGMA user_version=10');
     return receipts(db);
+  } finally { db.close(); }
+}
+
+function migrateReceiptFixture(f) {
+  const db = new DatabaseSync(join(f.root, 'task-board.sqlite'));
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      migrateOperationScopes(db);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
   } finally { db.close(); }
 }
 
@@ -68,8 +83,9 @@ test('local receipts and failures are scoped to the actor across connections and
     assert.throws(() => other.operation({ actor: 'third', request_id: input.request_id }),
       error => error.code === 'OPERATION_NOT_FOUND');
   } finally { other.close(); }
-  const edit = { ...context(first.result), request_id: 'edit', reason: 'Update title', title: 'Updated' };
-  assert.equal((await f.call('second', 'task_edit', edit)).error.code, 'ORCHESTRATOR_OR_ASSIGNEE_REQUIRED');
+  f.store.executeLocal('task_claim', { actor: 'first', request_id: 'claim', ...context(first.result) });
+  const edit = { ...context(f.store.task(first.result.task_id)), request_id: 'edit', reason: 'Update title', title: 'Updated' };
+  assert.equal((await f.call('second', 'task_edit', edit)).error.code, 'PARENT_ASSIGNEE_OR_ASSIGNEE_REQUIRED');
   assert.equal((await f.call('first', 'task_edit', edit)).error, null);
   f.restart();
   for (const [actor, expected] of [['first', first], ['second', second]]) {
@@ -78,7 +94,7 @@ test('local receipts and failures are scoped to the actor across connections and
     assert.equal(read.result.actor, actor);
     assert.deepEqual(read.result.result, expected.result);
   }
-  assert.equal((await f.call('second', 'task_edit', edit)).error.code, 'ORCHESTRATOR_OR_ASSIGNEE_REQUIRED');
+  assert.equal((await f.call('second', 'task_edit', edit)).error.code, 'PARENT_ASSIGNEE_OR_ASSIGNEE_REQUIRED');
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM tasks').get().n, 2);
 });
 
@@ -145,6 +161,7 @@ test('assignment binding and one-time resume are scoped, including authorized We
   });
   const originals = [];
   for (const actor of ['first', 'second']) {
+    seedOrchestratingRoot(f.store, actor);
     const task = f.store.executeLocal('task_create', { actor, ...createInput(`task-${actor}`) });
     const input = { actor, request_id: 'assign', ...context(task), assignee: `${actor}-worker` };
     f.store.reserveOperation('task_assign', input);
@@ -171,7 +188,8 @@ test('assignment binding and one-time resume are scoped, including authorized We
       .get(actor, 'assign').resumed_by, 'resume');
   }
   assert.deepEqual(sent, ['first-worker', 'second-worker']);
-  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM task_assignments').get().n, 2);
+  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM task_assignments WHERE assignee IN (?,?)')
+    .get('first-worker', 'second-worker').n, 2);
   const consumed = await f.call('first', 'task_assign', {
     request_id: 'resume-again', ...context(originals[0].bound),
     assignee: 'first-worker', resume_request_id: 'assign',
@@ -185,6 +203,7 @@ test('script registration, automation start and reconcile share the local scoped
   const script = join(f.root, 'synthetic.mjs');
   writeFileSync(script, 'process.exit(0);\n');
   for (const actor of ['first', 'second']) {
+    seedOrchestratingRoot(f.store, actor);
     const registration = {
       actor, request_id: 'register', script_id: actor, title: 'Synthetic script', description: 'Never launched',
       executable: process.execPath, script_path: script, argv: [], parameters: [],
@@ -214,7 +233,7 @@ test('script registration, automation start and reconcile share the local scoped
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM automation_runs').get().n, 2);
 });
 
-test('v10 migration preserves raw receipts, caller attribution and pending or unknown effects without host replay', async t => {
+test('explicit v10 receipt migration preserves attribution and pending or unknown effects without host replay', async t => {
   const calls = [];
   const f = fixture(t, {
     create: async cwd => { calls.push(cwd); return { sessionId: 'independent-session' }; },
@@ -237,8 +256,9 @@ test('v10 migration preserves raw receipts, caller attribution and pending or un
     error: { code: 'OPERATION_UNCONFIRMED', message: 'Historical lost response' },
   });
   const before = v10Fixture(f);
+  migrateReceiptFixture(f);
   f.restart();
-  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 11);
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version, 12);
   assert.deepEqual(receipts(f.store.db), before, 'No original receipt field or insertion order changes');
   assert.deepEqual(f.store.executeLocal('task_create', createdInput), created);
   assert.deepEqual(f.store.executeLocal('task_create', webInput), web);
@@ -269,6 +289,7 @@ test('unattributable v10 receipts remain intact and block querying, reuse and re
     inspect: async () => ({ ready: true, idle: true, node: true }),
     send: async id => { sent.push(id); return { ok: true }; },
   });
+  seedOrchestratingRoot(f.store, 'main');
   const task = f.store.executeLocal('task_create', { actor: 'main', ...createInput('task') });
   const assignment = { actor: 'main', request_id: 'old-assignment', ...context(task), assignee: 'worker' };
   f.store.reserveOperation('task_assign', assignment);
@@ -298,6 +319,7 @@ test('unattributable v10 receipts remain intact and block querying, reuse and re
     db.prepare('UPDATE operations SET input=? WHERE request_id=?')
       .run(JSON.stringify({ ...assignment, actor: undefined, actor_session_id: 'main' }), assignment.request_id);
   });
+  migrateReceiptFixture(f);
   f.restart();
   assert.deepEqual(receipts(f.store.db), before);
   for (const actor of ['main', 'other', 'user']) {
@@ -332,6 +354,7 @@ test('v10 consumed recovery markers survive and known-unsent assignments resume 
     send: async id => { sent.push(id); return { ok: true }; },
   });
   const tasks = [];
+  seedOrchestratingRoot(f.store, 'main');
   for (const request_id of ['resumable', 'consumed']) {
     const task = f.store.executeLocal('task_create', { actor: 'main', ...createInput(`${request_id}-task`) });
     const input = { actor: 'main', request_id, ...context(task), assignee: `${request_id}-worker` };
@@ -343,6 +366,7 @@ test('v10 consumed recovery markers survive and known-unsent assignments resume 
     tasks.push({ input, bound });
   }
   v10Fixture(f, db => db.prepare("UPDATE operations SET resumed_by='historical-other-caller-resume' WHERE request_id='consumed'").run());
+  migrateReceiptFixture(f);
   f.restart();
   for (const { input, bound } of tasks) {
     const resumeInput = {
@@ -359,7 +383,7 @@ test('v10 consumed recovery markers survive and known-unsent assignments resume 
     .get().resumed_by, 'historical-other-caller-resume');
 });
 
-test('a failed v10-to-v11 migration rolls back the entire schema and every receipt', t => {
+test('a failed explicit v10 receipt migration rolls back its entire schema and every receipt', t => {
   const f = fixture(t);
   f.store.executeLocal('task_create', { actor: 'main', ...createInput('atomic') });
   const before = v10Fixture(f);
@@ -368,15 +392,16 @@ test('a failed v10-to-v11 migration rolls back the entire schema and every recei
     if (sql === 'DROP TABLE operations_v10;') throw new Error('Synthetic migration failure after copying receipts');
     return exec.call(this, sql);
   });
-  assert.throws(() => new TaskStore(f.root), /Synthetic migration failure/);
+  assert.throws(() => migrateReceiptFixture(f), /Synthetic migration failure/);
   mock.mock.restore();
   const db = new DatabaseSync(join(f.root, 'task-board.sqlite'), { readOnly: true });
   try {
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 10);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 12);
     assert.deepEqual(receipts(db), before);
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name='operations_v10'").get(), undefined);
     assert.equal(db.prepare('PRAGMA table_info(operations)').all().some(column => column.name === 'actor'), false);
   } finally { db.close(); }
+  migrateReceiptFixture(f);
   f.restart();
   assert.deepEqual(receipts(f.store.db), before);
 });

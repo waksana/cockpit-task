@@ -1,21 +1,67 @@
 # Task lifecycle replay guide
 
-This guide is the current real-agent replay specification for the tree-node Task
-model: one `node` role, one `cockpit-task-tree` Skill, Subtasks, dependencies,
-automation and bounded reads. It preserves the model-driven S1-S6 exercise run on
-2026-09-21, including its inputs, user turns, controlled failures, assertions and
-evidence requirements, but those S/N/G recorded results were obtained with the former
-orchestrator/assignee role pair. It is a repeatable test specification, not a production
-workflow or a checklist every Task must follow.
+The current acceptance specification is **schema12 recursive responsibility** below.
+The remainder is explicitly historical: prior specifications and model-driven S/N/G/T
+records retain their original terminology, payloads, inputs and results. References
+there to "current", creator/orchestrator ownership, depth3, direct report-start or
+immediate cancellation describe those earlier versions, not today's runnable contract.
+Do not replay historical inputs unchanged or count old passes as schema12 validation.
+This is a test guide, not a production workflow or a checklist every Task must follow.
 
-The historical baseline used Task source
+The preserved historical baseline used Task source
 `da55eb4bf034b2940f90eac6d2cbff51dde95cd4`, four model actors and five Tasks.
 All 40 assertions in cases S1-S6 were evidenced by an independent observer.
 The subscription-necessity cases N1-N3 were subsequently run separately:
 **18/18 scoped assertions passed in one supervised trial per case.** They are not
 included in the 40/40 result and use the narrower setup documented below.
+No new model/native-host replay result is asserted by this documentation update.
 
-## Schema v10 acceptance (current contract)
+## Schema12 responsibility acceptance
+
+Use existing Node tests, synthetic SQLite/host fixtures and isolated data only. A fixture
+must establish ordinary root → claim or Web assignment → execution/ACK → atomic start;
+children need an active orchestrating parent. Do not disable guards to keep old fixtures working.
+No production Task writes, live session prompts, installation, migration or restart are
+implied by this source acceptance.
+
+| Case | Required evidence, including refusal/uncertainty |
+| --- | --- |
+| R01 ordinary root | create unbound todo/undecided; creator gains no control; ready Node claim binds only itself without prompt/rename/idle gate, even blocked roots for clarification; no implicit ACK/start; Web user can assign root |
+| R02 initialization/start | assign/claim/ACK/activity do not start; exact current ACK + ready required; atomic start chooses execute/orchestrate; todo report-start/done refused |
+| R03 responsibility mode | execute cannot create child; explicit convert audits reason/results/remaining; no downgrade; orchestrate may have no children; neither operation calls native mode controls |
+| R04 helpers and judgment | separately observed model behavior allows helpers in both modes without ownership transfer, uses child for independent responsibility, and keeps sustained implementation out of orchestrator |
+| R05 current relations | permissions/list parent_assignee/notifications derive from current parent, not created_by; missing required parent binding fails; one unfinished Agent per session; no parent/ancestor self-binding |
+| R06 attach | preserve root ID/binding/scope/subtree/history; new parent is another active orchestrating session; reject cycles, stale dual contexts, ended/unbound parent and conflicting blockers atomically |
+| R07 bounded recursion | beyond three levels works; ancestors/children/history paginate; resource limit refuses full operation without partial depth or relation updates |
+| R08 closure | direct child todo/in_progress blocks parent done and cancelled; child cancelled satisfies structure but not successful delivery; children do not automatically become blockers |
+| R09 cancellation intent | leaf and parent cancel keep status with durable intent; notice requests cleanup; refuse new progress under self/ancestor intent and own done under own intent; existing child done may close under active bound orchestrating ancestors' intent/blockers; read/ACK/edit/activity remain; no implicit cascade |
+| R10 finalization | bound assignee or Web user only for unbound; intent and all child terminal required, neither execution readiness nor ACK required; persist disposition; outside effects/exit remain separate |
+| R11 conditions | own root/child resolves exact active text condition with evidence/ref history; parent/user also allowed; reject wrong IDs, Task-ID dependencies and removal via own edit; no second user approval |
+| R12 dependencies | done round resolves even failed automation, cancelled does not; success requirements need explicit conditions; old resolved relations do not revive on reopen |
+| R13 reopen | preserve original assignee/mode and sequence eligibility; ended ancestors first legally restored; cancelled/ineligible/unknown legacy mode refused; no redispatch/renewal/native mode changes |
+| R14 delivery evidence | new done outcome/explicit retro atomic; old ACK activity/stale outcome retain honest partial effects; current child outcomes still require parent judgment |
+| R15 notifications | recipient snapshots checked against current relation before send; drift records not_sent, no reroute; Web subscriber explicit; accepted/queued/unknown cannot cause retries |
+| R16 recovery | caller-scoped request replay preserves original bytes/effects; only proven final applied/not_sent assignment can resume; context changes invalidate stale writes |
+| R17 automation | trusted immutable scripts only, null Agent mode/binding/ACK; parent validity on create/start; existing PID/group barrier, failure/interrupt and cancellation safeguards unchanged |
+| R18 migration | pre-12 ordinary load refuses; explicit reviewed synthetic plans cover modes, trees, cancellation, legacy terminal facts and drift; historical JSON/receipts unchanged, no external effects |
+| R19 user decisions | observed model directly asks the user at any depth, records answer/affected scope, no relay/repeated approval/helper messaging, no pause override or invented work |
+| R20 surfaces | MCP schema/tool discovery, read/write results, Web cards/history/relations, Node/Skills, package/migration descriptor and release boundary agree |
+
+Report synthetic test commands/counts separately from observed model cases and native host
+integration. R04/R19 require an actual recorded agent run to claim a behavioral pass;
+static prose assertions or a fake host cannot establish it. Root idle and delivered notices
+do not prove completion/liveness. Record exact source, inputs, observer evidence and untested
+boundaries; reuse old harness mechanisms only after adapting to the current API.
+The explicit procedure is [Offline responsibility migration](task-responsibility-migration.md);
+release compatibility remains defined by [Releases](releases.md).
+
+## Historical specifications and recorded runs
+
+Everything below is preserved for provenance, not a report that schema12 was rerun.
+Historical test-source paths or harnesses may require adaptation; old model assertions
+cannot validate the new authority, start, condition-resolution or cancellation contracts.
+
+## Schema v10 acceptance (historical specification)
 
 Historical S/N/G results and payloads below are evidence of their recorded versions,
 not valid v10 status writes. On a current rerun, replace blocked reports with concrete

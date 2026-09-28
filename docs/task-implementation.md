@@ -7,8 +7,8 @@ See the [MCP contract](task-mcp-contract.md) for input/result shapes, the
 
 ## Module and data
 
-The module ID and MCP server key are `cockpit-task`, display name Task, version
-`0.3.2` (source preparation; no deployment implied). Its manifest is [cockpit.module.json](../cockpit.module.json).
+The module ID and MCP server key are `cockpit-task`, display name Task, source version
+`0.0.0-dev`. Its manifest is [cockpit.module.json](../cockpit.module.json).
 `src/task-board/`, `web/task-board/` and the database filename `task-board.sqlite`
 are current internal paths. Task runs inside Cockpit, not a standalone service.
 
@@ -20,44 +20,68 @@ SQLite transactions protect local mutations. Separate tables hold Tasks,
 description snapshots, exact revision acknowledgements, activities, outcomes,
 operation receipts, subscriptions, assignment order, script registrations and automation runs. A partial unique index limits each
 assignee to one unfinished Task. Subscription uniqueness permits one waiting
-subscription per `(task_id, subscriber)`; the subscriber is derived from the caller.
+subscription per `(task_id, subscriber)`; MCP callers subscribe themselves, while
+the Web user explicitly selects the recipient.
 
-Schema version 6 adds `task_dependencies(task_id, blocker_id, author, at)`, unique
-per pair, no self-edge, indexed by blocker, and `dependency_notices` with
-`UNIQUE(task_id, kind, blocker_id, blocker_lifecycle)` where kind is `ready` or
-`blocker_cancelled`, plus the same pending/unknown/accepted delivery columns as
-subscriptions. The v5→v6 migration only creates these tables; installed 0.1.12
-opens schema v6, but installed 0.1.11 cannot. Schema v6 is roll-forward only.
-Version 0.1.13 (merged via #75, closing #66) schema v7 adds `child_notices`
-(`UNIQUE(task_id, status, child_lifecycle)`, status done/blocked/cancelled, the same
-delivery columns) plus nullable
-`tasks.parent_task_id REFERENCES tasks(id)` and `tasks.depth INTEGER NOT NULL DEFAULT 1`
-(`CHECK(depth>=1)`, indexed by parent). The v6→v7 migration only adds absent columns
-and the table, so existing Tasks become top-level; installed 0.1.12 cannot open v7, and package rollback is not database rollback. `task_create`
-looks up the orchestrator's unfinished Agent Task where it is assignee in the same write
-transaction; that Task becomes the parent and `depth` is its depth plus one, rejected
-with `DELEGATION_DEPTH_EXCEEDED` beyond 3 levels before any row is saved. Lineage is
-immutable and changes no readiness or authority rule. There is no caller/orchestrator mismatch case because v9 derives orchestrator from host invocation metadata; `DELEGATION_OWNER_MISMATCH` is removed. `bindAssignment`
-rejects `SELF_ASSIGNMENT` (assignee = orchestrator) and `DELEGATION_CYCLE` (assignee owns or
-executes any ancestor) before readiness. A Subtask's real transition into
-done/cancelled, in the same write transaction (including automation
-`finish`), inserts one `child_notices` row for its orchestrator when the parent is unfinished,
-the parent's assignee is that orchestrator and no subscription for the same transition already notified that same orchestrator;
-delivery and startup recovery share the subscription path. Reads derive `actor_role` from the host-supplied caller and `orchestrator`/`assignee`; nothing is stored.
-Schema v10 blocker sets contain at most 20 unique Task references or concrete text
-conditions. Task references permit any orchestrator, but reject self, ancestors
-(`BLOCKER_ANCESTOR`), newly added cancelled Tasks and active cycles (recursive CTE).
-Edits on unfinished Tasks (automation only before start) bump `editable`, not revision.
-Only the orchestrator/Web user can resolve or replace an assignee's text condition;
-complete-set replacement is atomic. Done resolves active dependency rounds permanently.
-Reopen never scans or revives old relations. Cancellation retains active relations.
-Binding, automation start and Agent done reject `TASK_NOT_READY` while any active
-prerequisite remains; reads, ACK, discussion and definition edits remain possible.
-Readiness never changes lifecycle or dispatches.
-`report`/`cancel`/automation finish return these as `notice_ids`, delivered and
-recovered through the same outbox path as `subscription_ids`.
+Schema12 uses `created_by` only for historical provenance. The sole current Agent
+binding is assignee; parent_assignee and actor_role derive from the current parent.
+No current orchestrator field or creator-authority fallback exists. Missing required
+parent binding fails explicitly. Root means no parent, not a special ownership type.
+
+New Agent Tasks are todo/undecided. Root claim performs read-only public host readiness
+checks, then rechecks root/context/occupancy in the binding transaction, without caller
+idle checks, native title changes or self-messages. External assignment retains its
+separate native idle/empty queue checks and durable step receipts. Both binding paths
+preserve one unfinished Agent Task per session and reliable assignment order.
+Claim may bind a blocked root for clarification; it is not ACK or start.
+
+task_start atomically enters in_progress with execute/orchestrate after exact ACK,
+readiness, context and valid active ancestor checks. task_report cannot start todo
+or finish it directly. task_convert records reason/completed/remaining and only moves
+active execute to orchestrate. Neither operation changes native session mode.
+Child creation requires the caller's bound active orchestrating responsibility,
+current ACK/readiness and no cancellation intent. All relevant ancestors must remain
+bound active orchestrators; children cannot bind the parent or an ancestor's session.
+
+task_attach checks both root and new-parent contexts, active ancestor bindings,
+cycle/resource limits, subtree and blocker constraints transactionally. It preserves
+Task/binding/history, updates all descendant depths and invalidates affected read versions.
+There is no fixed depth-3 limit, detach or arbitrary reparent; structural operations
+are bounded at 10,000 nodes with explicit TREE_RESOURCE_LIMIT rather than partial effects.
+
+Task/text prerequisites remain durable rounds (at most20 active). Task references
+reject self, ancestors, cycles, missing/new cancelled blockers; done permanently resolves
+the referenced round, not a success condition. Cancelled does not satisfy it and reopen
+does not revive it. task_resolve_condition requires exact active dependency_id and
+evidence, permitted to own assignee/current parent assignee/Web user. Its evidence and
+references persist in dependency history. It cannot change meaning or remove Task-ID
+relations; own edit cannot bypass this path. Parent/user replanning retains reason audit.
+Children are not automatically prerequisites, and readiness never dispatches or grants consent.
+
+Agent cancellation is two-phase: task_cancel records durable intent, not terminal status;
+task_cancel_finalize records disposition only after all direct children are terminal.
+Bound Agent finalization belongs to its assignee, unbound finalization to Web user.
+Intent blocks ordinary goal progress, including under ancestors, but permits read/ACK,
+edits, activity and cleanup. Final cancellation needs neither execution readiness nor ACK.
+Existing child done may close under active bound orchestrating ancestors' intent or blockers;
+its own intent still forbids done. Done also checks own current ACK/readiness, all children
+terminal and new outcome/retro. Neither child terminal nor parent terminal proves success or process exit.
+
+Responsibility/mode/intent/structural mutations preserve audit and caller-scoped receipts
+and participate in lifecycle/editable concurrency guards. Notice recipient snapshots use
+current relations at creation and are revalidated before sending, never rerouted on drift.
+Existing schema≤11 is refused by ordinary load. Only the explicit reviewed
+[schema12 procedure](task-responsibility-migration.md) changes historical data;
+unknown terminal modes remain legacy, not fabricated starts or inferred execution.
+Schema12 preflight validates read-only without applying DDL; exercise apply on an authorized
+isolated copy separately. Evidence-backed historical terminal modes can be selected only in
+the reviewed schema11-to-12 plan, without a started event. There is no post-schema12
+mode-repair API; runtime reopen refuses an unknown mode.
 
 ### Caller-scoped receipts and schema v11
+
+This section describes the retained receipt contract and its historical v11 transition,
+not permission for current ordinary activation to upgrade older data.
 
 The idempotency key is `(actor, request_id)`. For MCP the service derives `actor`
 only from the trusted main session ID in host invocation metadata; a subagent uses
@@ -91,12 +115,15 @@ An authorized operator must inspect the retained evidence on an isolated consist
 copy before separately deciding any remediation. A new ID is not permission to
 repeat a possibly completed action.
 
-The v10-to-v11 migration runs atomically at storage initialization and rolls back
-all schema/data changes on failure. Older supported schemas first retain their
-existing migration requirements. In particular, v9 still requires the reviewed
-v10 lifecycle plan below; the 0.3.1 CLI reports `final_schema:11` in inventory and
-preflight, and applies the reviewed lifecycle step and mechanical receipt step in
-one transaction. Its plan's `target_schema:10` remains the lifecycle review target.
+The historical v10-to-v11 transition is atomic and preserves its own migration
+requirements. It is not schema12 activation: older data must complete its explicit
+historical transitions and then the separate reviewed responsibility migration.
+The lifecycle plan's `target_schema:10` remains its historical review target.
+The shipped CLIs are distinct stages: `migrate-task-v10.js` stops at schema10;
+`migrate-task-v11.js` performs only receipt migration and stops at schema11.
+Neither constructs a live TaskStore, starts services or chooses responsibility modes.
+Then re-inventory schema11 for the separate reviewed schema12 plan; the old lifecycle
+plan is not a responsibility-migration plan.
 Schema v11 is roll-forward only; released 0.3.0 rejects it with `SCHEMA_TOO_NEW`.
 Source merge, packaging and synthetic fixtures do not authorize production database
 access, migration, installation, restart or release.
@@ -104,7 +131,7 @@ access, migration, installation, restart or release.
 ### Explicit schema v10 to v11 migration
 
 The packaged `scripts/migrate-task-v11.js` supports an existing schema v10
-database only. It reuses the storage migration without starting Task services,
+database only. It invokes the receipt-only migration without starting Task services,
 reconciling automation or replaying any operation:
 
 ```sh
@@ -136,6 +163,8 @@ consistent v9 inventory. It reads every legacy blocked/in_review Task, complete
 definitions, activities, outcomes, dependencies and automation facts. Sensitive data
 and plans belong in restricted local artifacts, never a repository or public Issue.
 Use SQLite online backup (including committed WAL), not a lone `.sqlite` file copy.
+Successful apply stops at schema10, not schema11 or schema12; it does not construct
+TaskStore or automatically perform subsequent migrations.
 
 ```sh
 node scripts/migrate-task-v10.js --data-root <consistent-copy> > inventory.json
@@ -209,9 +238,9 @@ copy before authorized deployment; never replace live data with a historical bac
 Schema version 4 added nullable `outcomes.retro TEXT` and
 `outcomes.retro_recorded INTEGER NOT NULL DEFAULT 0` (restricted to 0/1).
 Version 3 added Task kind, immutable scripts and automation run/log facts to
-the v2 subscription and notification evidence. Opening a supported older Task
-database upgrades it transactionally, preserving Agent Tasks and receipt rows;
-unsupported newer schema versions fail with `SCHEMA_TOO_NEW`. Service-assigned
+the v2 subscription and notification evidence. Those historical migrations
+preserve Agent Tasks and receipts; current activation refuses existing pre-12
+data rather than automatically migrating it. Newer schemas fail with `SCHEMA_TOO_NEW`. Service-assigned
 timestamps and retained histories are not caller-authenticated evidence.
 Migration does not fabricate reflection or backfill historical outcomes as
 explicit no-findings submissions.
@@ -230,9 +259,9 @@ on an otherwise compatible older host.
 MCP calls require host-injected `_meta["cockpit/invocation"].sessionId`; missing metadata returns `INVOCATION_REQUIRED` before reads or writes touch storage. The service derives `actor` from that session ID, not from tool input: MCP and module HTTP calls are marked external, and an `actor` or `invocation` field in their arguments/body is rejected with `INVALID_INPUT` before any effect. Browser/module HTTP routes have no native session and use actor `user`. Reads use the caller to check its currently assigned Task as well as any explicit target. Actor is attribution, not an automatic list filter or credential.
 
 Role assembly determines the available tool subset, not a per-Task ACL.
-ACK history records the fixed assignee as `confirmed_for` and the reported actor
-as `author`. Cross-Task operations remain callable, but Skills must not claim
-another assignee has read a definition. The backend does not verify reading,
+ACK history records the fixed assignee as `confirmed_for` and the host-derived actor
+as `author`. Only the assignee may ACK/report; parent authority derives from the
+current parent binding, not historical creation. The backend does not verify reading,
 understanding or user authorization through actor IDs or chat inspection.
 
 The host controls role management, including changes to existing sessions.
@@ -264,8 +293,8 @@ description version. Return it unchanged:
 | Generation | Changes that advance it | Checks |
 | --- | --- | --- |
 | Description `revision` | Actual description changes or explicit reopen, including identical text | Definition edits, current ACK, assignment, reopen and reports as applicable |
-| Lifecycle | First assignment or actual status transition | Existing-Task writes except subscription cancellation |
-| Editable materials | Actual title/references/metadata changes | Definition edits |
+| Lifecycle | Binding, status, mode, structure and cancellation-intent transitions | Existing-Task writes except subscription cancellation |
+| Editable materials | Actual title/references/metadata/prerequisite and affected structural changes | Definition and structural edits |
 
 ACK and activity do not invalidate unrelated writes. Subscription registration
 checks lifecycle without advancing it. `task_unsubscribe` instead checks the
@@ -308,11 +337,17 @@ a description edit, without changing historic outcomes or reopening execution.
 ### Guarded original-assignee reopen
 
 Only `task_reopen` can move a done Agent Task to in_progress for explicitly
-user-authorized rework. It preserves Task/orchestrator/assignee and requires the caller to be either the orchestrator or original assignee; this relation check is not chat authentication. Work always continues with the original eligible assignee.
+user-authorized rework. It preserves Task/assignee/mode; caller must be original
+assignee, current parent assignee or Web user. Creation history grants no authority.
+Work always continues with the original eligible assignee.
 Cancelled and automation Tasks remain excluded; report/edit/assign do not reopen.
 Eligibility requires a tracked post-v5 assignment, no later assignment to that
 assignee (including other Tasks now done/cancelled), and no other unfinished Task.
 Use durable sequence ordering, not timestamps or only current occupancy.
+Every ancestor must be a valid bound active orchestrator without cancellation intent.
+Reopen necessary ancestors legally first, never automatically; cancelled/ineligible
+ancestors prevent in-place restoration. Unknown legacy mode requires explicit
+review/migration, not guessing from child absence.
 
 The service checks current assignee capability readiness through the public host
 adapter, without requiring idle: the calling original session can be executing.
@@ -322,7 +357,7 @@ inside the local mutation transaction, including after the host observation, so 
 concurrent assignment or definition change cannot slip past an earlier check.
 
 Atomically increment revision even for identical description, record the full
-definition/reason/author/time, set in_progress and advance lifecycle context with the receipt. Original-assignee reopen invokes the existing ACK helper for self-confirmation and sends no notice; orchestrator/Web-user reopen does not ACK and records an assignee `[Task updated]` notice. Histories and
+definition/reason/author/time, set in_progress and advance lifecycle context with the receipt. Original-assignee reopen invokes the existing ACK helper for self-confirmation and sends no notice; parent-assignee/Web-user reopen does not ACK and records an assignee `[Task updated]` notice. Histories and
 references remain; old outcome/retro becomes current:false, and old ACK/outcome
 cannot deliver the new revision. Subsequent done again needs a new outcome and
 explicit retro text or null. No mandatory activity log or round state machine.
@@ -339,7 +374,9 @@ required string/integer/boolean parameters. Creation snapshots configuration and
 typed inputs without executing. Start checks revision/write_context and durably
 queues once; a persistent single service queue executes
 `executable [...argv, script_path, ...typedStrings]`, never a shell template.
-No Agent assignee, ACK or session slot is invented; assign/ack/report reject this kind.
+No Agent assignee, work_mode, ACK or session slot is invented; Agent claim/start/
+convert/finalize/assign/ack/report reject this kind. Child creation/start respects
+current parent responsibility; root automation is managed by Web user.
 
 Definitions/materials freeze in queued/starting/running; script and input snapshots
 are never mutable. Claim records starting/in_progress and a barrier. The worker
@@ -378,7 +415,11 @@ a `blocked_by` Task cannot start until every prerequisite is satisfied or explic
 
 ## Invocation metadata
 
-For official MCP transport calls, `mcp.js` copies `_meta["cockpit/invocation"]` into the business service. `service.js` rejects absent metadata with `INVOCATION_REQUIRED` (400), derives `actor` from `sessionId`, attributes subagent calls to that containing session, and stores the complete invocation JSON on the operation receipt. `task_read(view=operation)` exposes both `actor` and `invocation`. Module HTTP calls bypass MCP metadata and run as actor `user`, so Tasks created there have `orchestrator="user"`. Dependency and Subtask notices to that orchestrator normally record `ORCHESTRATOR_NOT_FOUND`; a `user` subscription routes to the same `user` recipient and records `SUBSCRIBER_NOT_FOUND`; subscriptions from real sessions deliver to those sessions normally.
+For official MCP calls, `mcp.js` passes host invocation to service; missing metadata
+returns INVOCATION_REQUIRED. Actor is sessionId, helpers use the containing session,
+and full invocation remains receipt audit. HTTP uses internal actor=user, not a native
+session. Creation provenance does not become a notice recipient: parent notices use
+current parent bindings, and Web subscriptions require an explicit subscriber session.
 
 ## External operation receipts
 
@@ -470,8 +511,8 @@ does not depend on a subscriber wait or notice being read.
 
 Registration atomically checks lifecycle, current status and waiting uniqueness.
 Already matching fails without registration or immediate notification.
-A terminal Task cannot register for future transitions. The recipient is always
-the subscriber derived from the caller (Web board `user` routes to the Task orchestrator), not a caller-supplied destination.
+A terminal Task cannot register for future transitions. MCP subscriber is the caller;
+only Web user supplies an explicit subscriber session. There is no creator fallback.
 
 A real matching status transition commits Task effects, receipt, subscription
 consumption, immutable transition event and `pending` delivery together.
@@ -479,20 +520,21 @@ Same-status reports and failed transitions do not trigger; an unmatched terminal
 transition expires the wait. Waiting cancellation races through the same
 transaction boundary and cannot revoke an already triggered event.
 An assignee notice commits with the local write that caused it. Ready-period agreement
-edits, ready/blocked boundaries, reopen and cancellation on assigned unfinished Agent
+edits, ready/blocked boundaries, reopen and cancellation intent on assigned unfinished Agent
 work notify once unless self-authored. Blocked-period edits and partial resolution
-save silently. New assignee text conditions still notify the orchestrator via a
+save silently. New assignee text conditions notify the current parent assignee via a
 `dependency_notices(kind='blocked')` row. Failed authorization/lifecycle checks save nothing.
 
 The delivery record is a bounded durable outbox, not a second native queue or
 scheduler. A passive `session/get` lookup first checks that the notice's original recipient
-exists: the subscriber for subscription cards, the orchestrator for dependency and Subtask
-cards, and the assignee for updated and cancelled notices. Missing/unavailable
-recipients produce `not_sent` evidence; no replacement is created.
+exists: subscriber for subscriptions, recorded current parent assignee for unbound
+dependency/Subtask cards, and own assignee for updates/cancellation requests.
+Delivery revalidates current relations; changed or missing recipients produce not_sent,
+never rerouting to a new parent or historical creator. No replacement is created.
 A compare-and-set claim persists `unknown` before the non-idempotent host send.
 The subscription message is `[Subscribed Task status changed](task:<uuid>?event=status_changed)`
 (or, for an undispatched dependency notice, the dependent's `event=ready` / `event=blocker_cancelled` card;
-for an assignee notice, the fixed `[Task updated]` or `[Task cancelled]` link only).
+for an assignee notice, the fixed `[Task updated]` or `[Task cancellation requested]` link only).
 Assignee notices call host `prompt` with `mode:"immediate"`; the other notices use the
 default queued prompt. Accepted/queued responses update evidence; ambiguous or interrupted sends remain
 unknown and are never automatically retried. Busy orchestrator enqueue is normal and
@@ -518,9 +560,10 @@ no exactly-once guarantee for host prompt.
 
 Read views are fixed, not arbitrary projections:
 `list`, `overview`, `execution`, `definition`, `changelog`, `activity`, `outcomes`,
-`subscriptions`, `dependency_notices`, `child_notices`, `assignee_notices`,
-`automation_log`, `operation`. orchestrator discovers through an explicit
-orchestrator-filtered list and selects single-Task content by purpose; assignee reads full
+`dependencies`, `ancestors`, `responsibility_events`, `retro_handlings`, `subscriptions`,
+`dependency_notices`, `child_notices`, `assignee_notices`, `automation_log`, `operation`.
+Current parent assignee discovers through parent_assignee-filtered list; roots use
+root=true and direct children use parent_task_id. assignee reads full
 execution requirements at start/resumption and synchronization checkpoints.
 These are information choices, not ACLs.
 Full current description appears in execution/definition or a selected changelog
@@ -530,7 +573,8 @@ revision, and optionally in overview's selected definition, never silently trunc
 groups: context, activity, outcome, retro, definition, automation, cancellation.
 It cannot mix with other views or pagination/revision selectors. Omission preserves
 all existing response shapes. Context is always returned; `["context"]` reads only
-identity/status/revision/ACK/timestamps/write_context/kind. Other groups are opt-in:
+identity/status/revision/ACK/timestamps/write_context/kind plus current parent/mode,
+legacy/intent/prerequisites and compact child counts. Other groups are opt-in:
 latest complete activity/outcome (null if absent), latest recorded retro, current
 definition/materials, full automation snapshot/facts without logs, cancellation.
 Outcome excludes unselected retro. Records retain revision/current/source and
@@ -566,6 +610,7 @@ retaining status and attribution. orchestrator may read on demand, without requi
 | Activity / outcome input object; combined `{outcome,retro}` when supplied | 16,000 serialized characters, including outcome references and escaping |
 | Overview activity excerpt | 320 characters with explicit `truncated` |
 | List / history item counts | Default 20 / 5; maximum 50 / 10 |
+| Ancestors / responsibility events | Maximum 50 / 10; direct children use paginated list, no embedded tree |
 | List/history page payload | 24,000 serialized characters, cursor for every remainder |
 | Selected overview result | 48,000 serialized characters; explicit error and group sizes on overflow |
 
@@ -582,7 +627,8 @@ checked against retained fields too, not merely the supplied patch.
 | Ordinary reference | `[Task](task:<uuid>)` |
 | Entire first assignment message | `[Task assigned](task:<uuid>?event=assigned)` |
 | Automatic assignee update notice | `[Task updated](task:<uuid>?event=updated)` |
-| Automatic assignee cancellation notice | `[Task cancelled](task:<uuid>?event=cancelled)` |
+| Agent cancellation intent | `[Task cancellation requested](task:<uuid>?event=cancellation_requested)` |
+| Historical final-cancellation card | `[Task cancelled](task:<uuid>?event=cancelled)` |
 | Explicit subscription's system notice to subscriber | `[Subscribed Task status changed](task:<uuid>?event=status_changed)` |
 | Dependent ready notice to orchestrator | `[Subtask ready](task:<uuid>?event=ready)` |
 | Dependent blocker-cancelled notice to orchestrator | `[Subtask blocker cancelled](task:<uuid>?event=blocker_cancelled)` |

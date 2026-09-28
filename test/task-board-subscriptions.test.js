@@ -7,6 +7,7 @@ import { TaskStore } from '../src/task-board/store.js';
 import { TaskService } from '../src/task-board/service.js';
 import { parseInput } from '../src/task-board/contracts.js';
 import { activate } from '../src/task-board/module.js';
+import { startExecution, responsibilityInput } from './helpers/responsibility-fixtures.js';
 
 function fixture(t, overrides = {}) {
   const root = join(process.cwd(), '.task-board-tests', randomUUID());
@@ -30,16 +31,19 @@ function fixture(t, overrides = {}) {
   });
   const subscribe = (task, statuses = ['done'], extra = {}) => store.executeLocal('task_subscribe', request(task, { actor: 'subscriber', statuses, ...extra }));
   const reportRequest = (task, fields) => request(task, { actor: 'assignee', revision: store.task(task.task_id).revision, ...fields });
-  const executable = () => {
+  const executable = ({ start = true } = {}) => {
     const task = create();
-    const input = request(task, { revision: 1, assignee: 'assignee' });
-    store.reserveOperation('task_assign', input);
-    store.bindAssignment(input);
+    store.executeLocal('task_claim', responsibilityInput(store, task, 'assignee'));
     store.executeLocal('task_ack', reportRequest(task, {}));
-    return task;
+    return start ? startExecution(store, task) : store.task(task.task_id);
+  };
+  const cancellation = (task, reason) => {
+    const { revision, ...input } = responsibilityInput(store, task, 'user', { reason });
+    store.executeLocal('task_cancel', input);
+    return responsibilityInput(store, task, store.task(task.task_id).assignee ?? 'user', { summary: 'Stopped and cleaned up.' });
   };
   return {
-    root, host, sent, reads, errors, create, request, reportRequest, subscribe, executable,
+    root, host, sent, reads, errors, create, request, reportRequest, subscribe, executable, cancellation,
     get store() { return store; }, get service() { return service; },
     subscriptions: task => store.read({ view: 'subscriptions', task_id: task.task_id }).items,
     restart() { service.close(); store = new TaskStore(root); service = new TaskService(store, host, { report: error => errors.push(error) }); },
@@ -64,14 +68,16 @@ test('self transitions consume subscriptions silently and cancellation preserves
   const cancelled = f.executable();
   f.subscribe(cancelled, ['cancelled'], { actor: 'assignee' });
   f.subscribe(cancelled, ['cancelled'], { actor: 'observer' });
-  const input = f.request(cancelled, { reason: 'User cancelled' });
+  const input = f.request(cancelled, { actor: 'user', reason: 'User cancelled' });
   const result = await f.service.execute('task_cancel', input);
   assert.equal(result.error, null);
   assert.equal(f.sent.filter(entry => entry.orchestrator === 'assignee').length, 1);
-  assert.match(f.sent.find(entry => entry.orchestrator === 'assignee').text, /^\[Task cancelled\]/);
+  assert.match(f.sent.find(entry => entry.orchestrator === 'assignee').text, /^\[Task cancellation requested\]/);
+  assert.equal(f.subscriptions(cancelled).every(entry => entry.state === 'waiting'), true);
+  assert.equal((await f.service.execute('task_cancel_finalize', f.reportRequest(cancelled, { summary: 'Cleanup complete.' }))).error, null);
   assert.equal(f.sent.filter(entry => entry.orchestrator === 'observer').length, 1);
   const duplicate = f.subscriptions(cancelled).find(entry => entry.subscriber === 'assignee');
-  assert.equal(duplicate.notification.error.code, 'DUPLICATE_NOTIFICATION_SUPPRESSED');
+  assert.equal(duplicate.notification.error.code, 'SELF_NOTIFICATION_SUPPRESSED');
   f.restart();
   await f.service.execute('task_cancel', input);
   assert.equal(f.sent.length, 2, 'restart and replay do not resend suppressed or accepted notices');
@@ -133,17 +139,17 @@ test('one waiting subscription per subscriber, durable receipt replay and cancel
 });
 
 test('actual transitions consume once, address only stored subscriber, and retain event snapshot after fast changes', async t => {
-  const f = fixture(t), task = f.executable();
+  const f = fixture(t), task = f.executable({ start: false });
   const subscription = f.subscribe(task, ['in_progress', 'done']).subscription;
-  const input = f.reportRequest(task, { status: 'in_progress' });
-  const first = await f.service.execute('task_report', input);
+  const input = f.reportRequest(task, { work_mode: 'execute' });
+  const first = await f.service.execute('task_start', input);
   assert.equal(first.error, null);
   assert.equal(first.notification_error, null);
   assert.deepEqual(first.result.subscription_ids, [subscription.subscription_id]);
   assert.equal(first.notifications[0].notification.status, 'accepted');
   assert.deepEqual(f.sent, [{ orchestrator: 'subscriber', text: `[Subscribed Task status changed](task:${task.task_id}?event=status_changed)` }]);
   assert.deepEqual(f.reads, ['subscriber']);
-  assert.deepEqual((await f.service.execute('task_report', input)).result, first.result);
+  assert.deepEqual((await f.service.execute('task_start', input)).result, first.result);
   await f.service.execute('task_report', f.reportRequest(task, { status: 'in_progress' }));
   assert.equal(f.sent.length, 1);
   const recorded = f.subscriptions(task)[0];
@@ -188,18 +194,18 @@ test('cancellation triggers only subscribed Tasks; unmatched terminal targets ex
   const f = fixture(t);
   const task = f.create();
   f.subscribe(task, ['cancelled']);
-  const result = await f.service.execute('task_cancel', f.request(task, { reason: 'stop' }));
+  const result = await f.service.execute('task_cancel_finalize', f.cancellation(task, 'stop'));
   assert.equal(result.result.task_status, 'cancelled');
   assert.equal(result.notifications[0].event.status, 'cancelled');
   assert.equal(f.subscriptions(task)[0].notification.status, 'accepted');
   assert.throws(() => f.subscribe(task, ['cancelled']), code('ALREADY_IN_TARGET_STATUS'));
   assert.throws(() => f.subscribe(task, ['done']), code('TASK_STATE_CONFLICT'));
   const unmatched = f.executable();
-  f.subscribe(unmatched, ['in_progress']);
+  f.subscribe(unmatched, ['cancelled']);
   await f.service.execute('task_report', f.reportRequest(unmatched, { status: 'done', outcome: { summary: 'Complete' }, retro: null }));
   assert.equal(f.subscriptions(unmatched)[0].state, 'expired');
   const ordinary = f.create();
-  await f.service.execute('task_cancel', f.request(ordinary, { reason: 'ordinary' }));
+  await f.service.execute('task_cancel_finalize', f.cancellation(ordinary, 'ordinary'));
   assert.equal(f.sent.length, 1);
   assert.equal(f.reads.length, 1);
 });
@@ -209,11 +215,11 @@ test('unsubscription races serialize: cancelling wins before transition or fails
   const sub = f.subscribe(task, ['cancelled']).subscription;
   const cancel = { actor: 'actor', request_id: randomUUID(), task_id: task.task_id, subscription_id: sub.subscription_id };
   await f.service.execute('task_unsubscribe', cancel);
-  await f.service.execute('task_cancel', f.request(task, { reason: 'done waiting' }));
+  await f.service.execute('task_cancel_finalize', f.cancellation(task, 'done waiting'));
   assert.equal(f.sent.length, 0);
   const next = f.create();
   const triggered = f.subscribe(next, ['cancelled']).subscription;
-  f.store.executeLocal('task_cancel', f.request(next, { reason: 'transition wins' }));
+  f.store.executeLocal('task_cancel_finalize', f.cancellation(next, 'transition wins'));
   assert.throws(() => f.store.executeLocal('task_unsubscribe', { ...cancel, request_id: randomUUID(), task_id: next.task_id, subscription_id: triggered.subscription_id }), code('SUBSCRIPTION_NOT_WAITING'));
   await f.service.recoverNotifications();
   assert.equal(f.sent.length, 1);
@@ -229,15 +235,15 @@ test('queued, rejected and unknown host results remain inspectable across restar
     let attempts = 0;
     const f = fixture(t, { send: async (...args) => { attempts++; return send(...args); } }), task = f.create();
     f.subscribe(task, ['cancelled']);
-    const input = f.request(task, { reason: 'stop' });
-    const result = await f.service.execute('task_cancel', input);
+    const input = f.cancellation(task, 'stop');
+    const result = await f.service.execute('task_cancel_finalize', input);
     assert.equal(result.error, null, 'delivery failures do not erase saved Task effects');
     assert.equal(result.result.task_status, 'cancelled');
     assert.equal(result.notification_error?.code ?? null, error);
     assert.equal(result.notifications[0].notification.status, status);
     f.restart();
     await f.service.recoverNotifications();
-    const replay = await f.service.execute('task_cancel', input);
+    const replay = await f.service.execute('task_cancel_finalize', input);
     assert.deepEqual(replay, result);
     assert.equal(f.subscriptions(task)[0].notification.status, status);
     assert.equal(attempts, 1);
@@ -248,7 +254,7 @@ test('missing Orchestrator or failed passive lookup is explicitly known unsent; 
   for (const sessionExists of [async () => false, async () => { throw new Error('read failed'); }]) {
     const f = fixture(t, { sessionExists }), task = f.create();
     f.subscribe(task, ['cancelled']);
-    const result = await f.service.execute('task_cancel', f.request(task, { reason: 'stop' }));
+    const result = await f.service.execute('task_cancel_finalize', f.cancellation(task, 'stop'));
     assert.equal(result.result.task_status, 'cancelled');
     assert.equal(result.notifications[0].notification.status, 'not_sent');
     assert.ok(result.notification_error);
@@ -263,8 +269,8 @@ test('crash gaps: pending is recovered, claimed uncertainty is never resent, eve
   const f = fixture(t), pending = f.create(), claimed = f.create();
   const p = f.subscribe(pending, ['cancelled']).subscription;
   const c = f.subscribe(claimed, ['cancelled']).subscription;
-  f.store.executeLocal('task_cancel', f.request(pending, { reason: 'pending gap' }));
-  f.store.executeLocal('task_cancel', f.request(claimed, { reason: 'claimed gap' }));
+  f.store.executeLocal('task_cancel_finalize', f.cancellation(pending, 'pending gap'));
+  f.store.executeLocal('task_cancel_finalize', f.cancellation(claimed, 'claimed gap'));
   assert.equal(f.store.claimNotification(c.subscription_id).notification.status, 'unknown');
   f.restart();
   await f.service.recoverNotifications();
@@ -275,7 +281,7 @@ test('crash gaps: pending is recovered, claimed uncertainty is never resent, eve
   f.subscribe(rollback, ['cancelled']);
   f.store.db.exec(`CREATE TRIGGER fail_subscription BEFORE UPDATE ON subscriptions
     WHEN NEW.state='triggered' BEGIN SELECT RAISE(ABORT,'synthetic commit failure'); END`);
-  const result = await f.service.execute('task_cancel', f.request(rollback, { reason: 'rollback' }));
+  const result = await f.service.execute('task_cancel_finalize', f.cancellation(rollback, 'rollback'));
   assert.equal(result.error.code, 'OPERATION_UNCONFIRMED');
   assert.equal(f.store.task(rollback.task_id).status, 'todo');
   assert.equal(f.subscriptions(rollback)[0].state, 'waiting');
@@ -290,15 +296,15 @@ test('concurrent requests and independent stores claim one external attempt befo
   const f = fixture(t, { send: async () => { attempts++; entered(); return waiting; } });
   const task = f.create();
   const sub = f.subscribe(task, ['cancelled']).subscription;
-  const input = f.request(task, { reason: 'stop' });
-  const first = f.service.execute('task_cancel', input);
+  const input = f.cancellation(task, 'stop');
+  const first = f.service.execute('task_cancel_finalize', input);
   await started;
   const secondStore = new TaskStore(f.root);
   const second = new TaskService(secondStore, f.host);
   try {
     assert.equal(secondStore.getSubscription(sub.subscription_id).notification.status, 'unknown');
     assert.equal(secondStore.claimNotification(sub.subscription_id), null);
-    const replay = await second.execute('task_cancel', input);
+    const replay = await second.execute('task_cancel_finalize', input);
     assert.equal(replay.notifications[0].notification.status, 'unknown');
     await second.recoverNotifications();
     finish({ ok: true });
@@ -307,14 +313,14 @@ test('concurrent requests and independent stores claim one external attempt befo
   } finally { finish({ ok: true }); await first; second.close(); }
 });
 
-test('competing status reports fire once and an armed subscription survives restart', async t => {
-  const f = fixture(t), task = f.executable();
+test('competing explicit starts fire once and an armed subscription survives restart', async t => {
+  const f = fixture(t), task = f.executable({ start: false });
   f.subscribe(task, ['in_progress']);
   f.restart();
-  const first = f.reportRequest(task, { status: 'in_progress' });
-  const competing = f.reportRequest(task, { status: 'in_progress' });
+  const first = f.reportRequest(task, { work_mode: 'execute' });
+  const competing = f.reportRequest(task, { work_mode: 'execute' });
   const results = await Promise.all([
-    f.service.execute('task_report', first), f.service.execute('task_report', competing),
+    f.service.execute('task_start', first), f.service.execute('task_start', competing),
   ]);
   assert.equal(results[0].error, null);
   assert.equal(results[1].error.code, 'TASK_STATE_CONFLICT');
@@ -329,7 +335,7 @@ test('close drains in-flight delivery and preserves successful receipt while rej
   const f = fixture(t, { send: async () => { entered(); return waiting; } });
   const task = f.create();
   const sub = f.subscribe(task, ['cancelled']).subscription;
-  f.store.executeLocal('task_cancel', f.request(task, { reason: 'pending recovery' }));
+  f.store.executeLocal('task_cancel_finalize', f.cancellation(task, 'pending recovery'));
   const recovery = f.service.recoverNotifications();
   await started;
   f.service.close();
@@ -346,15 +352,15 @@ test('storage failure after host acceptance remains unknown durably and cannot r
   const f = fixture(t), task = f.create();
   f.subscribe(task, ['cancelled']);
   f.store.finishNotification = () => { throw new Error('Synthetic disk failure'); };
-  const input = f.request(task, { reason: 'stop' });
-  const first = await f.service.execute('task_cancel', input);
+  const input = f.cancellation(task, 'stop');
+  const first = await f.service.execute('task_cancel_finalize', input);
   assert.equal(first.result.task_status, 'cancelled');
   assert.equal(first.notification_error.code, 'NOTIFICATION_STORAGE_UNCONFIRMED');
   assert.equal(f.sent.length, 1);
   f.restart();
   assert.equal(f.subscriptions(task)[0].notification.status, 'unknown');
   await f.service.recoverNotifications();
-  await f.service.execute('task_cancel', input);
+  await f.service.execute('task_cancel_finalize', input);
   assert.equal(f.sent.length, 1);
 });
 
@@ -365,7 +371,7 @@ test('current schema preserves Task rows and receipts across restart', t => {
   f.service.close();
   const upgraded = new TaskStore(f.root);
   try {
-    assert.equal(upgraded.db.prepare('PRAGMA user_version').get().user_version, 11);
+    assert.equal(upgraded.db.prepare('PRAGMA user_version').get().user_version, 12);
     assert.deepEqual(upgraded.task(task.task_id), before);
     assert.deepEqual(upgraded.db.prepare('SELECT * FROM operations ORDER BY request_id').all(), receipts);
     assert.deepEqual(upgraded.read({ view: 'subscriptions', task_id: task.task_id }).items, []);
@@ -380,7 +386,7 @@ test('subscription histories are bounded and scoped, including after terminal tr
       actor: 'actor', request_id: randomUUID(), task_id: task.task_id, subscription_id: subscription.subscription_id,
     });
   }
-  f.store.executeLocal('task_cancel', f.request(task, { reason: 'stop' }));
+  f.store.executeLocal('task_cancel_finalize', f.cancellation(task, 'stop'));
   const page = f.store.read({ view: 'subscriptions', task_id: task.task_id, limit: 10 });
   assert.equal(page.items.length, 10);
   assert.ok(JSON.stringify(page).length < 24000);
@@ -392,7 +398,7 @@ test('subscription histories are bounded and scoped, including after terminal tr
 test('service-ready hook recovers without inbound traffic; activation and ordinary reads do not initiate recovery', async t => {
   const f = fixture(t), task = f.create();
   f.subscribe(task, ['cancelled']);
-  f.store.executeLocal('task_cancel', f.request(task, { reason: 'crash gap' }));
+  f.store.executeLocal('task_cancel_finalize', f.cancellation(task, 'crash gap'));
   f.service.close();
   const calls = [];
   const module = activate({
@@ -429,7 +435,7 @@ test('service-ready recovery honors host shutdown or module disposal during Orch
   for (const shutdown of ['host', 'dispose']) {
     const f = fixture(t), task = f.create();
     f.subscribe(task, ['cancelled']);
-    f.store.executeLocal('task_cancel', f.request(task, { reason: 'pending gap' }));
+    f.store.executeLocal('task_cancel_finalize', f.cancellation(task, 'pending gap'));
     f.service.close();
     const controller = new AbortController();
     let finishLookup;
@@ -466,7 +472,7 @@ test('pending recovery drains bounded batches and stops at its captured high-wat
   for (let i = 0; i < 23; i++) {
     const task = f.create();
     f.subscribe(task, ['cancelled']);
-    f.store.executeLocal('task_cancel', f.request(task, { reason: 'pending' }));
+    f.store.executeLocal('task_cancel_finalize', f.cancellation(task, 'pending'));
   }
   const sizes = [];
   const original = f.store.pendingNotifications.bind(f.store);
@@ -481,7 +487,7 @@ test('pending recovery drains bounded batches and stops at its captured high-wat
     if (!later) {
       later = f.create();
       f.subscribe(later, ['cancelled']);
-      f.store.executeLocal('task_cancel', f.request(later, { reason: 'after high-water mark' }));
+      f.store.executeLocal('task_cancel_finalize', f.cancellation(later, 'after high-water mark'));
     }
     return { ok: true };
   };
@@ -498,15 +504,15 @@ test('abort during passive Orchestrator lookup preserves pending known-unsent ev
   const f = fixture(t, { sessionExists: async () => { controller.abort(); return true; } });
   const task = f.create();
   f.subscribe(task, ['cancelled']);
-  const input = f.request(task, { reason: 'saved before abort' });
-  const first = await f.service.execute('task_cancel', input, { signal: controller.signal });
+  const input = f.cancellation(task, 'saved before abort');
+  const first = await f.service.execute('task_cancel_finalize', input, { signal: controller.signal });
   assert.equal(first.error, null);
   assert.equal(first.result.task_status, 'cancelled');
   assert.equal(first.notification_error.code, 'NOTIFICATION_PENDING');
   assert.equal(first.notifications[0].notification.status, 'pending');
   assert.deepEqual(f.sent, []);
   f.host.sessionExists = async () => true;
-  const replay = await f.service.execute('task_cancel', input);
+  const replay = await f.service.execute('task_cancel_finalize', input);
   assert.deepEqual(replay.result, first.result);
   assert.equal(replay.notifications[0].notification.status, 'accepted');
   assert.equal(f.sent.length, 1);
@@ -516,7 +522,7 @@ test('failure to persist uncertainty prevents crossing the send boundary', async
   const f = fixture(t), task = f.create();
   f.subscribe(task, ['cancelled']);
   f.store.claimNotification = () => { throw new Error('Synthetic disk failure before claim'); };
-  const result = await f.service.execute('task_cancel', f.request(task, { reason: 'saved status' }));
+  const result = await f.service.execute('task_cancel_finalize', f.cancellation(task, 'saved status'));
   assert.equal(result.result.task_status, 'cancelled');
   assert.equal(result.notification_error.code, 'NOTIFICATION_STORAGE_UNCONFIRMED');
   assert.equal(f.subscriptions(task)[0].notification.status, 'pending');
@@ -529,6 +535,7 @@ test('failure to persist uncertainty prevents crossing the send boundary', async
 test('HTTP exposes notification failure separately from persisted cancellation and never requires Orchestrator idle', async t => {
   const f = fixture(t), task = f.create();
   f.subscribe(task, ['cancelled']);
+  const { actor, ...finalizeInput } = f.cancellation(task, 'stop');
   f.service.close();
   const calls = [];
   const controller = new AbortController();
@@ -544,8 +551,8 @@ test('HTTP exposes notification failure separately from persisted cancellation a
   });
   try {
     const response = await module.routes.find(route => route.path === '/tools/:name').handler({
-      params: { name: 'task_cancel' }, signal: controller.signal,
-      body: { request_id: randomUUID(), task_id: task.task_id, write_context: task.write_context, reason: 'stop' },
+      params: { name: 'task_cancel_finalize' }, signal: controller.signal,
+      body: finalizeInput,
     });
     assert.equal(response.status, 502);
     assert.equal(response.body.error, null);

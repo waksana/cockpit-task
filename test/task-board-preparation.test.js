@@ -7,6 +7,7 @@ import { TaskStore } from '../src/task-board/store.js';
 import { TaskService } from '../src/task-board/service.js';
 import { parseInput } from '../src/task-board/contracts.js';
 import { createHostAdapter } from '../src/task-board/host.js';
+import { seedOrchestratingRoot } from './helpers/service-responsibility-fixtures.js';
 
 const prepared = (sessionId = 'assignee', patch = {}) => ({
   sessionId, ok: true, skills: [], mcpServers: [], tools: 'unchanged', ...patch,
@@ -89,6 +90,7 @@ test('preparation rejects busy, unloaded and unapplied roles without native muta
 
 test('unfinished Task excludes preparation even when idle; completed Assignee can be prepared', async t => {
   const f = fixture(t);
+  seedOrchestratingRoot(f.store);
   const created = await f.write('task_create', { title: 'Synthetic', description: 'Complete one result' });
   const taskId = created.result.task_id;
   await f.write('task_assign', { task_id: taskId, revision: 1, assignee: 'assignee', write_context: created.result.write_context });
@@ -98,8 +100,10 @@ test('unfinished Task excludes preparation even when idle; completed Assignee ca
   assert.equal(f.calls.length, before, 'Reject responsibility conflict before host observation or mutation');
   const context = f.store.task(taskId).write_context;
   await f.write('task_ack', { task_id: taskId, revision: 1, write_context: context, actor: 'assignee' });
+  const started = await f.write('task_start', { task_id: taskId, revision: 1, write_context: context, actor: 'assignee', work_mode: 'execute' });
+  assert.equal(started.error, null);
   await f.write('task_report', {
-    task_id: taskId, revision: 1, write_context: context, actor: 'assignee',
+    task_id: taskId, revision: 1, write_context: f.store.task(taskId).write_context, actor: 'assignee',
     status: 'done', outcome: { summary: 'Synthetic complete result' }, retro: null,
   });
   assert.equal((await f.write('task_session_prepare', { session_id: 'assignee' })).error, null);
@@ -198,6 +202,7 @@ test('cancellation after creation or an admitted preparation stops the next obse
 
 test('preparation and assignment reject concurrent same-target work without duplicate effects', async t => {
   const f = fixture(t);
+  seedOrchestratingRoot(f.store);
   const created = await f.write('task_create', { title: 'Concurrent', description: 'Complete one result' });
   let started;
   const entered = new Promise(resolve => { started = resolve; });
@@ -233,6 +238,7 @@ test('resource inputs reject unknown fields and duplicate selections without exp
 
 test('an admitted assignment excludes preparation even before the Task is bound', async t => {
   const f = fixture(t);
+  seedOrchestratingRoot(f.store);
   const created = await f.write('task_create', { title: 'Reserved assignment', description: 'One result' });
   let entered;
   const started = new Promise(resolve => { entered = resolve; });

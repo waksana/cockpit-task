@@ -33,8 +33,8 @@ export function activate(context) {
         return titles.get(id);
       };
       const enrich = async task => {
-        const [orchestrator, assignee] = await Promise.all([display(task.orchestrator), display(task.assignee)]);
-        return { ...task, sessions: { orchestrator, assignee } };
+        const [parentAssignee, assignee] = await Promise.all([display(task.parent_assignee), display(task.assignee)]);
+        return { ...task, sessions: { parent_assignee: parentAssignee, assignee } };
       };
       body.result = request.body.view === 'list'
         ? { ...body.result, items: await Promise.all(body.result.items.map(enrich)) }

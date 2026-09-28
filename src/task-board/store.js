@@ -1,17 +1,18 @@
 import { DatabaseSync } from 'node:sqlite';
-import { chmodSync, mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { LIMITS, TaskError, parseInternal, definitionFits } from './contracts.js';
 import { AutomationStore } from './automation-store.js';
 import { groupAlive } from './automation-runner.js';
-import { validateLifecyclePlan } from './lifecycle-migration.js';
 import { migrateOperationScopes, operationActor } from './operation-scopes.js';
 import { ReadVersions } from './read-versions.js';
+import { initializeResponsibilitySchema, applyResponsibilityMigration } from './responsibility-migration.js';
+import { assertResponsibilityWaits } from './responsibility-graph.js';
 
 export { TaskError } from './contracts.js';
 export { inspectLifecycleMigration } from './lifecycle-migration.js';
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 const terminal = status => status === 'done' || status === 'cancelled';
 const now = () => new Date().toISOString();
 const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -42,12 +43,16 @@ export class TaskStore {
   constructor(directory, { platform = process.platform, migrationPlan = null } = {}) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const file = join(directory, 'task-board.sqlite');
+    const existing = existsSync(file);
     this.db = new DatabaseSync(file);
     try {
       const version = this.db.prepare('PRAGMA user_version').get().user_version;
       if (version > SCHEMA_VERSION) fail('SCHEMA_TOO_NEW', 'Task database requires a newer module version', 500);
-      if (version === 9 && migrationPlan === null) {
-        fail('MIGRATION_REVIEW_REQUIRED', 'Every existing schema v9 database requires a reviewed lifecycle plan, including an empty legacy Task set');
+      if (existing && version < 12 && migrationPlan === null) {
+        fail('MIGRATION_REVIEW_REQUIRED', 'Existing Task databases require explicit reviewed responsibility migration; ordinary loading never infers responsibility modes or bindings');
+      }
+      if (migrationPlan !== null && version !== 11) {
+        fail('MIGRATION_REVIEW_REQUIRED', 'An explicit responsibility migration plan applies only to schema 11');
       }
       chmodSync(file, 0o600);
       this.db.exec(`
@@ -57,10 +62,6 @@ export class TaskStore {
       PRAGMA busy_timeout=5000;
       BEGIN IMMEDIATE;
       `);
-      if (migrationPlan !== null) {
-        if (version !== 9) fail('MIGRATION_REVIEW_REQUIRED', 'An explicit lifecycle plan applies only to schema v9');
-        validateLifecyclePlan(this.db, migrationPlan);
-      }
       // Schemas before v9 are built with their historical names, then renamed once by v9.
       if (version < 9) this.db.exec(`
       CREATE TABLE IF NOT EXISTS tasks (
@@ -210,6 +211,13 @@ export class TaskStore {
       if (version < 9) this.migrateVocabulary();
       if (version < 10) this.migrateLifecycle(migrationPlan?.tasks);
       if (version < 11) migrateOperationScopes(this.db);
+      if (version < 12) {
+        if (existing) applyResponsibilityMigration(this.db, migrationPlan);
+        else {
+          this.db.exec('PRAGMA user_version=11');
+          initializeResponsibilitySchema(this.db);
+        }
+      }
       this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}; COMMIT;`);
       this.automation = new AutomationStore(this, { platform });
       this.readVersions = new ReadVersions(this.db);
@@ -463,59 +471,107 @@ export class TaskStore {
     if (!row.assignee) fail('ASSIGNMENT_REQUIRED', 'Task has no fixed assignee');
   }
   authorize(row, actor, relations) {
-    // Host-supplied identity makes the relationship authoritative; a subagent acts for its session.
-    const orchestrator = row.orchestrator === actor || actor === 'user';
-    const allowed = (relations.includes('orchestrator') && orchestrator) || (relations.includes('assignee') && row.assignee && row.assignee === actor);
+    const parent = this.parentAssignee(row);
+    const manages = relations.includes('parent_assignee');
+    const allowed = (manages && (actor === 'user' || parent && parent === actor))
+      || (relations.includes('assignee') && row.assignee && row.assignee === actor);
     if (allowed) return;
-    const code = relations.length > 1 ? 'ORCHESTRATOR_OR_ASSIGNEE_REQUIRED' : `${relations[0].toUpperCase()}_REQUIRED`;
-    fail(code, `Only the Task ${relations.join(' or ')} may do this; nothing was saved`, 403);
+    if (manages && row.parent_task_id && !parent) fail('PARENT_UNBOUND', 'The current parent has no responsible session', 403);
+    const code = relations.length > 1 ? 'PARENT_ASSIGNEE_OR_ASSIGNEE_REQUIRED' : `${relations[0].toUpperCase()}_REQUIRED`;
+    fail(code, `Only the Task ${relations.join(' or ')}${manages ? ' or Web user' : ''} may do this; nothing was saved`, 403);
+  }
+  parentAssignee(row) {
+    if (!row.parent_task_id) return null;
+    const parent = this.db.prepare('SELECT assignee FROM tasks WHERE id=?').get(row.parent_task_id);
+    if (!parent) fail('TASK_NOT_FOUND', `Parent Task ${row.parent_task_id} does not exist`, 404);
+    return parent.assignee;
+  }
+  childCounts(id) {
+    const counts = this.db.prepare(`SELECT count(*) AS total,
+      coalesce(sum(status NOT IN ('done','cancelled')),0) AS nonterminal FROM tasks WHERE parent_task_id=?`).get(id);
+    return { total: counts.total, nonterminal: counts.nonterminal };
   }
   identity(row) {
     return {
-      id: row.id, task_id: row.id, title: row.title, orchestrator: row.orchestrator, assignee: row.assignee,
+      id: row.id, task_id: row.id, title: row.title, created_by: row.created_by,
+      parent_assignee: this.parentAssignee(row), assignee: row.assignee,
       status: row.status, revision: row.revision, acknowledged_revision: row.acknowledged_revision,
       created_at: row.created_at, updated_at: row.updated_at, write_context: this.context(row),
       kind: row.kind, parent_task_id: row.parent_task_id ?? null, depth: row.depth ?? 1,
+      work_mode: row.work_mode, legacy: Boolean(row.legacy),
+      cancellation_request: row.cancellation_request ? JSON.parse(row.cancellation_request) : null,
+      children: this.childCounts(row.id),
       ...this.dependencies(row.id),
     };
   }
   currentAssignment(session) {
     // Occupancy guarantees at most one unfinished Agent assignment per session.
-    return this.db.prepare("SELECT id,depth FROM tasks WHERE assignee=? AND kind='agent' AND status NOT IN ('done','cancelled')").get(session) ?? null;
+    return this.db.prepare("SELECT * FROM tasks WHERE assignee=? AND kind='agent' AND status NOT IN ('done','cancelled')").get(session) ?? null;
   }
-  delegationParent(actor) {
-    // The creator orchestrates the new Task; if it is executing a Task, the new Task is that Task's Subtask.
-    const parent = this.currentAssignment(actor);
+  delegationParent(actor, explicitParent) {
+    if (explicitParent && actor !== 'user') fail('USER_REQUIRED', 'Only the Web user may select an explicit parent', 403);
+    const parent = explicitParent ? this.row(explicitParent) : this.currentAssignment(actor);
     if (!parent) return { parent_task_id: null, depth: 1 };
-    if (parent.depth >= LIMITS.delegationDepth) {
-      fail('DELEGATION_DEPTH_EXCEEDED', `You are executing Task ${parent.id} at delegation level ${parent.depth}; Subtasks are limited to ${LIMITS.delegationDepth} levels. Deliver this level directly, or ask the user how to restructure the work`);
-    }
+    this.assertOrchestrating(parent);
+    this.assertActiveAncestors(parent);
+    this.assertAcknowledged(parent);
+    if (this.lineage(parent).length + 2 > LIMITS.treeNodes) fail('TREE_RESOURCE_LIMIT', 'Responsibility tree exceeds the structural operation limit');
     return { parent_task_id: parent.id, depth: parent.depth + 1 };
   }
   lineage(row) {
-    const ancestors = [];
-    for (let id = row.parent_task_id; id && ancestors.length < LIMITS.delegationDepth; ) {
-      const ancestor = this.db.prepare('SELECT id,orchestrator,assignee,parent_task_id FROM tasks WHERE id=?').get(id);
-      if (!ancestor) break;
+    const ancestors = [], seen = new Set([row.id]);
+    for (let id = row.parent_task_id; id; ) {
+      if (seen.has(id)) fail('TREE_CYCLE', 'Responsibility tree contains a cycle');
+      if (ancestors.length >= LIMITS.treeNodes) fail('TREE_RESOURCE_LIMIT', 'Responsibility tree exceeds the structural operation limit');
+      seen.add(id);
+      const ancestor = this.row(id);
       ancestors.push(ancestor);
       id = ancestor.parent_task_id;
     }
     return ancestors;
   }
   assertAssignable(row, assignee) {
-    if (assignee === row.orchestrator) {
-      fail('SELF_ASSIGNMENT', 'A Task cannot be assigned to its own orchestrator; assign another session. For explicitly authorized rework of your own completed Task use task_reopen');
+    this.assertAssignmentReady(row);
+    if (assignee === this.parentAssignee(row)) {
+      fail('SELF_ASSIGNMENT', 'A child must have a different responsible session from its parent');
     }
-    const loop = this.lineage(row).find(ancestor => ancestor.orchestrator === assignee || ancestor.assignee === assignee);
+    const loop = this.lineage(row).find(ancestor => ancestor.assignee === assignee);
     if (loop) {
       fail('DELEGATION_CYCLE', `Session ${assignee} already orchestrates or is assigned ancestor Task ${loop.id}; assign Subtasks to a session outside their lineage`);
     }
   }
   actorRole(row, actor) {
     if (!actor) return undefined;
-    const orchestrator = row.orchestrator === actor, assignee = row.assignee === actor;
-    // Self-assignment is rejected; only legacy rows can hold both relations.
-    return orchestrator && assignee ? 'orchestrator_and_assignee' : assignee ? 'assignee' : orchestrator ? 'orchestrator' : 'none';
+    return actor === 'user' ? 'user' : row.assignee === actor ? 'assignee'
+      : this.parentAssignee(row) === actor ? 'parent_assignee' : 'none';
+  }
+  assertNoCancellation(row) {
+    if (row.cancellation_request) fail('CANCELLATION_REQUESTED', 'Cancellation is requested; stop advancing the goal and arrange cleanup before finalizing');
+  }
+  assertAcknowledged(row) {
+    if (row.acknowledged_revision !== row.revision) fail('ACK_REQUIRED', 'The assignee must acknowledge the current description revision');
+  }
+  assertOrchestrating(row, { closure = false } = {}) {
+    if (!row.assignee) fail('PARENT_UNBOUND', 'The parent must have a responsible session');
+    if (row.kind !== 'agent' || row.status !== 'in_progress' || row.work_mode !== 'orchestrate') {
+      fail('PARENT_NOT_ORCHESTRATING', 'The parent must be an active orchestrating Agent responsibility');
+    }
+    if (!closure) {
+      this.assertNoCancellation(row);
+      this.assertReady(row);
+    }
+  }
+  assertActiveAncestors(row, options) {
+    for (const ancestor of this.lineage(row)) this.assertOrchestrating(ancestor, options);
+  }
+  assertAssignmentReady(row) {
+    this.assertNoCancellation(row);
+    this.assertActiveAncestors(row);
+    if (row.parent_task_id) this.assertAcknowledged(this.row(row.parent_task_id));
+    this.assertReady(row);
+  }
+  assertChildrenTerminal(row) {
+    if (this.childCounts(row.id).nonterminal) fail('CHILDREN_NOT_TERMINAL', 'All direct children must be done or cancelled before ending this responsibility');
   }
   dependencies(taskId) {
     const blocked_by = this.db.prepare(`SELECT d.id,d.kind,d.blocker_id,d.condition,t.status
@@ -523,7 +579,7 @@ export class TaskStore {
       WHERE d.task_id=? AND d.resolved_at IS NULL ORDER BY d.seq`).all(taskId).map(entry =>
       entry.kind === 'task'
         ? { task_id: entry.blocker_id, status: entry.status }
-        : { condition: entry.condition });
+        : { dependency_id: entry.id, condition: entry.condition });
     return { blocked_by, ready: blocked_by.length === 0 };
   }
   dependency(entry) {
@@ -534,6 +590,7 @@ export class TaskStore {
       active: entry.resolved_at === null,
       resolved_at: entry.resolved_at, resolved_by: entry.resolved_by, resolution: entry.resolution,
       blocker_lifecycle: entry.blocker_lifecycle,
+      evidence: entry.evidence ?? null, references: entry.refs ? JSON.parse(entry.refs) : [],
     };
   }
   awaitingDispatch(row) {
@@ -546,6 +603,30 @@ export class TaskStore {
       fail('TASK_NOT_READY', `Task has ${waiting.length} unmet prerequisite(s) (${waiting.map(entry =>
         entry.task_id ? `${entry.task_id}: ${entry.status}` : entry.condition).join('; ')}); dispatch after every blocker is satisfied or explicitly resolved`);
     }
+  }
+  assertResponsibilityWaits(taskId) {
+    // Include existing dependents as well as prerequisites: a changed downstream
+    // requirement can close a wait cycle in another branch of the tree.
+    const tasks = this.db.prepare(`WITH RECURSIVE connected(id) AS (
+      SELECT ?
+      UNION SELECT p.id FROM tasks t JOIN connected c ON t.id=c.id JOIN tasks p ON p.id=t.parent_task_id
+        WHERE p.status NOT IN ('done','cancelled')
+      UNION SELECT t.id FROM tasks t JOIN connected c ON t.parent_task_id=c.id
+        WHERE t.status NOT IN ('done','cancelled')
+      UNION SELECT t.id FROM task_dependencies d JOIN connected c ON d.task_id=c.id
+        JOIN tasks t ON t.id=d.blocker_id
+        WHERE d.kind='task' AND d.resolved_at IS NULL AND t.status NOT IN ('done','cancelled')
+      UNION SELECT t.id FROM task_dependencies d JOIN connected c ON d.blocker_id=c.id
+        JOIN tasks t ON t.id=d.task_id
+        WHERE d.kind='task' AND d.resolved_at IS NULL AND t.status NOT IN ('done','cancelled')
+      LIMIT ?
+    ) SELECT t.id,t.status,t.parent_task_id FROM tasks t JOIN connected c ON t.id=c.id`)
+      .all(taskId, LIMITS.treeNodes + 1);
+    if (tasks.length > LIMITS.treeNodes) fail('TREE_RESOURCE_LIMIT', 'Effective responsibility graph exceeds the structural operation limit');
+    const blockers = this.db.prepare("SELECT blocker_id FROM task_dependencies WHERE task_id=? AND kind='task' AND resolved_at IS NULL");
+    assertResponsibilityWaits(tasks.map(task => ({
+      ...task, blockers: blockers.all(task.id).map(entry => entry.blocker_id),
+    })));
   }
   setBlockers(row, requested, author, at) {
     const normalized = requested.map(value => typeof value === 'string'
@@ -563,8 +644,8 @@ export class TaskStore {
     if (terminal(row.status) || (row.kind === 'automation' && this.automation.run(row.id, { includeLog: false }).state !== 'created')) {
       fail('DEPENDENCY_LOCKED', 'blocked_by can change only on an unfinished Task (automation only before it starts)');
     }
-    if (removed.some(entry => entry.kind === 'condition') && row.assignee === author && row.orchestrator !== author) {
-      fail('CONDITION_RESOLUTION_REQUIRED', 'Only the Task orchestrator or user may resolve or replace a textual blocker; the assignee may add a concrete unmet condition');
+    if (removed.some(entry => entry.kind === 'condition') && author !== 'user' && this.parentAssignee(row) !== author) {
+      fail('CONDITION_RESOLUTION_REQUIRED', 'The assignee must use the evidence-based condition resolution operation; only the parent assignee or user may replan conditions');
     }
     for (const entry of added.filter(value => value.kind === 'task')) {
       const id = entry.task_id;
@@ -574,6 +655,9 @@ export class TaskStore {
       // An ancestor finishes only after its Subtasks, so waiting on it would deadlock.
       if (this.lineage(row).some(ancestor => ancestor.id === id)) {
         fail('BLOCKER_ANCESTOR', `Blocker Task ${id} is an ancestor of this Task and can only finish after it; order work among siblings instead`);
+      }
+      if (blocker.status !== 'done' && this.lineage(this.row(id)).some(ancestor => ancestor.id === row.id)) {
+        fail('BLOCKER_DESCENDANT', 'A responsibility cannot depend on its own descendant; child termination already gates its completion');
       }
       if (blocker.status === 'cancelled') fail('BLOCKER_CANCELLED', `Blocker Task ${id} is cancelled and can never become done`);
     }
@@ -597,12 +681,17 @@ export class TaskStore {
         resolved ? blocker.lifecycle : null,
       );
     }
-    const cycle = added.some(entry => entry.kind === 'task') && this.db.prepare(`WITH RECURSIVE reachable(id) AS (
+    const reachable = added.some(entry => entry.kind === 'task') ? this.db.prepare(`WITH RECURSIVE reachable(id) AS (
         SELECT blocker_id FROM task_dependencies WHERE task_id=? AND kind='task' AND resolved_at IS NULL
         UNION SELECT d.blocker_id FROM task_dependencies d JOIN reachable r ON d.task_id=r.id
           WHERE d.kind='task' AND d.resolved_at IS NULL
-      ) SELECT 1 FROM reachable WHERE id=? LIMIT 1`).get(row.id, row.id);
-    if (cycle) fail('DEPENDENCY_CYCLE', 'blocked_by would create a dependency cycle');
+        LIMIT ?
+      ) SELECT id FROM reachable`).all(row.id, LIMITS.treeNodes + 1) : [];
+    if (reachable.length > LIMITS.treeNodes) fail('TREE_RESOURCE_LIMIT', 'Dependency graph exceeds the structural operation limit');
+    if (reachable.some(entry => entry.id === row.id)) fail('DEPENDENCY_CYCLE', 'blocked_by would create a dependency cycle');
+    const ancestors = new Set(this.lineage(row).map(ancestor => ancestor.id));
+    if (reachable.some(entry => ancestors.has(entry.id))) fail('BLOCKER_ANCESTOR', 'A prerequisite transitively waits on an ancestor responsibility');
+    this.assertResponsibilityWaits(row.id);
     return true;
   }
   summary(row) {
@@ -623,6 +712,8 @@ export class TaskStore {
     return {
       status, task_id: row.id, revision: row.revision, acknowledged_revision: row.acknowledged_revision,
       task_status: row.status, assignee: row.assignee, write_context: this.context(row),
+      work_mode: row.work_mode, parent_task_id: row.parent_task_id, parent_assignee: this.parentAssignee(row),
+      cancellation_request: row.cancellation_request ? JSON.parse(row.cancellation_request) : null,
       kind: row.kind, ...(row.kind === 'automation' ? { automation: this.automation.project(this.automation.run(row.id)) } : {}),
     };
   }
@@ -683,6 +774,7 @@ export class TaskStore {
             : receipt.error,
         };
       }
+      if (name === 'task_assign') this.assertAssignmentReady(this.row(input.task_id));
       const operation = { request_id: input.request_id, status: 'unconfirmed', ...(input.task_id ? { task_id: input.task_id } : {}), message: 'External operation reserved; do not repeat an unconfirmed host call' };
       this.insertReceipt(name, input, { operation });
       return { replay: false, ...this.operation(input) };
@@ -707,6 +799,8 @@ export class TaskStore {
     if (name === 'task_script_read') return this.automation.script(input);
     const handlers = {
       task_create: 'create', task_edit: 'edit', task_ack: 'ack', task_report: 'report', task_cancel: 'cancel', task_reopen: 'reopen',
+      task_claim: 'claim', task_start: 'start', task_convert: 'convert', task_attach: 'attach',
+      task_resolve_condition: 'resolveCondition', task_cancel_finalize: 'cancelFinalize',
       task_subscribe: 'subscribe', task_unsubscribe: 'unsubscribe', task_retro_handle: 'handleRetro',
       task_script_register: 'registerScript', task_automation_start: 'startAutomation',
       task_automation_reconcile: 'reconcileAutomation',
@@ -738,17 +832,161 @@ export class TaskStore {
   create(input) {
     if (input.automation) this.automation.assertPlatform();
     const id = randomUUID(), at = now();
-    const { parent_task_id, depth } = this.delegationParent(input.actor);
-    this.db.prepare('INSERT INTO tasks(id,title,description,orchestrator,refs,metadata,created_at,updated_at,parent_task_id,depth) VALUES(?,?,?,?,?,?,?,?,?,?)')
-      .run(id, input.title, input.description, input.actor, JSON.stringify(input.references || []), JSON.stringify(input.metadata || {}), at, at, parent_task_id, depth);
+    const { parent_task_id, depth } = this.delegationParent(input.actor, input.parent_task_id);
+    this.db.prepare('INSERT INTO tasks(id,title,description,created_by,refs,metadata,created_at,updated_at,parent_task_id,depth,work_mode) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+      .run(id, input.title, input.description, input.actor, JSON.stringify(input.references || []), JSON.stringify(input.metadata || {}), at, at, parent_task_id, depth, 'undecided');
     this.recordDefinition(this.row(id), 'Initial definition', input.actor, at);
     if (input.automation) this.automation.create(id, input.automation);
     if (input.blocked_by?.length) this.setBlockers(this.row(id), input.blocked_by, input.actor, at);
+    this.recordResponsibility(id, 'created', input, { parent_task_id, created_by: input.actor }, at);
     return { result: { ...this.effects(this.row(id)), ...this.dependencies(id) } };
+  }
+  claimCandidate(input) {
+    const row = this.row(input.task_id);
+    this.checkContext(row, input, true);
+    this.currentRevision(row, input);
+    if (!input.actor || input.actor === 'user') fail('ASSIGNEE_REQUIRED', 'Root claim requires the calling Node session', 403);
+    if (row.kind !== 'agent') fail('AUTOMATION_MANAGED', 'Automation Tasks have no Agent binding');
+    if (row.parent_task_id) fail('ROOT_REQUIRED', 'Only an ordinary root may be claimed');
+    if (row.status !== 'todo' || row.assignee) fail('ASSIGNMENT_CONFLICT', 'Only an unbound todo root may be claimed');
+    this.assertNoCancellation(row);
+    if (this.currentAssignment(input.actor)) fail('ASSIGNEE_OCCUPIED', 'The calling session already has an unfinished responsibility');
+    return row;
+  }
+  claim(input) {
+    const row = this.claimCandidate(input), at = now();
+    this.db.prepare('UPDATE tasks SET assignee=?,lifecycle=lifecycle+1,editable=editable+1,updated_at=? WHERE id=?')
+      .run(input.actor, at, row.id);
+    this.db.prepare('INSERT INTO task_assignments(task_id,assignee,author,at) VALUES(?,?,?,?)')
+      .run(row.id, input.actor, input.actor, at);
+    this.recordResponsibility(row.id, 'claimed', input, { assignee: input.actor }, at);
+    return { result: this.effects(this.row(row.id)) };
+  }
+  start(input) {
+    const row = this.row(input.task_id);
+    this.executable(row);
+    this.authorize(row, input.actor, ['assignee']);
+    this.checkContext(row, input, true);
+    this.currentRevision(row, input);
+    this.assertAcknowledged(row);
+    if (row.status !== 'todo' || row.work_mode !== 'undecided') fail('TASK_STATE_CONFLICT', 'Start requires a todo Agent responsibility with undecided mode');
+    this.assertNoCancellation(row);
+    this.assertActiveAncestors(row);
+    this.assertReady(row);
+    if (input.work_mode === 'execute' && this.childCounts(row.id).total) fail('WORK_MODE_CONFLICT', 'A responsibility with children must orchestrate');
+    const at = now();
+    this.db.prepare("UPDATE tasks SET status='in_progress',work_mode=?,lifecycle=lifecycle+1,editable=editable+1,updated_at=? WHERE id=?")
+      .run(input.work_mode, at, row.id);
+    this.recordResponsibility(row.id, 'started', input, { work_mode: input.work_mode }, at);
+    const subscription_ids = this.transitionSubscriptions(row, 'in_progress', input, at);
+    return { result: { ...this.effects(this.row(row.id)), ...(subscription_ids.length ? { subscription_ids } : {}) } };
+  }
+  convert(input) {
+    const row = this.row(input.task_id);
+    this.executable(row);
+    this.authorize(row, input.actor, ['assignee']);
+    this.checkContext(row, input, true);
+    this.currentRevision(row, input);
+    this.assertAcknowledged(row);
+    this.assertNoCancellation(row);
+    this.assertActiveAncestors(row);
+    if (row.status !== 'in_progress' || row.work_mode !== 'execute') fail('WORK_MODE_CONFLICT', 'Only active execute responsibility may convert to orchestrate');
+    const at = now();
+    this.db.prepare("UPDATE tasks SET work_mode='orchestrate',lifecycle=lifecycle+1,editable=editable+1,updated_at=? WHERE id=?").run(at, row.id);
+    this.recordResponsibility(row.id, 'converted', input, {
+      from: 'execute', to: 'orchestrate', reason: input.reason, completed: input.completed, remaining: input.remaining,
+    }, at);
+    return { result: this.effects(this.row(row.id)) };
+  }
+  recordResponsibility(taskId, kind, input, details, at = now()) {
+    const id = randomUUID();
+    this.db.prepare('INSERT INTO responsibility_events(id,task_id,kind,author,at,details) VALUES(?,?,?,?,?,?)')
+      .run(id, taskId, kind, input.actor, at, JSON.stringify(details));
+    return id;
+  }
+  resolveCondition(input) {
+    const row = this.row(input.task_id);
+    this.authorize(row, input.actor, ['parent_assignee', 'assignee']);
+    this.checkContext(row, input, true);
+    this.currentRevision(row, input);
+    if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Only unfinished responsibility conditions may be resolved');
+    if (row.kind === 'automation' && this.automation.run(row.id).state !== 'created') fail('DEPENDENCY_LOCKED', 'Started automation prerequisites are immutable');
+    const dependency = this.db.prepare("SELECT * FROM task_dependencies WHERE id=? AND task_id=? AND kind='condition' AND resolved_at IS NULL")
+      .get(input.dependency_id, row.id);
+    if (!dependency) fail('CONDITION_NOT_ACTIVE', 'dependency_id must identify an active textual condition on this Task');
+    const at = now();
+    this.db.prepare("UPDATE task_dependencies SET resolved_at=?,resolved_by=?,resolution='evidence',evidence=?,refs=? WHERE id=?")
+      .run(at, input.actor, input.evidence, JSON.stringify(input.references ?? []), dependency.id);
+    this.db.prepare('UPDATE tasks SET lifecycle=lifecycle+1,editable=editable+1,updated_at=? WHERE id=?').run(at, row.id);
+    this.recordResponsibility(row.id, 'condition_resolved', input, { dependency_id: dependency.id, evidence: input.evidence, references: input.references ?? [] }, at);
+    const current = this.row(row.id), readiness = this.dependencies(row.id), notice_ids = [];
+    if (readiness.ready && row.assignee && row.assignee !== input.actor) {
+      notice_ids.push(this.recordAssigneeNotice(current, input, at));
+    } else if (readiness.ready && !row.assignee) {
+      const notice = this.recordDependencyNotice(current, input, at, 'ready', { dependency_id: dependency.id });
+      if (notice) notice_ids.push(notice);
+    }
+    return { result: { ...this.effects(current), ...readiness, dependency_id: dependency.id, ...(notice_ids.length ? { notice_ids } : {}) } };
+  }
+  subtree(row) {
+    const rows = this.db.prepare(`WITH RECURSIVE tree(id) AS (
+      SELECT ? UNION SELECT t.id FROM tasks t JOIN tree p ON t.parent_task_id=p.id LIMIT ?
+    ) SELECT tasks.* FROM tasks JOIN tree ON tasks.id=tree.id`).all(row.id, LIMITS.treeNodes + 1);
+    if (rows.length > LIMITS.treeNodes) fail('TREE_RESOURCE_LIMIT', 'Responsibility subtree exceeds the structural operation limit');
+    return rows;
+  }
+  attach(input) {
+    const row = this.row(input.task_id), parent = this.row(input.parent_task_id);
+    this.checkContext(row, input, true);
+    this.currentRevision(row, input);
+    this.checkContext(parent, { write_context: input.parent_write_context }, true);
+    if (input.actor !== 'user' && input.actor !== parent.assignee) {
+      if (!parent.assignee) fail('PARENT_UNBOUND', 'Target parent has no responsible session');
+      fail('PARENT_ASSIGNEE_REQUIRED', 'Only the target parent assignee or Web user may attach a root', 403);
+    }
+    if (row.parent_task_id) fail('ROOT_REQUIRED', 'Only roots may be attached; detach and reparent are not supported');
+    if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Only unfinished roots may be attached');
+    this.assertNoCancellation(row);
+    this.assertOrchestrating(parent);
+    this.assertAcknowledged(parent);
+    const ancestors = [parent, ...this.lineage(parent)];
+    this.assertActiveAncestors(parent);
+    const tree = this.subtree(row), ids = new Set(tree.map(item => item.id));
+    if (ancestors.some(item => ids.has(item.id))) fail('TREE_CYCLE', 'Attaching this root would create a responsibility cycle');
+    if (tree.length + ancestors.length > LIMITS.treeNodes) fail('TREE_RESOURCE_LIMIT', 'Attachment exceeds the structural operation limit');
+    const ancestorIds = new Set(ancestors.map(item => item.id));
+    const ancestorSessions = new Set(ancestors.map(item => item.assignee).filter(Boolean));
+    for (const child of tree) {
+      if (!terminal(child.status)) this.assertNoCancellation(child);
+      if (child.assignee && ancestorSessions.has(child.assignee)) fail('DELEGATION_CYCLE', 'A subtree assignee is already responsible for a new ancestor');
+      for (const blocker of this.dependencies(child.id).blocked_by) {
+        if (blocker.task_id && ancestorIds.has(blocker.task_id)) fail('BLOCKER_ANCESTOR', 'Attaching would make a Task dependency wait on its own ancestor');
+      }
+    }
+    const dependencyPath = this.db.prepare(`WITH RECURSIVE
+      tree(id) AS (SELECT ? UNION SELECT t.id FROM tasks t JOIN tree p ON t.parent_task_id=p.id LIMIT ?),
+      required(id) AS (
+        SELECT d.blocker_id FROM task_dependencies d JOIN tree ON tree.id=d.task_id WHERE d.kind='task' AND d.resolved_at IS NULL
+        UNION SELECT d.blocker_id FROM task_dependencies d JOIN required r ON r.id=d.task_id
+          WHERE d.kind='task' AND d.resolved_at IS NULL LIMIT ?
+      ) SELECT id FROM required`).all(row.id, LIMITS.treeNodes + 1, LIMITS.treeNodes + 1);
+    if (dependencyPath.length > LIMITS.treeNodes) fail('TREE_RESOURCE_LIMIT', 'Attachment prerequisite graph exceeds the structural operation limit');
+    if (new Set([...ids, ...ancestorIds, ...dependencyPath.map(entry => entry.id)]).size > LIMITS.treeNodes) {
+      fail('TREE_RESOURCE_LIMIT', 'Attachment exceeds the combined structural operation limit');
+    }
+    if (dependencyPath.some(entry => ancestorIds.has(entry.id))) fail('BLOCKER_ANCESTOR', 'A subtree prerequisite transitively waits on a new ancestor');
+    const at = now(), offset = parent.depth + 1 - row.depth;
+    this.db.prepare('UPDATE tasks SET parent_task_id=? WHERE id=?').run(parent.id, row.id);
+    const update = this.db.prepare('UPDATE tasks SET depth=depth+?,lifecycle=lifecycle+1,editable=editable+1,updated_at=? WHERE id=?');
+    for (const child of tree) update.run(offset, at, child.id);
+    this.db.prepare('UPDATE tasks SET lifecycle=lifecycle+1,editable=editable+1,updated_at=? WHERE id=?').run(at, parent.id);
+    this.assertResponsibilityWaits(row.id);
+    this.recordResponsibility(row.id, 'attached', input, { parent_task_id: parent.id, reason: input.reason, subtree_count: tree.length }, at);
+    return { result: { ...this.effects(this.row(row.id)), parent_write_context: this.context(this.row(parent.id)), subtree_count: tree.length } };
   }
   edit(input) {
     const row = this.row(input.task_id);
-    this.authorize(row, input.actor, ['orchestrator', 'assignee']);
+    this.authorize(row, input.actor, ['parent_assignee', 'assignee']);
     this.checkContext(row, input, true);
     this.currentRevision(row, input);
     if (row.kind === 'automation' && ['queued', 'starting', 'running'].includes(this.automation.run(row.id).state)) {
@@ -772,6 +1010,7 @@ export class TaskStore {
     const revision = row.revision + Number(descriptionChanged);
     this.db.prepare('UPDATE tasks SET title=?,description=?,refs=?,metadata=?,revision=?,editable=editable+?,updated_at=? WHERE id=?')
       .run(input.title ?? row.title, input.description ?? row.description, references, metadata, revision, Number(metadataChanged), at, row.id);
+    if (blockersChanged) this.recordResponsibility(row.id, 'blockers_replanned', input, { reason: input.reason }, at);
     if (descriptionChanged) {
       this.recordDefinition(this.row(row.id), input.reason, input.actor, at);
       if (!terminal(row.status) && row.assignee === input.actor) this.recordAck(this.row(row.id), input.actor);
@@ -786,14 +1025,16 @@ export class TaskStore {
     }
     const priorConditions = new Set(beforeDependencies.blocked_by.filter(entry => entry.condition).map(entry => entry.condition));
     const addedConditions = afterDependencies.blocked_by.filter(entry => entry.condition && !priorConditions.has(entry.condition));
-    if (row.kind === 'agent' && row.assignee === input.actor && row.orchestrator !== input.actor && addedConditions.length) {
+    if (row.kind === 'agent' && row.assignee === input.actor && this.parentAssignee(row) && addedConditions.length) {
       const dependency = this.db.prepare(`SELECT id FROM task_dependencies
         WHERE task_id=? AND kind='condition' AND condition=? AND resolved_at IS NULL`).get(row.id, addedConditions.at(-1).condition);
-      notice_ids.push(this.recordDependencyNotice(this.row(row.id), input, at, 'blocked', {
+      const notice = this.recordDependencyNotice(this.row(row.id), input, at, 'blocked', {
         dependency_id: dependency.id,
-      }));
-    } else if (!row.assignee && becameReady && row.orchestrator !== input.actor) {
-      notice_ids.push(this.recordDependencyNotice(this.row(row.id), input, at, 'ready'));
+      });
+      if (notice) notice_ids.push(notice);
+    } else if (!row.assignee && becameReady && this.parentAssignee(row) !== input.actor) {
+      const notice = this.recordDependencyNotice(this.row(row.id), input, at, 'ready');
+      if (notice) notice_ids.push(notice);
     }
     return {
       result: {
@@ -817,7 +1058,10 @@ export class TaskStore {
     this.currentRevision(row, input);
     if (row.kind !== 'agent') fail('AUTOMATION_MANAGED', 'Automation Tasks cannot reopen');
     if (row.status !== 'done') fail('TASK_STATE_CONFLICT', 'Only a done Agent Task can reopen');
-    this.authorize(row, input.actor, ['orchestrator', 'assignee']);
+    this.authorize(row, input.actor, ['parent_assignee', 'assignee']);
+    if (!['execute', 'orchestrate'].includes(row.work_mode)) fail('MIGRATION_REVIEW_REQUIRED', 'Legacy responsibility mode is unknown; explicit review is required before reopening');
+    this.assertNoCancellation(row);
+    this.assertActiveAncestors(row);
     const assignment = this.db.prepare('SELECT seq FROM task_assignments WHERE task_id=? AND assignee=?').get(row.id, row.assignee);
     if (!assignment) fail('REOPEN_NOT_ELIGIBLE', 'Tasks assigned before assignment-order tracking cannot reopen');
     const occupied = this.db.prepare("SELECT 1 FROM tasks WHERE assignee=? AND status NOT IN ('done','cancelled')").get(row.assignee);
@@ -834,8 +1078,10 @@ export class TaskStore {
     // This runs under the same write transaction as assignment and its ordering record.
     this.db.prepare("UPDATE tasks SET status='in_progress',description=?,revision=revision+1,lifecycle=lifecycle+1,updated_at=? WHERE id=?")
       .run(input.description, at, row.id);
+    this.assertResponsibilityWaits(row.id);
     const current = this.row(row.id);
     this.recordDefinition(current, input.reason, input.actor, at);
+    this.recordResponsibility(row.id, 'reopened', input, { reason: input.reason, revision: current.revision, work_mode: current.work_mode }, at);
     if (row.assignee === input.actor) {
       this.recordAck(current, input.actor);
       return { result: this.effects(this.row(row.id)) };
@@ -864,7 +1110,15 @@ export class TaskStore {
       .get(row.id, input.revision, row.assignee);
     if (!ack) fail('ACK_REQUIRED', 'The fixed assignee has not acknowledged the specified revision');
     const stale = input.revision !== row.revision;
-    if (!stale && input.status === 'done') this.assertReady(row);
+    if (!stale && input.status) {
+      if (row.status !== 'in_progress') fail('START_REQUIRED', 'Use task_start to choose a work mode and start atomically before reporting status');
+      if (input.status === 'done') {
+        this.assertNoCancellation(row);
+        this.assertActiveAncestors(row, { closure: true });
+        this.assertReady(row);
+        this.assertChildrenTerminal(row);
+      }
+    }
     const field = requested => ({ status: requested ? 'rejected' : 'not_requested' });
     const fields = {
       activity: field(input.activity), task_status: field(input.status), outcome: field(input.outcome),
@@ -889,6 +1143,7 @@ export class TaskStore {
       }
       if (input.status) {
         this.db.prepare('UPDATE tasks SET status=?,lifecycle=lifecycle+? WHERE id=?').run(input.status, Number(input.status !== row.status), row.id);
+        if (input.status !== row.status) this.recordResponsibility(row.id, 'completed', input, { status: input.status }, at);
         fields.task_status = { status: 'saved', value: input.status };
         subscription_ids = this.transitionSubscriptions(row, input.status, input, at);
         notice_ids = [...this.transitionDependents(row, input.status, input, at), ...this.transitionChild(row, input.status, input, at, subscription_ids)];
@@ -909,19 +1164,26 @@ export class TaskStore {
   }
   cancel(input) {
     const row = this.row(input.task_id);
-    this.authorize(row, input.actor, ['orchestrator', 'assignee']);
+    this.authorize(row, input.actor, ['parent_assignee', 'assignee']);
     this.checkContext(row, input);
     if (row.status === 'cancelled') return { result: this.effects(row, 'unchanged') };
     if (row.status === 'done') fail('TASK_STATE_CONFLICT', 'A completed Task cannot be cancelled');
+    if (row.kind === 'agent') {
+      if (row.cancellation_request) return { result: this.effects(row, 'unchanged') };
+      const at = now(), request = { reason: input.reason, author: input.actor, at, request_id: input.request_id };
+      this.db.prepare('UPDATE tasks SET cancellation_request=?,lifecycle=lifecycle+1,editable=editable+1,updated_at=? WHERE id=?')
+        .run(JSON.stringify(request), at, row.id);
+      this.recordResponsibility(row.id, 'cancellation_requested', input, request, at);
+      const notice_ids = row.assignee && row.assignee !== input.actor
+        ? [this.recordAssigneeNotice(this.row(row.id), input, at, 'cancellation_requested')] : [];
+      return { result: { ...this.effects(this.row(row.id)), ...(notice_ids.length ? { notice_ids } : {}) } };
+    }
+    this.assertChildrenTerminal(row);
     const cancellation = { reason: input.reason, author: input.actor, source: 'reported', at: now() };
     this.db.prepare("UPDATE tasks SET status='cancelled',lifecycle=lifecycle+1,cancellation=?,updated_at=? WHERE id=?")
       .run(JSON.stringify(cancellation), cancellation.at, row.id);
     const subscription_ids = this.transitionSubscriptions(row, 'cancelled', input, cancellation.at);
     const notice_ids = [...this.transitionDependents(row, 'cancelled', input, cancellation.at), ...this.transitionChild(row, 'cancelled', input, cancellation.at, subscription_ids)];
-    // An assignee still working is told to stop by the service, never by another agent.
-    if (row.kind === 'agent' && row.assignee && row.assignee !== input.actor) {
-      notice_ids.push(this.recordAssigneeNotice(this.row(row.id), input, cancellation.at, 'cancelled'));
-    }
     if (row.kind === 'automation') this.automation.cancel(row.id);
     return {
       result: {
@@ -929,6 +1191,26 @@ export class TaskStore {
         ...(subscription_ids.length ? { subscription_ids } : {}), ...(notice_ids.length ? { notice_ids } : {}),
       },
     };
+  }
+  cancelFinalize(input) {
+    const row = this.row(input.task_id);
+    this.checkContext(row, input, true);
+    this.currentRevision(row, input);
+    if (row.kind !== 'agent') fail('AUTOMATION_MANAGED', 'Automation cancellation is service-managed');
+    if (row.assignee) this.authorize(row, input.actor, ['assignee']);
+    else if (input.actor !== 'user') fail('USER_REQUIRED', 'Only the Web user may finalize an unbound Agent cancellation', 403);
+    if (!row.cancellation_request) fail('CANCELLATION_REQUIRED', 'Record cancellation intent before finalizing');
+    if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Only unfinished cancellation responsibility may be finalized');
+    this.assertChildrenTerminal(row);
+    const request = JSON.parse(row.cancellation_request), at = now();
+    const cancellation = { ...request, summary: input.summary, finalized_by: input.actor, finalized_at: at, source: 'reported' };
+    this.db.prepare("UPDATE tasks SET status='cancelled',cancellation=?,lifecycle=lifecycle+1,editable=editable+1,updated_at=? WHERE id=?")
+      .run(JSON.stringify(cancellation), at, row.id);
+    this.recordResponsibility(row.id, 'cancellation_finalized', input, { summary: input.summary }, at);
+    const subscription_ids = this.transitionSubscriptions(row, 'cancelled', input, at);
+    const notice_ids = [...this.transitionDependents(row, 'cancelled', input, at), ...this.transitionChild(row, 'cancelled', input, at, subscription_ids)];
+    return { result: { ...this.effects(this.row(row.id)), cancellation,
+      ...(subscription_ids.length ? { subscription_ids } : {}), ...(notice_ids.length ? { notice_ids } : {}) } };
   }
   subscription(row) {
     return {
@@ -952,8 +1234,10 @@ export class TaskStore {
     this.checkContext(row, input);
     if (input.statuses.includes(row.status)) fail('ALREADY_IN_TARGET_STATUS', 'Task is already in a target status; no subscription was created');
     if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Subscriptions require an unfinished Task; no subscription was created');
-    // Whoever subscribes is notified; a Web board user has no session, so its notice goes to the orchestrator.
-    const subscriber = input.actor === 'user' ? row.orchestrator : input.actor;
+    const subscriber = input.actor === 'user' ? input.subscriber : input.actor;
+    if (!subscriber || input.actor !== 'user' && input.subscriber !== undefined) {
+      fail('SUBSCRIBER_REQUIRED', 'Web subscriptions require an explicit subscriber; sessions may only subscribe themselves', 400);
+    }
     if (this.db.prepare("SELECT 1 FROM subscriptions WHERE task_id=? AND subscriber=? AND state='waiting'").get(row.id, subscriber)) {
       fail('SUBSCRIPTION_EXISTS', 'This subscriber already has a waiting subscription on this Task; inspect or cancel it explicitly');
     }
@@ -982,9 +1266,7 @@ export class TaskStore {
           event_id: randomUUID(), request_id: input.request_id, from_status: row.status, status, at, actor: input.actor,
           ...(input.source === 'automation' ? { source: 'automation', run_id: input.run_id } : {}),
         };
-        const suppression = subscription.subscriber === input.actor ? 'SELF_NOTIFICATION_SUPPRESSED'
-          : status === 'cancelled' && row.kind === 'agent' && subscription.subscriber === row.assignee
-            ? 'DUPLICATE_NOTIFICATION_SUPPRESSED' : null;
+        const suppression = subscription.subscriber === input.actor ? 'SELF_NOTIFICATION_SUPPRESSED' : null;
         const error = suppression ? JSON.stringify({
           code: suppression, message: suppression === 'SELF_NOTIFICATION_SUPPRESSED'
             ? 'The subscriber caused this transition; no self-reminder is sent.'
@@ -1022,7 +1304,7 @@ export class TaskStore {
         }
         continue;
       }
-      if (dependent.orchestrator === input.actor) continue;
+      if (this.parentAssignee(dependent) === input.actor) continue;
       const notice = this.recordDependencyNotice(dependent, input, at, kind, {
         dependency_id: dependent.dependency_id, blocker_id: row.id, blocker_lifecycle: blocker.lifecycle,
         blocker_status: status,
@@ -1032,13 +1314,12 @@ export class TaskStore {
     return ids;
   }
   transitionChild(row, status, input, at, triggered = []) {
-    // A Subtask's terminal transition wakes its orchestrator (the parent's assignee) while the parent is unfinished.
+    // Snapshot the current parent binding; later delivery never follows a changed relationship.
     if (!row.parent_task_id || status === row.status || !['done', 'cancelled'].includes(status)) return [];
-    // A subscription card to the same orchestrator already covers this transition; anyone else's does not.
-    const covered = triggered.some(id => this.db.prepare('SELECT subscriber FROM subscriptions WHERE id=?').get(id)?.subscriber === row.orchestrator);
+    const parent = this.row(row.parent_task_id), recipient = parent.assignee;
+    const covered = triggered.some(id => this.db.prepare('SELECT subscriber FROM subscriptions WHERE id=?').get(id)?.subscriber === recipient);
     if (covered) return [];
-    const parent = this.row(row.parent_task_id);
-    if (terminal(parent.status) || parent.assignee !== row.orchestrator || row.orchestrator === input.actor) return [];
+    if (terminal(parent.status) || !recipient || recipient === input.actor) return [];
     const child = this.row(row.id);
     const id = randomUUID();
     const event = {
@@ -1046,8 +1327,8 @@ export class TaskStore {
       actor: input.actor,
       ...(input.source === 'automation' ? { source: 'automation', run_id: input.run_id } : {}),
     };
-    const inserted = this.db.prepare(`INSERT OR IGNORE INTO child_notices(id,task_id,parent_task_id,child_lifecycle,orchestrator,status,event,created_at)
-      VALUES(?,?,?,?,?,?,?,?)`).run(id, row.id, parent.id, child.lifecycle, row.orchestrator, status, JSON.stringify(event), at);
+    const inserted = this.db.prepare(`INSERT OR IGNORE INTO child_notices(id,task_id,parent_task_id,child_lifecycle,recipient,status,event,created_at)
+      VALUES(?,?,?,?,?,?,?,?)`).run(id, row.id, parent.id, child.lifecycle, recipient, status, JSON.stringify(event), at);
     return inserted.changes ? [id] : [];
   }
   recordAssigneeNotice(row, input, at, kind = 'updated') {
@@ -1063,17 +1344,20 @@ export class TaskStore {
   recordDependencyNotice(row, input, at, kind, {
     dependency_id = null, blocker_id = null, blocker_lifecycle = null, blocker_status = null,
   } = {}) {
+    const recipient = this.parentAssignee(row);
+    if (!recipient || recipient === input.actor) return null;
     const id = randomUUID();
     const event = {
       event_id: randomUUID(), request_id: input.request_id, at, actor: input.actor,
+      parent_task_id: row.parent_task_id,
       ...(dependency_id ? { dependency_id } : {}),
       ...(blocker_id ? { blocker_id, blocker_status } : {}),
       ...(input.source === 'automation' ? { source: 'automation', run_id: input.run_id } : {}),
     };
     const inserted = this.db.prepare(`INSERT OR IGNORE INTO dependency_notices(
-      id,task_id,blocker_id,dependency_id,blocker_lifecycle,orchestrator,kind,event,created_at
+      id,task_id,blocker_id,dependency_id,blocker_lifecycle,recipient,kind,event,created_at
     ) VALUES(?,?,?,?,?,?,?,?,?)`).run(
-      id, row.id, blocker_id, dependency_id, blocker_lifecycle, row.orchestrator, kind, JSON.stringify(event), at,
+      id, row.id, blocker_id, dependency_id, blocker_lifecycle, recipient, kind, JSON.stringify(event), at,
     );
     return inserted.changes ? id : null;
   }
@@ -1089,7 +1373,7 @@ export class TaskStore {
   }
   childNotice(row) {
     return {
-      notice_id: row.id, task_id: row.task_id, parent_task_id: row.parent_task_id, orchestrator: row.orchestrator,
+      notice_id: row.id, task_id: row.task_id, parent_task_id: row.parent_task_id, recipient: row.recipient,
       kind: `child_${row.status}`, status: row.status, event: JSON.parse(row.event), created_at: row.created_at,
       notification: {
         status: row.delivery_status, attempted_at: row.attempted_at, completed_at: row.completed_at,
@@ -1100,7 +1384,7 @@ export class TaskStore {
   notice(row) {
     return {
       notice_id: row.id, task_id: row.task_id, blocker_id: row.blocker_id, dependency_id: row.dependency_id,
-      orchestrator: row.orchestrator, kind: row.kind,
+      recipient: row.recipient, parent_task_id: JSON.parse(row.event).parent_task_id ?? null, kind: row.kind,
       event: JSON.parse(row.event), created_at: row.created_at,
       notification: {
         status: row.delivery_status, attempted_at: row.attempted_at, completed_at: row.completed_at,
@@ -1126,10 +1410,10 @@ export class TaskStore {
     const child = this.db.prepare('SELECT * FROM child_notices WHERE id=?').get(id);
     if (child) {
       const read = () => this.childNotice(this.db.prepare('SELECT * FROM child_notices WHERE id=?').get(id));
-      return { table: 'child_notices', event: `child_${child.status}`, read };
+      return { table: 'child_notices', event: `child_${child.status}`, recipient: 'recipient', read };
     }
     const notice = this.getNotice(id);
-    return { table: 'dependency_notices', event: notice.kind, read: () => this.getNotice(id) };
+    return { table: 'dependency_notices', event: notice.kind, recipient: 'recipient', read: () => this.getNotice(id) };
   }
   pendingNotificationBoundary(table = 'subscriptions') {
     return this.db.prepare(`SELECT max(seq) AS seq FROM ${notificationTable(table)} WHERE delivery_status='pending'`).get().seq ?? 0;
@@ -1141,6 +1425,23 @@ export class TaskStore {
   claimNotification(id) {
     const { table, read } = this.notificationChannel(id);
     return this.transaction(() => {
+      const notification = read(), task = this.row(notification.task_id);
+      let valid = true;
+      if (table === 'child_notices' || table === 'dependency_notices') {
+        const parent = task.parent_task_id && this.row(task.parent_task_id);
+        valid = parent && parent.id === notification.parent_task_id && !terminal(parent.status)
+          && parent.assignee === notification.recipient;
+        if (table === 'dependency_notices') valid = valid && !terminal(task.status)
+          && (notification.kind === 'blocked' ? task.assignee === notification.event.actor : !task.assignee);
+      } else if (table === 'assignee_notices') {
+        valid = task.assignee === notification.assignee
+          && (notification.kind === 'cancelled' ? task.status === 'cancelled' : !terminal(task.status));
+      }
+      if (!valid) {
+        this.db.prepare(`UPDATE ${table} SET delivery_status='not_sent',completed_at=?,delivery_error=? WHERE id=? AND delivery_status='pending'`)
+          .run(now(), JSON.stringify({ code: 'NOTIFICATION_RELATION_CHANGED', message: 'The snapshotted responsibility relation no longer holds; no notification was rerouted or sent' }), id);
+        return null;
+      }
       // Unknown is durable before any send. It is deliberately never a recovery candidate.
       const error = { code: 'NOTIFICATION_UNCONFIRMED', message: 'Notification attempt may be in flight or interrupted; inspect before taking any manual action. Never blindly resend.' };
       const changed = this.db.prepare(`UPDATE ${table} SET delivery_status='unknown',attempted_at=?,delivery_error=? WHERE id=? AND delivery_status='pending'`)
@@ -1164,10 +1465,11 @@ export class TaskStore {
       if (receipt.binding_context) fail('ASSIGNMENT_CONFLICT', 'This operation already bound the Task; do not repeat it');
       const row = this.row(input.task_id);
       if (row.kind === 'automation') fail('AUTOMATION_MANAGED', 'Automation Tasks cannot be assigned to an Agent');
-      this.authorize(row, input.actor, ['orchestrator']);
+      this.authorize(row, input.actor, ['parent_assignee']);
       this.checkContext(row, input);
       this.currentRevision(row, input);
       if (terminal(row.status)) fail('TASK_STATE_CONFLICT', 'Terminal Tasks cannot be assigned');
+      this.assertAssignmentReady(row);
       if (input.resume_request_id) {
         const old = this.operationRow({ actor: input.actor, request_id: input.resume_request_id });
         const prior = old?.result ? JSON.parse(old.result)?.operation : null;
@@ -1194,6 +1496,7 @@ export class TaskStore {
         }
         this.db.prepare('INSERT INTO task_assignments(task_id,assignee,author,at) VALUES(?,?,?,?)')
           .run(row.id, input.assignee, input.actor, now());
+        this.recordResponsibility(row.id, 'assigned', input, { assignee: input.assignee });
       }
       const task = this.row(row.id);
       this.db.prepare('UPDATE operations SET binding_context=?,result=?,updated_at=? WHERE actor=? AND request_id=?')
@@ -1215,14 +1518,18 @@ export class TaskStore {
   }
   dispatchPreflight(rawInput) {
     const input = parseInternal('task_assign', rawInput);
-    const receipt = this.receipt('task_assign', input);
-    if (!receipt || receipt.status !== 'pending' || !receipt.binding_context) fail('OPERATION_NOT_PENDING', 'No pending bound dispatch exists');
-    const row = this.row(input.task_id);
-    this.checkContext(row, { write_context: receipt.binding_context });
-    this.currentRevision(row, input);
-    this.executable(row);
-    if (row.assignee !== input.assignee || row.status !== 'todo') fail('ASSIGNMENT_CONFLICT', 'Task is no longer awaiting this dispatch');
-    return this.summary(row);
+    return this.transaction(() => {
+      const receipt = this.receipt('task_assign', input);
+      if (!receipt || receipt.status !== 'pending' || !receipt.binding_context) fail('OPERATION_NOT_PENDING', 'No pending bound dispatch exists');
+      const row = this.row(input.task_id);
+      this.checkContext(row, { write_context: receipt.binding_context });
+      this.currentRevision(row, input);
+      this.executable(row);
+      this.authorize(row, input.actor, ['parent_assignee']);
+      this.assertAssignmentReady(row);
+      if (row.assignee !== input.assignee || row.status !== 'todo') fail('ASSIGNMENT_CONFLICT', 'Task is no longer awaiting this dispatch');
+      return this.summary(row);
+    }, { readOnly: true });
   }
   overview(row, includeCancellation = true) {
     const outcome = this.db.prepare('SELECT id,revision,at,summary,run_id FROM outcomes WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(row.id);
@@ -1307,8 +1614,9 @@ export class TaskStore {
     const include = new Set(input.include);
     // Explicit projections keep unrequested bodies out of the read, not just the response.
     const columns = [
-      'id', 'title', 'orchestrator', 'assignee', 'status', 'revision', 'acknowledged_revision',
+      'id', 'title', 'created_by', 'assignee', 'status', 'revision', 'acknowledged_revision',
       'created_at', 'updated_at', 'lifecycle', 'editable', 'kind', 'parent_task_id', 'depth',
+      'work_mode', 'legacy', 'cancellation_request',
       ...(include.has('definition') ? ['description', 'refs', 'metadata'] : []),
       ...(include.has('cancellation') ? ['cancellation'] : []),
     ];
@@ -1372,15 +1680,17 @@ export class TaskStore {
     const input = parseInternal('task_read', rawInput);
     const actor = input.actor;
     // Role is derived from Task facts relative to the reading session, never from memory.
-    const withRole = item => actor && item?.orchestrator !== undefined ? { ...item, actor_role: this.actorRole(item, actor) } : item;
+    const withRole = item => actor && item?.parent_assignee !== undefined ? { ...item, actor_role: this.actorRole(item, actor) } : item;
     if (input.include) return withRole(this.transaction(() => this.selected(input), { readOnly: true }));
     if (input.view === 'operation') return this.operation(input);
     if (input.view === 'list') {
-      const { orchestrator, assignee, parent_task_id: parent, query, retro } = input;
+      const { parent_assignee, assignee, parent_task_id: parent, query, retro, root, work_mode } = input;
       const status = input.status ?? (retro ? 'all' : 'unfinished');
-      const scope = hash({ view: 'list', orchestrator: orchestrator ?? null, assignee: assignee ?? null, parent: parent?.toLowerCase() ?? null, query: query ?? null, status, ...(retro ? { retro } : {}) });
+      const scope = hash({ view: 'list', parent_assignee: parent_assignee ?? null, assignee: assignee ?? null, parent: parent?.toLowerCase() ?? null, query: query ?? null, status, root: root ?? null, work_mode: work_mode ?? null, ...(retro ? { retro } : {}) });
       const clauses = ['seq < ?'], values = [this.cursor(input, scope)];
-      if (orchestrator) { clauses.push('orchestrator=?'); values.push(orchestrator); }
+      if (parent_assignee) { clauses.push('EXISTS (SELECT 1 FROM tasks p WHERE p.id=tasks.parent_task_id AND p.assignee=?)'); values.push(parent_assignee); }
+      if (root !== undefined) clauses.push(root ? 'parent_task_id IS NULL' : 'parent_task_id IS NOT NULL');
+      if (work_mode) { clauses.push('work_mode=?'); values.push(work_mode); }
       if (parent) { clauses.push('parent_task_id=?'); values.push(parent.toLowerCase()); }
       if (assignee) { clauses.push('assignee=?'); values.push(assignee); }
       if (status === 'unfinished') clauses.push("status NOT IN ('done','cancelled')");
@@ -1398,13 +1708,34 @@ export class TaskStore {
         const item = this.overview(row, false);
         // Lists must remain pageable even with twenty JSON-escaped maximum-length conditions.
         item.blocked_by = item.blocked_by.map(entry => entry.condition === undefined ? entry : {
-          condition: entry.condition.slice(0, 80), truncated: entry.condition.length > 80,
+          dependency_id: entry.dependency_id, condition: entry.condition.slice(0, 80), truncated: entry.condition.length > 80,
         });
         return withRole(item);
       });
     }
-    if (input.view === 'overview' || input.view === 'execution') return this.transaction(() => {
+    if (['overview', 'execution', 'ancestors', 'responsibility_events'].includes(input.view)) return this.transaction(() => {
       const row = this.row(input.task_id);
+      if (input.view === 'ancestors') {
+        const scope = hash({ view: input.view, task_id: row.id, lifecycle: row.lifecycle, parent: row.parent_task_id });
+        const before = this.cursor(input, scope), limit = input.limit ?? 20;
+        const ancestors = this.lineage(row).map((ancestor, index) => ({ ...ancestor, seq: LIMITS.treeNodes - index }));
+        return this.page(ancestors.filter(ancestor => ancestor.seq < before), limit, scope,
+          ancestor => {
+            const item = this.identity(ancestor);
+            item.blocked_by = item.blocked_by.map(entry => entry.condition === undefined ? entry : {
+              dependency_id: entry.dependency_id, condition: entry.condition.slice(0, 80), truncated: entry.condition.length > 80,
+            });
+            return withRole(item);
+          }, { task_id: row.id });
+      }
+      if (input.view === 'responsibility_events') {
+        const scope = hash({ view: input.view, task_id: row.id }), limit = input.limit ?? 5;
+        const events = this.db.prepare('SELECT * FROM responsibility_events WHERE task_id=? AND seq < ? ORDER BY seq DESC LIMIT ?')
+          .all(row.id, this.cursor(input, scope), limit + 1);
+        return this.page(events, limit, scope, entry => ({
+          id: entry.id, task_id: entry.task_id, kind: entry.kind, author: entry.author, at: entry.at, details: JSON.parse(entry.details),
+        }), { task_id: row.id });
+      }
       return withRole(input.view === 'overview' ? this.overview(row) : {
         ...this.task(row.id), data_version: this.readVersions.token(row.id),
         activity_count: this.activityCount(row.id), activity: this.latestActivity(row), outcome: this.latestOutcome(row),
@@ -1457,7 +1788,7 @@ export class TaskStore {
   }
   definitionCheck({ task_id, actor } = {}) {
     try {
-      const rows = this.db.prepare("SELECT id,assignee,status,revision,acknowledged_revision FROM tasks WHERE id=? OR (assignee=? AND status NOT IN ('done','cancelled'))")
+      const rows = this.db.prepare("SELECT id,assignee,status,work_mode,parent_task_id,cancellation_request,revision,acknowledged_revision FROM tasks WHERE id=? OR (assignee=? AND status NOT IN ('done','cancelled'))")
         .all(task_id ?? null, actor ?? null);
       if (task_id && !rows.some(row => row.id === task_id)) fail('TASK_NOT_FOUND', `Task ${task_id} does not exist`, 404);
       if (!rows.length) return { status: 'not_applicable', tasks: [] };
@@ -1467,6 +1798,8 @@ export class TaskStore {
           const needs_ack = Boolean(row.assignee) && !terminal(row.status) && row.acknowledged_revision !== row.revision;
           return {
             task_id: row.id, revision: row.revision, acknowledged_revision: row.acknowledged_revision, needs_ack,
+            work_mode: row.work_mode, parent_task_id: row.parent_task_id,
+            cancellation_requested: Boolean(row.cancellation_request),
             ...(needs_ack ? { message: row.acknowledged_revision === null
               ? "Awaiting the assignee's acknowledgement of the current Task description"
               : "Task description has changed; awaiting the assignee's acknowledgement of the current revision" } : {}),

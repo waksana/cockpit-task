@@ -81,7 +81,7 @@ export class TaskService {
         if (row.kind === 'automation') throw new TaskError('AUTOMATION_MANAGED', 'Automation Tasks cannot be assigned to an Agent');
         // Reject before reserving or inspecting the assignee, so a busy target cannot mask role
         // confusion as unavailability; binding rechecks inside its transaction.
-        if (!this.store.receipt(name, input)) this.store.authorize(row, input.actor, ['orchestrator']);
+        if (!this.store.receipt(name, input)) this.store.authorize(row, input.actor, ['parent_assignee']);
         if (!input.resume_request_id && !this.store.receipt(name, input)) {
           this.store.assertAssignable(row, input.assignee);
           this.store.assertReady(row);
@@ -131,26 +131,36 @@ export class TaskService {
           }
         }
       } else {
-        let validationError;
-        if (name === 'task_reopen' && !this.store.receipt(name, input)) {
-          try {
-            const candidate = this.store.reopenCandidate(input);
-            // Whoever reopens, the original assignee continues the work and needs Node capability.
-            const capability = await this.host.inspect(candidate.assignee);
-            if (!capability.ready || !capability.node) {
-              throw new TaskError('CAPABILITY_UNAVAILABLE', 'The original assignee must have loaded, ready Node capability');
+        const executeLocal = async () => {
+          let validationError;
+          if (['task_reopen', 'task_claim'].includes(name) && !this.store.receipt(name, input)) {
+            try {
+              const candidate = name === 'task_claim' ? this.store.claimCandidate(input) : this.store.reopenCandidate(input);
+              const capability = await this.host.inspect(name === 'task_claim' ? input.actor : candidate.assignee);
+              if (!capability.ready || !capability.node) {
+                throw new TaskError('CAPABILITY_UNAVAILABLE', 'The responsible session must have loaded, ready Node capability');
+              }
+              if (signal?.aborted) throw new TaskError('REQUEST_CANCELLED', 'Task request was cancelled before binding or reopening');
+            } catch (error) {
+              if (!(error instanceof TaskError)) throw error;
+              validationError = error;
             }
-            if (signal?.aborted) throw new TaskError('REQUEST_CANCELLED', 'Task request was cancelled before reopening');
-          } catch (error) {
-            if (!(error instanceof TaskError)) throw error;
-            validationError = error;
           }
-        }
-        outcome = { result: this.store.executeLocal(name, input, {
-          validate: () => { if (validationError) throw validationError; },
-        }), error: null };
-        if (name === 'task_cancel') this.automation.cancel(input.task_id);
-        if (['task_automation_start', 'task_automation_reconcile'].includes(name)) this.automation.kick();
+          return { result: this.store.executeLocal(name, input, {
+            validate: () => { if (validationError) throw validationError; },
+          }), error: null };
+        };
+        // New bindings cannot race resource preparation; finalized receipts need no session guard.
+        const bindingSession = ['task_claim', 'task_reopen'].includes(name) && !this.store.receipt(name, input)
+          ? name === 'task_claim' ? input.actor : this.store.row(input.task_id).assignee
+          : null;
+        outcome = bindingSession
+          ? await this.withSessionOperation(bindingSession, executeLocal)
+          : await executeLocal();
+        if (name === 'task_cancel' && this.store.row(input.task_id).kind === 'automation') this.automation.cancel(input.task_id);
+        // An already authorized queued run may have waited for an ancestor or its prerequisites.
+        if (['task_automation_start', 'task_automation_reconcile', 'task_ack', 'task_start',
+          'task_edit', 'task_report', 'task_resolve_condition', 'task_reopen'].includes(name)) this.automation.kick();
       }
     } catch (error) {
       if (error instanceof TaskError) {

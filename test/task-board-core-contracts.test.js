@@ -66,11 +66,11 @@ test('official MCP tools/list publishes all Task read selectors and a required v
   assert.equal(schema.additionalProperties, false);
   assert.deepEqual(schema.required, ['view']);
   assert.deepEqual(Object.keys(schema.properties).sort(), [
-    'cursor', 'assignee', 'include', 'limit', 'offset', 'orchestrator', 'parent_task_id', 'query',
-    'request_id', 'retro', 'revision', 'status', 'task_id', 'view',
+    'cursor', 'assignee', 'include', 'limit', 'offset', 'parent_assignee', 'parent_task_id', 'query',
+    'request_id', 'retro', 'revision', 'root', 'status', 'task_id', 'view', 'work_mode',
   ].sort());
   assert.deepEqual(schema.properties.view.enum, [
-    'list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'dependencies', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices', 'automation_log', 'operation',
+    'list', 'overview', 'execution', 'definition', 'changelog', 'activity', 'outcomes', 'dependencies', 'responsibility_events', 'ancestors', 'retro_handlings', 'subscriptions', 'dependency_notices', 'child_notices', 'assignee_notices', 'automation_log', 'operation',
   ]);
   assert.equal(schema.properties.task_id.type, 'string');
   assert.equal(schema.properties.task_id.format, 'uuid');
@@ -90,7 +90,10 @@ test('official MCP tools/call retains strict per-view requirements despite the p
   const { client, calls } = await fixture(t);
   const valid = [
     { view: 'list' },
-    { view: 'list', orchestrator: 'orchestrator', assignee: 'assignee', status: 'unfinished', query: 'word', limit: 50 },
+    { view: 'list', parent_assignee: 'parent', assignee: 'assignee', status: 'unfinished', query: 'word', limit: 50 },
+    { view: 'list', root: true, work_mode: 'undecided' },
+    { view: 'ancestors', task_id, limit: 50, cursor: 'opaque-cursor' },
+    { view: 'responsibility_events', task_id, limit: 10 },
     ...['overview', 'execution', 'definition'].map(view => ({ view, task_id })),
     { view: 'overview', task_id, include: ['context'] },
     { view: 'overview', task_id, include: ['activity', 'outcome', 'retro'] },
@@ -111,6 +114,8 @@ test('official MCP tools/call retains strict per-view requirements despite the p
   const invalid = [
     {}, { view: 'unknown' }, { view: 'list', task_id }, { view: 'list', revision: 1 },
     { view: 'list', limit: 51 }, { view: 'list', extra: true },
+    { view: 'list', orchestrator: 'historical-creator' }, { view: 'list', work_mode: 'autopilot' },
+    { view: 'ancestors', task_id, limit: 51 }, { view: 'responsibility_events', task_id, limit: 11 },
     { view: 'overview' }, { view: 'overview', task_id, limit: 1 },
     { view: 'overview', task_id, include: [] },
     { view: 'overview', task_id, include: ['outcome', 'outcome'] },
@@ -135,6 +140,42 @@ test('official MCP tools/call retains strict per-view requirements despite the p
     assert.equal(result.isError, true, JSON.stringify(input));
   }
   assert.equal(calls.length, valid.length, 'Invalid inputs never reach the tool handler');
+});
+
+test('responsibility mutation schemas publish explicit guarded actions without caller identity', async t => {
+  const { client } = await fixture(t);
+  const tools = new Map((await client.listTools()).tools.map(tool => [tool.name, tool.inputSchema]));
+  const base = { request_id: 'responsibility', task_id, write_context: 'context', revision: 1 };
+  const valid = {
+    task_claim: base,
+    task_start: { ...base, work_mode: 'execute' },
+    task_convert: { ...base, reason: 'Independent result needed', completed: 'Discovery result', remaining: 'Implement separately' },
+    task_attach: { ...base, parent_task_id: '5fe0d9dd-615b-4549-9d15-f116e307e505', parent_write_context: 'parent-context', reason: 'Authorized broader responsibility' },
+    task_resolve_condition: { ...base, dependency_id: 'b8e44fb7-c147-4c5b-9ac1-4b560ab597ba', evidence: 'Recorded user answer satisfies the exact condition' },
+    task_cancel_finalize: { ...base, summary: 'Children closed and remaining effects recorded' },
+  };
+  for (const [name, input] of Object.entries(valid)) {
+    assert.equal(tools.get(name).additionalProperties, false, name);
+    assert.notEqual((await client.callTool({ name, arguments: input })).isError, true, name);
+    for (const field of ['actor', 'orchestrator', 'work_mode_override']) {
+      assert.equal(schemas[name].safeParse({ ...input, [field]: 'forged' }).success, false, `${name}:${field}`);
+    }
+    for (const field of tools.get(name).required) {
+      const incomplete = { ...input };
+      delete incomplete[field];
+      assert.equal(schemas[name].safeParse(incomplete).success, false, `${name}:${field}`);
+    }
+  }
+  for (const work_mode of ['undecided', 'interactive', 'autopilot']) {
+    assert.equal(schemas.task_start.safeParse({ ...base, work_mode }).success, false);
+  }
+  assert.equal(schemas.task_convert.safeParse({ ...valid.task_convert, remaining: ' ' }).success, false);
+  assert.equal(schemas.task_resolve_condition.safeParse({ ...valid.task_resolve_condition, evidence: '' }).success, false);
+  for (const [name, input] of [
+    ['task_convert', { ...valid.task_convert, completed: '\u0000'.repeat(8000) }],
+    ['task_resolve_condition', { ...valid.task_resolve_condition, evidence: '\u0000'.repeat(4000) }],
+    ['task_cancel_finalize', { ...valid.task_cancel_finalize, summary: '\u0000'.repeat(8000) }],
+  ]) assert.equal(schemas[name].safeParse(input).success, false, 'Durable evidence must remain readable in bounded history');
 });
 
 test('official MCP publishes optional selections for both preparation entrypoints', async t => {

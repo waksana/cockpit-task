@@ -9,6 +9,7 @@ import { TaskStore } from '../src/task-board/store.js';
 import { TaskService } from '../src/task-board/service.js';
 import { groupAlive } from '../src/task-board/automation-runner.js';
 import { LOG_LIMIT } from '../src/task-board/automation-store.js';
+import { seedOrchestratingRoot, startResponsibility } from './helpers/service-responsibility-fixtures.js';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(predicate, message = 'Condition timed out') {
@@ -19,7 +20,7 @@ async function until(predicate, message = 'Condition timed out') {
   }
   assert.fail(message);
 }
-function fixture({ ready = true, platform } = {}) {
+function fixture({ ready = true, platform, actor = 'user' } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'task-automation-'));
   let store = new TaskStore(directory, { platform }), service;
   let request = 0;
@@ -34,10 +35,14 @@ function fixture({ ready = true, platform } = {}) {
     if (ready) service.automation.recover();
   };
   open();
-  const write = (name, input = {}) => service.execute(name, { actor: 'orchestrator', request_id: `auto-${++request}`, ...input });
+  const write = (name, input = {}) => service.execute(name, {
+    actor, request_id: `auto-${++request}`,
+    ...(name === 'task_subscribe' && (input.actor ?? actor) === 'user' ? { subscriber: 'orchestrator' } : {}),
+    ...input,
+  });
   const change = (name, id, input = {}) => write(name, {
     task_id: id, write_context: store.task(id).write_context,
-    ...(['task_automation_start', 'task_edit', 'task_ack', 'task_report', 'task_assign'].includes(name) ? { revision: store.task(id).revision } : {}),
+    ...(['task_automation_start', 'task_edit', 'task_ack', 'task_start', 'task_report', 'task_assign'].includes(name) ? { revision: store.task(id).revision } : {}),
     ...input,
   });
   const f = {
@@ -159,6 +164,51 @@ test('slow notification delivery cannot stall the execution queue or unrelated r
     release();
     await until(() => f.store.read({ view: 'subscriptions', task_id: first }).items[0].notification.status === 'accepted');
   } finally { release(); await f.close(); }
+});
+
+test('restoring ancestor conditions wakes authorized queued automation without another start', async () => {
+  const f = fixture({ ready: false, actor: 'orchestrator' });
+  try {
+    const parent = seedOrchestratingRoot(f.store).id;
+    await f.register('resume-condition', 'console.log("resumed once");');
+    const child = await f.create('resume-condition');
+    await f.start(child);
+    assert.equal((await f.change('task_edit', parent, {
+      blocked_by: [{ condition: 'Wait for the recorded release authorization' }], reason: 'Pause the synthetic responsibility',
+    })).error, null);
+    f.service.automation.recover();
+    assert.equal(f.store.automation.run(child).state, 'queued');
+    const condition = f.store.task(parent).blocked_by[0];
+    assert.equal((await f.change('task_resolve_condition', parent, {
+      revision: f.store.task(parent).revision, dependency_id: condition.dependency_id,
+      evidence: 'Synthetic user authorization recorded in the test',
+    })).error, null);
+    assert.equal((await f.finished(child)).automation.state, 'succeeded');
+    assert.equal(f.store.read({ view: 'outcomes', task_id: child }).items.length, 1);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
+
+test('completing an ancestor Task prerequisite wakes authorized queued automation', async () => {
+  const f = fixture({ ready: false, actor: 'orchestrator' });
+  try {
+    const parent = seedOrchestratingRoot(f.store).id;
+    const blocker = seedOrchestratingRoot(f.store, 'prerequisite-owner').id;
+    await f.register('resume-task', 'console.log("prerequisite resolved");');
+    const child = await f.create('resume-task');
+    await f.start(child);
+    assert.equal((await f.change('task_edit', parent, {
+      blocked_by: [{ task_id: blocker }], reason: 'Require the other synthetic responsibility',
+    })).error, null);
+    f.service.automation.recover();
+    assert.equal(f.store.automation.run(child).state, 'queued');
+    assert.equal((await f.change('task_report', blocker, {
+      actor: 'prerequisite-owner', status: 'done', outcome: { summary: 'Synthetic prerequisite delivered' }, retro: null,
+    })).error, null);
+    assert.equal((await f.finished(child)).automation.state, 'succeeded');
+    assert.equal(f.store.read({ view: 'outcomes', task_id: child }).items.length, 1);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
 });
 
 test('strict script catalog and parameters reject changes, unknown fields and mismatches without creating Tasks', async () => {
@@ -433,14 +483,20 @@ test('changing group membership cannot look absent while descendants fork and pa
   }
 });
 
-test('v2 migration preserves Agent outcomes and defaults while allowing null-Assignee service outcomes', async () => {
+test('reopening storage preserves reported Agent outcomes and defaults alongside null-Assignee service outcomes', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'automation-migration-'));
   let store;
   try {
     store = new TaskStore(directory);
     const task = store.executeLocal('task_create', { actor: 'orchestrator', request_id: 'old', title: 'Agent', description: 'Existing' });
-    store.db.prepare('INSERT INTO outcomes(id,task_id,revision,assignee,author,summary,refs,at) VALUES(?,?,?,?,?,?,?,?)')
-      .run('old-outcome', task.task_id, 1, 'assignee', 'assignee', 'Legacy result', '[]', new Date().toISOString());
+    store.executeLocal('task_claim', {
+      actor: 'assignee', request_id: 'claim-outcome', task_id: task.task_id, revision: 1, write_context: task.write_context,
+    });
+    const active = startResponsibility(store, task.task_id, 'assignee');
+    store.executeLocal('task_report', {
+      actor: 'assignee', request_id: 'reported-outcome', task_id: task.task_id, revision: 1,
+      write_context: active.write_context, status: 'done', outcome: { summary: 'Legacy result' }, retro: null,
+    });
     store.close();
     store = null;
     store = new TaskStore(directory);
@@ -448,7 +504,7 @@ test('v2 migration preserves Agent outcomes and defaults while allowing null-Ass
     assert.equal(store.task(task.task_id).automation, null);
     assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items[0].summary, 'Legacy result');
     assert.equal(store.read({ view: 'outcomes', task_id: task.task_id }).items[0].source, 'reported');
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 11);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 12);
     assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
   } finally {
     store?.close();
@@ -457,8 +513,9 @@ test('v2 migration preserves Agent outcomes and defaults while allowing null-Ass
 });
 
 test('automation respects blocked_by: start waits for readiness and a finished blocker sends the ready notice', async () => {
-  const f = fixture();
+  const f = fixture({ actor: 'orchestrator' });
   try {
+    seedOrchestratingRoot(f.store);
     await f.register('dependency', 'console.log("done");');
     const blocker = await f.create('dependency');
     const created = await f.write('task_create', {
@@ -471,8 +528,9 @@ test('automation respects blocked_by: start waits for readiness and a finished b
     assert.equal(f.store.automation.run(dependent).state, 'created');
     await f.start(blocker);
     assert.equal((await f.finished(blocker)).status, 'done');
-    await until(() => f.sent.length === 1);
-    assert.deepEqual(f.sent, [{ id: 'orchestrator', text: `[Subtask ready](task:${dependent}?event=ready)` }]);
+    const readyCards = () => f.sent.filter(entry => entry.text.includes('?event=ready)'));
+    await until(() => readyCards().length === 1);
+    assert.deepEqual(readyCards(), [{ id: 'orchestrator', text: `[Subtask ready](task:${dependent}?event=ready)` }]);
     const [notice] = f.store.read({ view: 'dependency_notices', task_id: dependent }).items;
     assert.equal(notice.event.source, 'automation');
     assert.equal(f.store.task(dependent).status, 'todo', 'ready never starts automation');
@@ -483,14 +541,9 @@ test('automation respects blocked_by: start waits for readiness and a finished b
 });
 
 test('automation children notify done while preserving succeeded and failed run facts', async () => {
-  const f = fixture();
+  const f = fixture({ actor: 'orchestrator' });
   try {
-    // Make 'orchestrator' execute an Agent Task so its automation Tasks become children.
-    const root = f.store.executeLocal('task_create', { actor: 'user', request_id: 'parent', title: 'Parent', description: 'Coordinate' }).task_id;
-    const assign = { actor: 'user', request_id: 'parent-assign', task_id: root, write_context: f.store.task(root).write_context, revision: 1, assignee: 'orchestrator' };
-    f.store.reserveOperation('task_assign', assign);
-    f.store.bindAssignment(assign);
-    f.store.executeLocal('task_ack', { actor: 'orchestrator', request_id: 'parent-ack', task_id: root, revision: 1, write_context: f.store.task(root).write_context });
+    const root = seedOrchestratingRoot(f.store).id;
     await f.register('ok', 'console.log("ok")');
     await f.register('bad', 'process.exit(3)');
     const cards = () => f.sent.filter(entry => entry.id === 'orchestrator').map(entry => entry.text);
@@ -537,7 +590,7 @@ test('automation blocker completion updates an assigned Agent dependent despite 
     })).result.task_id;
     assert.equal((await f.change('task_assign', dependent, { assignee: 'dependent-worker' })).error, null);
     assert.equal((await f.change('task_ack', dependent, { actor: 'dependent-worker' })).error, null);
-    assert.equal((await f.change('task_report', dependent, { actor: 'dependent-worker', status: 'in_progress' })).error, null);
+    assert.equal((await f.change('task_start', dependent, { actor: 'dependent-worker', work_mode: 'execute' })).error, null);
     f.sent.length = 0;
     const edited = await f.change('task_edit', dependent, {
       reason: 'Wait for automation blocker', blocked_by: [blocker],

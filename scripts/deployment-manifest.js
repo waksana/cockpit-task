@@ -31,7 +31,7 @@ export function moduleProduct(root) {
       requiresCapabilities: ['module-api.v1', 'serviceReady.v1', 'frontend-api.v2', 'ui.v1', 'uiSurface.v1', 'resourcePreparation.v1'],
       requiredIntents: [...new Set([...host.matchAll(/host\.call\('([^']+)'/g)].map(match => match[1]))].sort(),
       databases: [{ path: 'task-board.sqlite', schema: SCHEMA_VERSION, preserve }],
-      // Existing schema 11 needs no migration. Older schemas require separately reviewed plans.
+      // Schema 12 has no automatic upgrade path. Schema 11 requires an offline reviewed plan.
       migrations: [],
     };
   } finally {

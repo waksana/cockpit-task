@@ -26,6 +26,11 @@ export function verifyPackage(root, archive, sourceSha) {
   const build = JSON.parse(read('module-build.json'));
   const sourceManifest = JSON.parse(readFileSync(join(root, 'cockpit.module.json'), 'utf8'));
   const sourceMetadata = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  for (const path of ['scripts/migrate-task-v10.js', 'scripts/migrate-task-v11.js',
+    'scripts/migrate-task-v12.js', 'src/task-board/responsibility-migration.js',
+    'docs/task-responsibility-migration.md', 'docs/releases.md']) {
+    assert.equal(read(path), readFileSync(join(root, path), 'utf8'), `Reviewed migration source is missing or changed: ${path}`);
+  }
   assert.equal(sourceMetadata.version, '0.0.0-dev');
   assert.equal(sourceManifest.version, '0.0.0-dev');
   const deployment = process.env.ROLLING_SEQUENCE

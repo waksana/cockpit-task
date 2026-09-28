@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TaskStore } from '../src/task-board/store.js';
 import { TaskService } from '../src/task-board/service.js';
+import { seedOrchestratingRoot } from './helpers/service-responsibility-fixtures.js';
 
 function testService(store, host, options) {
   const service = new TaskService(store, host, options);
@@ -35,6 +36,7 @@ function fixture(host = {}) {
   return {
     directory, store, service, sent, reports, write,
     async create() {
+      seedOrchestratingRoot(store);
       const result = await write('task_create', { title: 'Synthetic Task', description: 'Complete the work' });
       assert.equal(result.error, null);
       return store.task(result.result.task_id);
@@ -58,7 +60,8 @@ test('Task service integrates assignment, ACK, revision reminders and partial re
     const bound = f.store.task(task.id);
     const ack = await f.write('task_ack', { task_id: task.id, revision: 1, write_context: bound.write_context }, 'assignee');
     assert.equal(ack.result.task_status, 'todo');
-    await f.write('task_report', { task_id: task.id, revision: 1, write_context: bound.write_context, status: 'in_progress' }, 'assignee');
+    const started = await f.write('task_start', { task_id: task.id, revision: 1, write_context: bound.write_context, work_mode: 'execute' }, 'assignee');
+    assert.equal(started.error, null);
     const current = f.store.task(task.id);
     await f.write('task_edit', { task_id: task.id, revision: 1, write_context: current.write_context, description: 'Updated complete work', reason: 'Clarified scope' });
     const report = {
@@ -215,7 +218,7 @@ test('business validation failures and unrelated reads still check the acting As
     });
     assert.equal(failure.error.code, 'INVALID_INPUT');
     assert.equal(failure.definition_check.tasks[0].needs_ack, true);
-    const list = await f.service.execute('task_read', { view: 'list', orchestrator: 'unrelated', actor: 'assignee' });
+    const list = await f.service.execute('task_read', { view: 'list', parent_assignee: 'unrelated', actor: 'assignee' });
     assert.equal(list.result.items.length, 0);
     assert.equal(list.definition_check.tasks[0].task_id, task.id);
   } finally { f.close(); }
@@ -244,17 +247,40 @@ test('module close drains admitted external calls, persists their outcome and re
   } finally { f.close(); }
 });
 
+test('creating a native session grants no authority over an unbound root', async () => {
+  const f = fixture();
+  try {
+    const session = await f.write('task_session_create', { cwd: '/synthetic' });
+    assert.equal(session.error, null);
+    const created = await f.write('task_create', { title: 'Ordinary root', description: 'Explicit binding is required.' });
+    assert.equal(created.error, null);
+    const input = {
+      task_id: created.result.task_id, revision: created.result.revision,
+      write_context: created.result.write_context, assignee: 'assignee',
+    };
+    const forbidden = await f.write('task_assign', input);
+    assert.equal(forbidden.error.code, 'PARENT_ASSIGNEE_REQUIRED');
+    assert.equal(f.store.task(input.task_id).assignee, null);
+    assert.equal(f.sent.length, 0);
+    const assigned = await f.write('task_assign', input, 'user');
+    assert.equal(assigned.error, null);
+    assert.equal(assigned.result.operation.message, 'accepted');
+    assert.equal(f.store.task(input.task_id).assignee, 'assignee');
+    assert.equal(f.sent.length, 1);
+  } finally { f.close(); }
+});
+
 test('Task storage is private and a newer schema is rejected rather than overwritten', () => {
   const f = fixture();
   try {
     assert.equal(statSync(join(f.directory, 'task-board.sqlite')).mode & 0o777, 0o600);
     f.service.close();
     const future = new DatabaseSync(join(f.directory, 'task-board.sqlite'));
-    future.exec('PRAGMA user_version=12');
+    future.exec('PRAGMA user_version=13');
     future.close();
     assert.throws(() => new TaskStore(f.directory), error => error.code === 'SCHEMA_TOO_NEW');
     const unchanged = new DatabaseSync(join(f.directory, 'task-board.sqlite'));
-    try { assert.equal(unchanged.prepare('PRAGMA user_version').get().user_version, 12); }
+    try { assert.equal(unchanged.prepare('PRAGMA user_version').get().user_version, 13); }
     finally { unchanged.close(); }
   } finally { f.close(); }
 });
@@ -268,7 +294,9 @@ test('subagent invocations attribute to the containing session and replay by ses
     const input = { request_id: 'subagent-create', title: 'Subagent Task', description: 'Record invocation' };
     const created = await service.execute('task_create', input, { invocation });
     assert.equal(created.error, null);
-    assert.equal(store.task(created.result.task_id).orchestrator, 'container');
+    assert.equal(store.task(created.result.task_id).created_by, 'container');
+    assert.equal(store.task(created.result.task_id).parent_assignee, null);
+    assert.equal(store.task(created.result.task_id).assignee, null);
     const replay = await service.execute('task_create', input, {
       invocation: { sessionId: 'container', runtimeSessionId: 'subagent-b', subagent: true, agentName: 'worker-b' },
     });

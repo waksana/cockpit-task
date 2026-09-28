@@ -15,7 +15,7 @@ export function createMcpRoutes({ execute, schemas, signal, report }) {
     name, description: toolDescriptions[name], inputSchema: z.toJSONSchema(schema, { target: 'draft-7' }),
     annotations: {
       readOnlyHint: ['task_read', 'task_script_read'].includes(name), destructiveHint: !['task_read', 'task_script_read'].includes(name),
-      idempotentHint: true, openWorldHint: ['task_assign', 'task_session_create', 'task_session_prepare', 'task_report', 'task_cancel', 'task_automation_start'].includes(name),
+      idempotentHint: true, openWorldHint: ['task_assign', 'task_claim', 'task_session_create', 'task_session_prepare', 'task_report', 'task_cancel', 'task_cancel_finalize', 'task_start', 'task_attach', 'task_resolve_condition', 'task_automation_start'].includes(name),
     },
   }));
   let stopped = false;

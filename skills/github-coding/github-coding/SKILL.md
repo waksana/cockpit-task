@@ -6,12 +6,12 @@ description: "Use when authorized work requires changing version-controlled repo
 # GitHub coding
 
 This is a work Skill, not a Task role or authority to change scope. Task guidance
-still governs assignment, current-definition reads/ACK, reporting and communication.
-Follow repository instructions for implementation methods and branch policy.
-Here, "main" means the repository's agreed target mainline, not a required branch name.
-Choose direct work, internal helpers or Task delegation with `cockpit-task-tree`.
+governs assignment, current-definition reads/ACK, reporting and communication.
+Follow repository instructions; "main" means its agreed mainline.
+Choose responsibility mode with `cockpit-task-tree`; both modes may use helpers.
 The implementing node is the assignee for delegated work, otherwise the current node;
-the same isolation, review and delivery rules apply.
+it implements in `execute`. `orchestrate` arranges children and integrates results,
+not sustained implementation. Same isolation, review and delivery rules apply.
 
 ## Agree on the result before creating work
 
@@ -42,6 +42,7 @@ this Skill's applicability are separate from the collaboration choice.
 
 When delegating, the orchestrator states what should change, which repositories are involved and
 the delivery boundary, and references an existing suitable Issue when there is one.
+Orchestrator means the parent assignee, not the creator.
 The orchestrator does not prepare or clean up branches or worktrees; setting up and releasing
 the work environment is the assignee's job. Do not take over assigned work, directly or
 through a helper, or invent repository changes just to create a deployment Task.
@@ -70,8 +71,7 @@ Tools default to the session cwd, so after creating your worktree direct every e
 build, test and Git command at worktree paths explicitly.
 
 New checkouts do not inherit untracked or ignored local environment files. Follow
-the project guide to prepare the environment needed for the current work; another
-worktree being runnable does not establish that this one is ready.
+the project guide to prepare this worktree; another runnable worktree does not prove readiness.
 
 Before editing repository files, reuse or create the Issue describing goal, scope and
 completion conditions, then create a dedicated branch and isolated worktree from
@@ -95,8 +95,8 @@ Safely fetch and normally merge current mainline into a retained branch as neede
 Independently review the complete follow-up and normally merge only within authorization. Source-only stays source-only: no release, install, deployment, restart or data migration is implied. Clean up again afterwards.
 
 Read the linked Issue and repository instructions and verify your own worktree before editing.
-For assigned work, read the latest Task and ACK the current agreement; do not assume inherited
-Skill context. Reuse this Skill while available and synchronize your Task at meaningful checkpoints.
+For Task work, read/ACK the agreement; `task_start` todo in execute before implementation.
+Do not assume inherited Skill context. Reuse this Skill; synchronize at meaningful checkpoints.
 
 Own implementation, relevant verification, independent read-only review and fixes.
 Give the reviewer the complete change and requirements, not just a desired verdict.

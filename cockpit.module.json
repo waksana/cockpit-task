@@ -22,7 +22,7 @@
     {
       "id": "node",
       "name": "Node",
-      "description": "Deliver your Task directly or through Subtasks you orchestrate; without a Task, stay available and delegate through Tasks.",
+      "description": "Carry one continuing Task responsibility: execute directly or orchestrate narrower children, with helpers in either mode.",
       "instructions": "roles/task-node.md",
       "skillDirectories": [
         "skills/cockpit-task-tree",
@@ -42,6 +42,12 @@
             "task_session_create",
             "task_session_prepare",
             "task_assign",
+            "task_claim",
+            "task_start",
+            "task_convert",
+            "task_attach",
+            "task_resolve_condition",
+            "task_cancel_finalize",
             "task_edit",
             "task_cancel",
             "task_subscribe",
