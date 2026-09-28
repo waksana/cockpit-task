@@ -163,6 +163,47 @@ test('automation remains unbound and mode-free with terminal barrier and uncerta
   assert.deepEqual({ ...row }, { assignee: null, acknowledged_revision: null, work_mode: null, legacy: 0 });
 });
 
+for (const [status, state] of [['todo', 'succeeded'], ['in_progress', 'created'], ['done', 'created'], ['cancelled', 'succeeded']]) {
+  test(`migration rejects contradictory automation facts ${status}/${state} without rewriting history`, t => {
+    const { db } = fixture(t);
+    const id = task(db, { kind: 'automation', status });
+    db.prepare("INSERT INTO automation_runs(run_id,task_id,script_id,script,parameters,state) VALUES(?,?,'fixture','{}','{}',?)")
+      .run(randomUUID(), id, state);
+    refuses(db, plan(db));
+  });
+}
+
+for (const [status, state] of [['todo', 'created'], ['done', 'succeeded'], ['done', 'failed'], ['done', 'interrupted'], ['cancelled', 'cancelled']]) {
+  test(`migration preserves valid automation facts ${status}/${state}`, t => {
+    const { db } = fixture(t);
+    const id = task(db, { kind: 'automation', status });
+    db.prepare("INSERT INTO automation_runs(run_id,task_id,script_id,script,parameters,state,barrier) VALUES(?,?,'fixture','{}','{}',?,?)")
+      .run(randomUUID(), id, state, Number(['interrupted', 'cancelled'].includes(state)));
+    const before = readAll(db, 'automation_runs');
+    applyResponsibilityMigration(db, plan(db));
+    assert.deepEqual(readAll(db, 'automation_runs'), before);
+  });
+}
+
+for (const readiness of [false, true]) {
+  test(`migration rejects mixed ${readiness ? 'ancestor readiness' : 'child completion'} wait cycles`, t => {
+    const { db } = fixture(t);
+    const p = task(db, { status: 'in_progress', assignee: 'p' });
+    const c = task(db, { status: readiness ? 'todo' : 'in_progress', parent: p, depth: 2, assignee: 'c' });
+    const q = task(db, { status: 'in_progress', assignee: 'q' });
+    const modes = { [p]: 'orchestrate', [q]: 'orchestrate' };
+    const add = (id, blocker) => db.prepare(`INSERT INTO task_dependencies(id,task_id,kind,blocker_id,author,at)
+      VALUES(?,?,'task',?,'reviewed-author',?)`).run(randomUUID(), id, blocker, at);
+    if (readiness) {
+      const d = task(db, { status: 'todo', parent: q, depth: 2, assignee: 'd' });
+      add(p, d); add(q, c);
+    } else {
+      add(c, q); add(q, p);
+    }
+    refuses(db, plan(db, modes));
+  });
+}
+
 test('dependency resolution history and rebuilt-table sequence high-water marks survive exactly', t => {
   const { db } = fixture(t);
   const id = task(db);

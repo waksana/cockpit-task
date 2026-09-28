@@ -210,6 +210,12 @@ Missing/extra/unknown decisions, unsupported source structure, cycles, invalid
 bindings/depths, invalid parent modes, unfinished children under terminal parents,
 conflicting assignees and invalid prerequisites fail closed. The tool does not
 repair them or manufacture responsibility. Review is bounded to 10,000 Tasks.
+Prerequisite validation includes child-completion waits and ancestor readiness
+needed by unstarted descendants, not just explicit dependency cycles.
+Automation Task status must agree with its run state: unstarted `todo/created`,
+finished `done/succeeded|failed|interrupted`, or final `cancelled/cancelled`.
+Contradictory pairs are rejected rather than reclassified; in-flight states are
+rejected separately below, and legitimate terminal barriers remain preserved.
 
 Pending operations/notices and queued/starting/running automation prevent apply.
 Resolve their actual facts separately using authorized procedures; there is no

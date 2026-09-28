@@ -252,6 +252,51 @@ test('parent prerequisites cannot strand an unstarted descendant behind parent r
   f.finish(root, 'parent');
 });
 
+test('downstream prerequisite edits reject mixed containment waits and roll back the whole edit', t => {
+  const f = fixture(t), parent = f.root('parent'), child = f.child('parent', 'child'), external = f.root('external');
+  f.call('task_edit', 'child', { ...f.context(child), reason: 'Need outside delivery', blocked_by: [external] });
+  const before = f.context(external), history = f.store.read({ view: 'dependencies', task_id: external });
+  assert.throws(() => f.call('task_edit', 'external', {
+    ...before, reason: 'Would depend on our own dependent through its parent', blocked_by: [parent],
+  }), { code: 'DEPENDENCY_CYCLE' });
+  assert.deepEqual(f.context(external), before);
+  assert.deepEqual(f.store.read({ view: 'dependencies', task_id: external }), history);
+  f.finish(external, 'external');
+  f.finish(child, 'child');
+  f.finish(parent, 'parent');
+});
+
+test('attachment rejects mixed waits through a prerequisite child without changing any subtree facts', t => {
+  const f = fixture(t), root = f.root('root'), external = f.root('external');
+  const child = f.child('external', 'child'), parent = f.root('parent');
+  f.call('task_edit', 'root', { ...f.context(root), reason: 'Outside delivery', blocked_by: [external] });
+  f.call('task_edit', 'child', { ...f.context(child), reason: 'Parent delivery', blocked_by: [parent] });
+  const before = f.context(root), parentBefore = f.context(parent);
+  assert.throws(() => f.call('task_attach', 'parent', {
+    ...before, parent_task_id: parent, parent_write_context: parentBefore.write_context, reason: 'Would close a mixed wait cycle',
+  }), { code: 'DEPENDENCY_CYCLE' });
+  assert.deepEqual(f.context(root), before);
+  assert.deepEqual(f.context(parent), parentBefore);
+  assert.equal(f.store.task(root).parent_task_id, null);
+});
+
+test('ancestor readiness cannot form a cycle between unstarted children in separate branches', t => {
+  const f = fixture(t), p = f.root('p'), q = f.root('q');
+  const c = f.create('p'), d = f.create('q');
+  f.assign(c, 'p', 'c'); f.assign(d, 'q', 'd');
+  f.call('task_ack', 'c', f.context(c)); f.call('task_ack', 'd', f.context(d));
+  f.call('task_edit', 'p', { ...f.context(p), reason: 'Need other child', blocked_by: [d] });
+  const before = f.context(q);
+  assert.throws(() => f.call('task_edit', 'q', {
+    ...before, reason: 'Would prevent both children starting', blocked_by: [c],
+  }), { code: 'DEPENDENCY_CYCLE' });
+  assert.deepEqual(f.context(q), before);
+  f.call('task_start', 'd', { ...f.context(d), work_mode: 'execute' });
+  f.finish(d, 'd');
+  f.call('task_start', 'c', { ...f.context(c), work_mode: 'execute' });
+  f.finish(c, 'c');
+});
+
 test('notice delivery revalidates snapshot recipients after awaited host inspection and never reroutes', async t => {
   const f = fixture(t), root = f.root('parent'), child = f.child('parent', 'child');
   const result = f.finish(child, 'child'), notice = result.notice_ids[0], sent = [];

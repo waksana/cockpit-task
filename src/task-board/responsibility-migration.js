@@ -3,6 +3,7 @@ import { lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { TaskError } from './contracts.js';
+import { assertResponsibilityWaits } from './responsibility-graph.js';
 
 const SOURCE_SCHEMA = 11;
 const TARGET_SCHEMA = 12;
@@ -180,6 +181,17 @@ function validateStructure(inventory, decisions) {
     if (row.automation && !['created', 'queued', 'starting', 'running', 'succeeded', 'failed', 'interrupted', 'cancelled'].includes(row.automation.state)) {
       reject(`Automation ${row.id} has unknown execution facts`);
     }
+    if (row.automation) {
+      const allowed = {
+        todo: ['created', 'queued'],
+        in_progress: ['starting', 'running'],
+        done: ['succeeded', 'failed', 'interrupted'],
+        cancelled: ['starting', 'running', 'cancelled'],
+      };
+      if (!allowed[row.status].includes(row.automation.state)) {
+        reject(`Automation ${row.id} has contradictory Task lifecycle and run state`);
+      }
+    }
     if (row.assignee && !terminal(row.status)) {
       if (occupied.has(row.assignee)) reject(`Session ${row.assignee} holds multiple unfinished Tasks`);
       occupied.add(row.assignee);
@@ -219,20 +231,14 @@ function validateStructure(inventory, decisions) {
       }
     }
   }
-  // Check active prerequisite cycles without recursive JS calls.
-  const edges = new Map([...tasks].map(([id, row]) => [id,
-    row.dependencies.filter(item => item.resolved_at === null && item.kind === 'task').map(item => item.blocker_id)]));
-  const visiting = new Set(), complete = new Set();
-  for (const id of tasks.keys()) {
-    const stack = [[id, false]];
-    while (stack.length) {
-      const [node, exit] = stack.pop();
-      if (exit) { visiting.delete(node); complete.add(node); continue; }
-      if (complete.has(node)) continue;
-      if (visiting.has(node)) reject('Active prerequisite cycle');
-      visiting.add(node);
-      stack.push([node, true], ...edges.get(node).map(next => [next, false]));
-    }
+  try {
+    assertResponsibilityWaits([...tasks.values()].map(row => ({
+      id: row.id, status: row.status, parent_task_id: row.parent_task_id,
+      blockers: row.dependencies.filter(item => item.resolved_at === null && item.kind === 'task').map(item => item.blocker_id),
+    })));
+  } catch (error) {
+    if (!(error instanceof TaskError) || !['DEPENDENCY_CYCLE', 'TREE_RESOURCE_LIMIT'].includes(error.code)) throw error;
+    reject(error.message);
   }
 }
 

@@ -5,16 +5,29 @@ import { TaskStore } from '../src/task-board/store.js';
 import { inspectLifecycleMigration, validateLifecyclePlan } from '../src/task-board/lifecycle-migration.js';
 
 const args = process.argv.slice(2);
-const inventoryOnly = args.length === 2 || (args.length === 3 && args[2] === '--inventory');
-const reviewed = args.length === 5 && args[2] === '--plan' && args[3] && ['--preflight', '--apply'].includes(args[4]);
-if (args[0] !== '--data-root' || !args[1] || (!inventoryOnly && !reviewed)) {
-  throw new Error('Usage: migrate-task-v10.js --data-root <existing-directory> [--inventory | --plan <reviewed.json> --preflight|--apply]');
+const usage = 'Usage: migrate-task-v10.js --data-root <existing-directory> [--inventory | --plan <reviewed.json> --preflight|--apply]';
+const options = new Map();
+const valueFlags = new Set(['--data-root', '--plan']);
+const actionFlags = new Set(['--inventory', '--preflight', '--apply']);
+for (let index = 0; index < args.length; index++) {
+  const flag = args[index];
+  if ((!valueFlags.has(flag) && !actionFlags.has(flag)) || options.has(flag)) throw new Error(usage);
+  if (valueFlags.has(flag)) {
+    const value = args[++index];
+    if (!value || value.startsWith('--')) throw new Error(usage);
+    options.set(flag, value);
+  } else {
+    options.set(flag, true);
+  }
 }
-const dataRoot = resolve(args[1]), file = join(dataRoot, 'task-board.sqlite');
+const apply = options.has('--apply'), preflight = options.has('--preflight');
+const reviewed = apply || preflight;
+if (!options.has('--data-root') || [...actionFlags].filter(flag => options.has(flag)).length > 1
+  || options.has('--plan') !== reviewed) throw new Error(usage);
+const dataRoot = resolve(options.get('--data-root')), file = join(dataRoot, 'task-board.sqlite');
 const stat = lstatSync(file);
 if (!stat.isFile() || stat.nlink !== 1) throw new Error('Expected an existing regular, unlinked Task database');
-const apply = args[4] === '--apply', preflight = args[4] === '--preflight';
-const plan = reviewed ? JSON.parse(readFileSync(resolve(args[3]), 'utf8')) : undefined;
+const plan = reviewed ? JSON.parse(readFileSync(resolve(options.get('--plan')), 'utf8')) : undefined;
 const inventory = inspectLifecycleMigration(dataRoot, { plan });
 
 function checkSource(db) {

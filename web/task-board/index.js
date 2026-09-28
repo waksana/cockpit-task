@@ -670,8 +670,9 @@ export function activate(context) {
     const [pending, setPending] = useState(false);
     const requestId = useRef(null);
     const submitted = useRef(false);
-    const openedContext = useRef(task.write_context);
-    const staleDraft = openedContext.current !== task.write_context;
+    const openedTask = useRef({ id: task.id, revision: task.revision, write_context: task.write_context });
+    const staleDraft = openedTask.current.id !== task.id || openedTask.current.revision !== task.revision ||
+      openedTask.current.write_context !== task.write_context;
     const unavailable = action === 'task_create' ? null : webActionUnavailable(task, action);
     const disabled = !current || staleDraft || Boolean(unavailable) || pending || submitted.current;
     return h('form', { className: 'tb-form', 'aria-label': label, 'aria-busy': pending, onSubmit: async event => {

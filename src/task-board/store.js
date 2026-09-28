@@ -8,6 +8,7 @@ import { groupAlive } from './automation-runner.js';
 import { migrateOperationScopes, operationActor } from './operation-scopes.js';
 import { ReadVersions } from './read-versions.js';
 import { initializeResponsibilitySchema, applyResponsibilityMigration } from './responsibility-migration.js';
+import { assertResponsibilityWaits } from './responsibility-graph.js';
 
 export { TaskError } from './contracts.js';
 export { inspectLifecycleMigration } from './lifecycle-migration.js';
@@ -603,6 +604,30 @@ export class TaskStore {
         entry.task_id ? `${entry.task_id}: ${entry.status}` : entry.condition).join('; ')}); dispatch after every blocker is satisfied or explicitly resolved`);
     }
   }
+  assertResponsibilityWaits(taskId) {
+    // Include existing dependents as well as prerequisites: a changed downstream
+    // requirement can close a wait cycle in another branch of the tree.
+    const tasks = this.db.prepare(`WITH RECURSIVE connected(id) AS (
+      SELECT ?
+      UNION SELECT p.id FROM tasks t JOIN connected c ON t.id=c.id JOIN tasks p ON p.id=t.parent_task_id
+        WHERE p.status NOT IN ('done','cancelled')
+      UNION SELECT t.id FROM tasks t JOIN connected c ON t.parent_task_id=c.id
+        WHERE t.status NOT IN ('done','cancelled')
+      UNION SELECT t.id FROM task_dependencies d JOIN connected c ON d.task_id=c.id
+        JOIN tasks t ON t.id=d.blocker_id
+        WHERE d.kind='task' AND d.resolved_at IS NULL AND t.status NOT IN ('done','cancelled')
+      UNION SELECT t.id FROM task_dependencies d JOIN connected c ON d.blocker_id=c.id
+        JOIN tasks t ON t.id=d.task_id
+        WHERE d.kind='task' AND d.resolved_at IS NULL AND t.status NOT IN ('done','cancelled')
+      LIMIT ?
+    ) SELECT t.id,t.status,t.parent_task_id FROM tasks t JOIN connected c ON t.id=c.id`)
+      .all(taskId, LIMITS.treeNodes + 1);
+    if (tasks.length > LIMITS.treeNodes) fail('TREE_RESOURCE_LIMIT', 'Effective responsibility graph exceeds the structural operation limit');
+    const blockers = this.db.prepare("SELECT blocker_id FROM task_dependencies WHERE task_id=? AND kind='task' AND resolved_at IS NULL");
+    assertResponsibilityWaits(tasks.map(task => ({
+      ...task, blockers: blockers.all(task.id).map(entry => entry.blocker_id),
+    })));
+  }
   setBlockers(row, requested, author, at) {
     const normalized = requested.map(value => typeof value === 'string'
       ? { kind: 'task', task_id: value.toLowerCase(), key: `task:${value.toLowerCase()}` }
@@ -666,6 +691,7 @@ export class TaskStore {
     if (reachable.some(entry => entry.id === row.id)) fail('DEPENDENCY_CYCLE', 'blocked_by would create a dependency cycle');
     const ancestors = new Set(this.lineage(row).map(ancestor => ancestor.id));
     if (reachable.some(entry => ancestors.has(entry.id))) fail('BLOCKER_ANCESTOR', 'A prerequisite transitively waits on an ancestor responsibility');
+    this.assertResponsibilityWaits(row.id);
     return true;
   }
   summary(row) {
@@ -954,6 +980,7 @@ export class TaskStore {
     const update = this.db.prepare('UPDATE tasks SET depth=depth+?,lifecycle=lifecycle+1,editable=editable+1,updated_at=? WHERE id=?');
     for (const child of tree) update.run(offset, at, child.id);
     this.db.prepare('UPDATE tasks SET lifecycle=lifecycle+1,editable=editable+1,updated_at=? WHERE id=?').run(at, parent.id);
+    this.assertResponsibilityWaits(row.id);
     this.recordResponsibility(row.id, 'attached', input, { parent_task_id: parent.id, reason: input.reason, subtree_count: tree.length }, at);
     return { result: { ...this.effects(this.row(row.id)), parent_write_context: this.context(this.row(parent.id)), subtree_count: tree.length } };
   }
@@ -1051,6 +1078,7 @@ export class TaskStore {
     // This runs under the same write transaction as assignment and its ordering record.
     this.db.prepare("UPDATE tasks SET status='in_progress',description=?,revision=revision+1,lifecycle=lifecycle+1,updated_at=? WHERE id=?")
       .run(input.description, at, row.id);
+    this.assertResponsibilityWaits(row.id);
     const current = this.row(row.id);
     this.recordDefinition(current, input.reason, input.actor, at);
     this.recordResponsibility(row.id, 'reopened', input, { reason: input.reason, revision: current.revision, work_mode: current.work_mode }, at);

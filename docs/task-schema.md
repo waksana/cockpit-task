@@ -109,7 +109,10 @@ description 真正变化时保存完整 changelog。own assignee 在 unfinished 
 不能把旧工作重标新版。当前 outcome 仅指 revision 对应，不是完整交付证明。
 
 Task-ID 前置只等待一个 execution 的 done，不判断 success；cancelled 不满足。
-引用自身、祖先、成环、缺失或新加 cancelled blocker 都拒绝。
+引用自身、祖先、未完后代、成环、缺失或新加 cancelled blocker 都拒绝。
+防环同时计算显式前置、父等待子终态，以及 todo 后代开始前所需的祖先 readiness，
+并覆盖受修改影响的既有 dependent；不只从新增 blocker 单向查找。编辑、挂接和迁移
+共用有界校验。已开始 child 的收口不重新要求祖先 ready。
 文字条件写具体缺少什么及满足标准。active condition 读回含 dependency_id；
 own assignee、parent assignee 或 Web user 可 `task_resolve_condition` 对精确条件
 提交 evidence 和 references，持久保存在 dependency history。

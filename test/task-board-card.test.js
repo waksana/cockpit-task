@@ -2165,6 +2165,51 @@ test('open Web drafts cannot silently adopt a newer write context and overwrite 
   }
 });
 
+test('open Web drafts reject description-only revision changes even when write context stays identical', async () => {
+  const oldDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  try {
+    const { f, harness } = await mountActions(rootTask);
+    try {
+      button(harness.render(), 'Edit current definition and requirements').props.onClick();
+      let tree = harness.render();
+      field(tree, 'description').props.onChange({ target: { value: 'Draft based on the original definition' } });
+      tree = harness.render();
+      const dialog = elements(tree).find(node => node.type === 'dialog');
+      button(dialog, 'Refresh Task').props.onClick();
+      for (const request of f.requests.slice(2)) {
+        const query = JSON.parse(request.init.body);
+        request.resolve(response({ ...rootTask, revision: rootTask.revision + 1, write_context: rootTask.write_context,
+          ...(query.view === 'execution' ? {
+            description: 'Newer description saved by another author', references: [], metadata: {},
+          } : {}) }));
+      }
+      await settle();
+      tree = harness.render();
+      assert.equal(field(tree, 'description').props.value, 'Draft based on the original definition');
+      const warning = elements(tree).find(node => node.props.role === 'alert' &&
+        textContent(node).includes('Task facts changed while this form was open'));
+      assert.ok(warning, 'revision-only changes must show the stale-draft warning');
+      assert.match(textContent(warning), /close and reopen this action before submitting/);
+      assert.equal(elements(tree).find(node => node.type === 'button' && node.props.type === 'submit').props.disabled, true);
+      const count = f.requests.length;
+      await elements(tree).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+      assert.equal(f.requests.length, count, 'stale draft must not submit using the refreshed revision');
+      assert.ok(f.requests.every(request => request.path === '/read'));
+      button(tree, 'Edit current definition and requirements').props.onClick();
+      tree = harness.render();
+      button(tree, 'Edit current definition and requirements').props.onClick();
+      tree = harness.render();
+      assert.equal(field(tree, 'description').props.value, 'Newer description saved by another author');
+      assert.equal(elements(tree).find(node => node.type === 'button' && node.props.type === 'submit').props.disabled, false);
+      assert.equal(f.requests.length, count, 'reopening the form does not write automatically');
+    } finally { harness.stop(); f.controller.abort(); }
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document;
+    else globalThis.document = oldDocument;
+  }
+});
+
 test('mounted reopen and automation actions use their exact public schemas without Agent start or mode mutation', async () => {
   const oldDocument = globalThis.document;
   globalThis.document = { body: {} };
