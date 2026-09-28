@@ -88,7 +88,7 @@ test('preparation rejects busy, unloaded and unapplied roles without native muta
   }
 });
 
-test('unfinished Task excludes preparation even when idle; completed Assignee can be prepared', async t => {
+for (const terminal of ['done', 'cancelled']) test(`${terminal} releases occupancy without erasing history or inheriting mode; native idle remains required`, async t => {
   const f = fixture(t);
   seedOrchestratingRoot(f.store);
   const created = await f.write('task_create', { title: 'Synthetic', description: 'Complete one result' });
@@ -100,13 +100,56 @@ test('unfinished Task excludes preparation even when idle; completed Assignee ca
   assert.equal(f.calls.length, before, 'Reject responsibility conflict before host observation or mutation');
   const context = f.store.task(taskId).write_context;
   await f.write('task_ack', { task_id: taskId, revision: 1, write_context: context, actor: 'assignee' });
-  const started = await f.write('task_start', { task_id: taskId, revision: 1, write_context: context, actor: 'assignee', work_mode: 'execute' });
+  const started = await f.write('task_start', { task_id: taskId, revision: 1, write_context: context, actor: 'assignee', work_mode: 'orchestrate' });
   assert.equal(started.error, null);
-  await f.write('task_report', {
+  assert.equal(f.store.currentAssignment('assignee').id, taskId);
+  const current = () => ({
     task_id: taskId, revision: 1, write_context: f.store.task(taskId).write_context, actor: 'assignee',
-    status: 'done', outcome: { summary: 'Synthetic complete result' }, retro: null,
   });
+  if (terminal === 'done') {
+    assert.equal((await f.write('task_report', {
+      ...current(), status: 'done', outcome: { summary: 'Synthetic complete result' }, retro: null,
+    })).error, null);
+  } else {
+    const { revision, ...cancellation } = current();
+    assert.equal((await f.write('task_cancel', { ...cancellation, reason: 'User abandoned this synthetic goal' })).error, null);
+    assert.equal(f.store.currentAssignment('assignee').id, taskId, 'Intent alone does not release occupancy');
+    assert.equal((await f.write('task_cancel_finalize', { ...current(), summary: 'No residual work or effects' })).error, null);
+  }
+  const history = f.store.read({ view: 'execution', task_id: taskId });
+  const assignment = f.store.db.prepare('SELECT * FROM task_assignments WHERE task_id=?').get(taskId);
+  assert.equal(history.status, terminal);
+  assert.equal(history.assignee, 'assignee');
+  assert.equal(history.work_mode, 'orchestrate');
+  assert.equal(f.store.currentAssignment('assignee'), null);
+  assert.deepEqual(f.store.read({ view: 'list', assignee: 'assignee' }).items, []);
+  assert.equal(terminal === 'done' ? history.outcome.summary : history.cancellation.summary,
+    terminal === 'done' ? 'Synthetic complete result' : 'No residual work or effects');
+  const next = await f.write('task_create', { title: 'Independent new goal', description: 'Deliver a different result' });
+  const nextId = next.result.task_id;
+  const dispatch = () => ({
+    task_id: nextId, revision: 1, write_context: f.store.task(nextId).write_context, assignee: 'assignee',
+  });
+  const inspect = f.host.inspect;
+  f.host.inspect = async () => ({ ready: true, idle: false, node: true });
+  assert.equal((await f.write('task_session_prepare', { session_id: 'assignee' })).error.code, 'SESSION_NOT_READY');
+  assert.equal((await f.write('task_assign', dispatch())).error.code, 'SESSION_NOT_READY');
+  assert.equal(f.store.task(nextId).assignee, null);
+  f.host.inspect = inspect;
   assert.equal((await f.write('task_session_prepare', { session_id: 'assignee' })).error, null);
+  assert.equal((await f.write('task_assign', dispatch())).error, null);
+  assert.equal(f.store.task(nextId).work_mode, 'undecided');
+  assert.equal(f.store.task(nextId).status, 'todo');
+  const nextInput = () => ({
+    task_id: nextId, revision: 1, write_context: f.store.task(nextId).write_context, actor: 'assignee',
+  });
+  assert.equal((await f.write('task_ack', nextInput())).error, null);
+  assert.equal((await f.write('task_start', { ...nextInput(), work_mode: 'execute' })).error, null);
+  assert.equal(f.store.task(nextId).work_mode, 'execute');
+  assert.equal(f.store.currentAssignment('assignee').id, nextId);
+  assert.deepEqual(f.store.read({ view: 'execution', task_id: taskId }), history);
+  assert.deepEqual(f.store.db.prepare('SELECT * FROM task_assignments WHERE task_id=?').get(taskId), assignment);
+  assert.equal(f.store.read({ view: 'list', assignee: 'assignee', status: 'all' }).items.length, 2);
 });
 
 test('native partial effects and creation ID survive readiness failures and replay', async t => {

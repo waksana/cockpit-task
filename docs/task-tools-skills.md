@@ -8,6 +8,11 @@ Node 是短责任模型和加载入口；Task Skill 指导判断；工具 schema
 
 ## 1. 关系定位与初始化
 
+Choose responsibility first: continue unfinished work, create for a new independent goal,
+or reopen authorized rework of the same delivered result. A familiar session or retained
+workspace does not choose the Task. `cockpit-task-tree` owns this judgment; `github-coding`
+then governs Issue/workspace reuse and repository delivery, not responsibility identity.
+
 `assignee` 是 Task 唯一直接绑定。`parent_assignee` 从 parent 绑定派生；
 `created_by` 是历史而非控制者。没有 parent 的 root 仍是普通 Task，
 没有树外 owner 或 root 专用模式。读取返回 `actor_role`；工具全集可见不代表每个操作都允许。
@@ -19,12 +24,15 @@ Node 是短责任模型和加载入口；Task Skill 指导判断；工具 schema
 claim 可承接 blocked root 以澄清；Node 能力就绪不是 Task ready。
 读取完整 execution、ACK 当前 revision 后，以 `task_start` 原子选择方式并进入 in_progress。
 todo 只澄清与轻发现；不能直接 done 或以 report 开工。
+Each new Task chooses mode independently of the session's prior work. Done/cancelled
+releases current occupancy, not assignee/assignment/outcome history. Reuse a suitable
+session only after rechecking ready/idle/no unfinished Task; Task done is not native idle.
 
 ## 2. 两种履责方式，都可用 helper
 
 | 方式 | 实际工作 |
 | --- | --- |
-| execute | 直接研究、实现、审阅并交付 |
+| execute | 直接讨论、研究、设计、实现、审阅并交付 |
 | orchestrate | 拆分更具体责任、接口/依赖安排、处理阻塞、必要判断与结果整合 |
 
 两种方式均可用内部 helper；调用者整合结果，helper 不取得独立责任。
@@ -33,6 +41,11 @@ to the main agent for every Task write, including activity; no helper maintenanc
 or write replay. Independent child-Task main agents retain their own authority.
 是否创建 child 取决于独立持续交付责任，不是工具名或调用次数；
 独立 review 不强制新 Task/session，不以 Task 数量或新 session 为目标。
+Use execute for a bounded end-to-end result; routine implementation/review/release stages
+do not justify pass-through layers. Delegate independent sustained discussions promptly,
+but short questions need no Task and discussion does not authorize implementation.
+Orchestrate retains real scope/interface/dependency/trade-off/integration responsibility;
+zero children is valid and complex recursion remains possible.
 orchestrator 可为协调判断轻调研，但持续实施/深度专项调查交给 child。
 执行中需要独立分解，先 `task_convert` 记录原因、已完成/剩余责任，再创建更具体 child，
 保留原 Task 和 assignee，不原样转包，不降级或同步 native interaction mode。
@@ -64,7 +77,7 @@ child 全终态后 `task_cancel_finalize`。绑定者 finalize，未绑定者由
 自己的意图仍禁止自己的 done，自己的当前 ACK、ready、成果与子终态要求不变。
 长期 root 可空闲，不自动结束或找新活。
 
-用户授权返工时 `task_reopen` 保留原 session 与方式，遵守原指派序号、未有后续指派、
+同一已完成交付的授权返工才用 `task_reopen`，保留原 session 与方式，遵守原指派序号、未有后续指派、
 无其他未结束责任及就绪条件。祖先先合法恢复；cancelled/不合格祖先不能自动替换。
 旧结果变历史，不恢复订阅、旧 blocker 或旧 ACK 的效力；未知 legacy mode 拒绝 reopen，
 没有 schema12 后的 mode-repair API。历史 mode 选择仅限审阅的 11→12 迁移，不补造 start。

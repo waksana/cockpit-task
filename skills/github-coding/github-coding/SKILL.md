@@ -15,28 +15,28 @@ not sustained implementation. Same isolation, review and delivery rules apply.
 
 ## Agree on the result before creating work
 
-Apply this Skill to changes intended for commit to version-controlled repository
-files, not mentions of GitHub, main, Releases or deployment. Installing existing
-verified artifacts, configuring the runtime and safely restarting do not require
-an Issue, PR, branch or worktree under this Skill. Existing project policies
-and reliability requirements, including immutable installation directories, still apply.
-Runtime configuration is distinct from repository changes: version bumps, build
-configuration, code and repository documentation intended for commit follow this flow.
-Keep an agreed mixed result together; when delegated, use one Task. Issue/PR scope covers
-only necessary repository changes, not an extra umbrella deployment Issue or stage Tasks.
+Apply to changes intended for commit, not mentions of GitHub, main or Releases.
+Installing verified artifacts, runtime configuration and restart need no Issue/PR/worktree
+under this Skill; project policies, including immutable installation directories, still apply.
+Version bumps, build configuration, code and repository documentation follow this flow.
+Keep an agreed mixed result in one Task; Issue/PR scope covers necessary repository changes,
+not an umbrella deployment Issue or stage Tasks.
 
-Distinguish discussion, investigation and authorized implementation. Questions and
-idea exploration do not require an Issue, Task or worktree. For coding delivery,
+Distinguish discussion, investigation and authorized implementation. Short questions
+need no Issue, Task or worktree; independent sustained discussion/research may be a Task
+under `cockpit-task-tree`, without authorizing coding. For coding delivery,
 confirm the repository, intended result and completion boundary. A full delivery
 normally includes merge; investigation-only, patch-only or PR-only authorization
 stops at that boundary. Ask about real ambiguity, not a second start command.
 
-Use an existing suitable Issue or work environment rather than duplicating it.
+Choose responsibility before environment: continue unfinished work, create for a new
+independent goal, reopen only same-delivery rework. A suitable session can take a new Task
+with a new mode after prior work ends. Familiarity, Issue and worktree do not justify reopen.
+Reuse a suitable Issue; verify workspace ownership and base for this result below.
 For Git repositories not hosted on GitHub, keep the isolation, delivery and cleanup
 principles, skipping inapplicable Issue/PR steps. Non-coding work is unaffected.
 Release/tag creation, installation, deployment, restart and data migration are not
-default coding stages and require separate authorization. That authorization and
-this Skill's applicability are separate from the collaboration choice.
+default coding stages and require separate authorization.
 
 ## For Task delegation: state the result
 
@@ -89,10 +89,16 @@ Unrelated work stays outside this agreement; do not make drive-by changes.
 
 ## Implementing node: deliver through the authorized boundary
 
-When your done Task is reopened with explicit authorization (by you or its orchestrator), default to reusing the retained worktree and branch when they still exist, even after its previous PR merged. Verify actual path, repository/project, branch, retained work and ownership/no conflicting worker; metadata is not ownership proof, and unrelated transcripts must not be scanned.
+Only after selecting authorized same-delivery rework and legally reopening the done Task,
+default to reusing the retained worktree and branch when they still exist, even after its
+previous PR merged. Reusing a session for a new goal instead follows the new-work setup above.
+Verify path, repository/project, branch, retained work and ownership/no conflicting worker;
+metadata is not ownership proof, and unrelated transcripts must not be scanned.
 If your worktree was already removed after merge, create a fresh branch and worktree from freshly fetched mainline as above. Repurposed or conflicting worktrees require explicit resolution with the user, never taking over or switching another worker's checkout. Reopen itself creates no workspace. Preserve the same eligible Task and responsibility, without replacement, redispatch, self-prompt, orchestrator messages or subscription renewal.
-Safely fetch and normally merge current mainline into a retained branch as needed, preserving work and resolving conflicts; never force-push, reset, amend prior delivered commits or discard work. After a merged PR, create a new follow-up PR linking prior results and the suitable Issue.
-Independently review the complete follow-up and normally merge only within authorization. Source-only stays source-only: no release, install, deployment, restart or data migration is implied. Clean up again afterwards.
+Safely fetch and merge current mainline into a retained branch as needed, preserving work;
+never force-push, reset, amend prior delivered commits or discard work. After a merged PR,
+create a follow-up PR linking prior results and the suitable Issue. Review, deliver within
+authorization and clean up as below; rework implies no release, install, deployment, restart or migration.
 
 Read the linked Issue and repository instructions and verify your own worktree before editing.
 For Task work, read/ACK the agreement; `task_start` todo in execute before implementation.

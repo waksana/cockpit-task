@@ -46,6 +46,19 @@ implied by this source acceptance.
 | R18 migration | pre-12 ordinary load refuses; explicit reviewed synthetic plans cover modes, trees, cancellation, legacy terminal facts and drift; historical JSON/receipts unchanged, no external effects |
 | R19 user decisions | observed model directly asks the user at any depth, records answer/affected scope, no relay/repeated approval/helper messaging, no pause override or invented work |
 | R20 surfaces | MCP schema/tool discovery, read/write results, Web cards/history/relations, Node/Skills, package/migration descriptor and release boundary agree |
+| R21 session reuse | done and cancelled release occupancy while preserving assignee/assignment/outcome/disposition; reused session starts a new todo/undecided Task in execute after orchestrate; busy native session still refuses preparation/assignment |
+
+Read the complete Node/tree/coding guidance against these decision cases in independent
+review. These are expected judgments, not server-side semantic guards or claimed live replays:
+
+| Situation | Expected choice |
+| --- | --- |
+| Add a new Assistant integration after prior delivery | New Task; reuse a suitable ready/idle session, not the old Task/mode |
+| Correct a defect or omission in the delivered integration | Authorized same-delivery reopen if eligible; preserve mode/history and recover workspace |
+| Several independent sustained discussions | Delegate promptly with discussion-only scope; do not wait until coding or Task every short question |
+| One bounded small delivery | Execute end to end, using helpers as useful; no unchanged pass-through or stage Tasks |
+| Long-lived root has no new work | May stay idle; do not manufacture children or infer completion |
+| New goal versus rework is unclear | Read the agreement and outcome, then ask the user the actual scope decision |
 
 Report synthetic test commands/counts separately from observed model cases and native host
 integration. R04/R19 require an actual recorded agent run to claim a behavioral pass;

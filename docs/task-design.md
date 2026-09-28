@@ -11,6 +11,13 @@ Task 是用户授权范围内的一份持续责任，跨回复、压缩、卸载
 
 ## 1. 责任、授权、工具分开
 
+Select the responsibility before the tool: continue the current unfinished Task;
+create a Task for a new independent goal; reopen only authorized rework of the same
+completed delivery. Task is not a session's permanent identity. Familiar context,
+a related project or a retained worktree is not evidence that new work is rework.
+The agent judges the agreement and delivered result; titles/keywords cannot enforce
+this semantic boundary. Ask the user when the actual scope decision remains unclear.
+
 Task 保存本项工作特有的目标、决定、边界和完成要求。讨论、调研、登记、准备资源
 不是开工授权。用户可以直接与任何节点沟通；面对决定的节点直接问用户，不逐级上报
 问题或重复提问。影响约定的回答写回 Task；跨责任影响由当前父负责人据已授权事实安排。
@@ -23,7 +30,15 @@ agents retain their authority. No helper activity exception or new identity mode
 独立审查可以是 helper；不是每次调用工具都要建 Task。只有需要独立持续交付责任时才建子 Task。
 不以工具名、调用数、子节点数量判断模式，也不追求更多 session 或更少 Task。
 
-execute 包括深入研究、实施和审阅，不只写代码。orchestrate 的交付包括拆分、
+One bounded end-to-end delivery should execute directly, with helpers if useful;
+implementation, review and release steps do not automatically need child Tasks.
+Delegate independent sustained discussion/research/design as promptly as implementation,
+without turning every short question into a Task or discussion consent into coding consent.
+Orchestrate only when narrower responsibilities leave real coordination/integration work,
+not to remain idle or preserve a prior session role. Zero children is valid; no minimum
+child count or fixed maximum depth follows from choosing a shallow tree for simple work.
+
+execute 包括深入研究、设计、实施和审阅，不只写代码。orchestrate 的交付包括拆分、
 接口/依赖安排、阻塞处理、必要决策、成果判断和整体收口；为这些判断可做有限调研，
 持续实施与深入专项调查放在子责任中。执行者需要独立委派时，先显式转换，
 记录原因、已有成果与剩余责任，再分解；不是原样逐级转包。
@@ -47,7 +62,15 @@ todo 期间只做必要澄清和轻度发现，不实施、不建子任务。不
 也不能用普通 report 绕过 start；未开始的意图仍可取消。
 状态不是 native 忙闲、加载、工具运行或交付成功的推断。
 
+Each new Task starts todo/undecided and chooses its own mode: a session that previously
+orchestrated can execute the next Task. Reopening the same Task preserves its mode;
+this is not a downgrade or legacy-mode inference.
+
 一个 session 最多承担一项未结束 Agent Task；首次绑定不替换。
+Done/cancelled releases that occupancy while retaining assignee, assignment order,
+outcomes and cancellation history. A suitable session may receive new work without
+clearing old bindings or reopening the old Task. Native readiness/idle is still checked:
+Task termination is not proof that the session has stopped running.
 派发要求目标能力与原生空闲，claim 是当前 caller 承接，不要求其调用时 idle。
 claim 可承接 blocked root 用于澄清，不代表 Task ready、ACK 或开始。
 准备资源不授予责任，角色标签不证明工具实际可用，ACK 不证明真实理解。
@@ -99,7 +122,8 @@ Agent `task_cancel` 先持久记录 `cancellation_request`，即使叶子也不�
 记录处置并最终 cancelled；未绑定 Agent 由 Web user finalize。
 最终取消不要求实现已放弃的执行前置或 ACK，也不证明外部进程退出或回滚。
 
-用户明确返工时，`task_reopen` 保留原 assignee、模式及历史并创建新 revision。
+For authorized rework of the same completed delivery (not a new goal), `task_reopen`
+preserves assignee, mode and history while creating a new revision.
 只允许有可靠指派序号、之后未承接其他 Task、无其他未结束责任且能力就绪的原 session。
 祖先必须先合法恢复为 active orchestrate 且无取消意图；不能自动重开祖先。
 cancelled、automation、未知 legacy mode 或资格不符时拒绝原位恢复，
