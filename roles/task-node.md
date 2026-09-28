@@ -1,34 +1,34 @@
 # Node
 
-A Task is a continuing responsibility within the user's authorization. Its assignee
-either delivers directly (`execute`) or organizes narrower child responsibilities and
-integrates their results (`orchestrate`). Both modes may use helpers: they only read Task
-tools and return results; the main agent alone maintains Tasks, including activity.
-Orchestrating keeps sustained implementation in
-children, not in the parent. Explicitly convert before dividing executing responsibility.
+A Task is a continuing responsibility for an authorized result, not a permanent session
+role. Continue unfinished work in its Task; create for a new goal; reopen only authorized
+rework of the same delivery. Familiarity or a retained worktree does not decide this.
 
-Only the Task's own session is bound. Its parent’s assignee coordinates the result;
-creation history grants no control. A root is a parentless Task, not a special role
-or tree-external owner. Never guess bindings.
+One bounded delivery uses execute, including research/design. Orchestrate only for narrower
+independent responsibilities with real coordination/integration, not pass-through stages.
+Delegate sustained discussions promptly, not every short question. Explicitly convert before
+splitting execution; sustained implementation then belongs in children.
+Both modes may use helpers: they only read Task tools and return results; the main agent
+alone maintains Tasks, including activity.
 
-Task is the only channel between formal Task nodes; the service sends notices.
-Do not message another Task node, even through a helper. Keep Task records work-specific:
-goals, decisions, boundaries and completion requirements, with external material referenced
-rather than copied. Activity records important changes; outcome records actual delivery,
-remaining work and evidence. Ask the user real decisions directly, without repeating a
-question another node is asking. Write changed agreements back to Task.
+Only the own assignee is bound; parent coordinates, creation history grants no control.
+Done/cancelled releases occupancy, not history or proof of native idle. A new Task chooses
+its own mode; the same Task's reopen preserves mode. Recheck availability before session reuse.
+Root means parentless, not a special authority.
 
-Before starting, resuming, consequential actions and delivery, read your full current Task
-and ACK its exact revision. Binding and ACK do not start work: use `task_start` to choose
-a mode and enter `in_progress` atomically. A ready prerequisite never overrides a user pause.
-Add concrete unmet conditions for blocking work outside your scope; record nonblocking
-needs in the outcome. Resolve your own conditions only with recorded satisfaction evidence.
+Task is the only channel between formal nodes; never message another node, even via helpers.
+Keep one work-specific agreement; reference external material. Activity records important
+changes; outcome records delivery, remaining work and evidence. Ask user decisions directly
+without repeating another node's question, and write changed agreements back.
+Before starting, resuming, consequential actions and delivery, read full execution and
+ACK its exact revision. Binding/ACK is not start: `task_start` selects mode and in_progress.
+Readiness does not override a pause or authorize implementation. Record concrete blockers;
+resolve conditions only with satisfaction evidence.
 
-Before done or final cancellation, all direct children must be terminal. Their termination
-is not your success: integrate actual results. Cancellation records intent first; stop
-advancing the goal, arrange child closure and residual handling, then finalize. Never
-abandon children, infer delivery from idle sessions, poll progress or blindly retry effects.
-Active orchestrating ancestors' intent/blockers permit existing child done; own intent forbids own done.
+Before done or final cancellation, all direct children must be terminal; integrate actual
+results, not their statuses. Cancellation records intent first: stop progress, close children,
+handle residuals, then finalize. Never abandon children, infer delivery from idle sessions,
+poll progress or blindly retry effects.
 
-Load `cockpit-task-tree` when first needed and follow its rules and situations. Reuse it
-while in context; that never replaces fresh Task reads or an exact ACK.
+Load `cockpit-task-tree` when first needed for decisions and recovery. Reuse it while in
+context, not stale Task reads/ACKs.

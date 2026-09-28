@@ -6,6 +6,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TASK_EVENTS } from '../src/task-board/reference.js';
 import { TOOL_NAMES } from '../src/task-board/tool-names.js';
+import { toolDescriptions } from '../src/task-board/tool-descriptions.js';
 import { parseInput } from '../src/task-board/contracts.js';
 import { formatQuotaReport, markdownBody, readMarkdownQuotas } from '../scripts/prompt-quotas.js';
 
@@ -114,7 +115,7 @@ test('Task Skill is an operational responsibility model with ordered recovery bo
     /continuing responsibility/, /Splitting never removes responsibility/,
     /Task is the only channel between formal Task nodes/, /`created_by` is history, not control/,
     /`parent_assignee`/, /Both modes may use tools and helpers/,
-    /independent continuing responsibility/, /not tool names/,
+    /independent continuing responsibilities/, /not tool names/,
     /Helpers may only read Task tools/, /main agent for all maintenance, including activity/,
     /Child Task main agents retain their authority/,
     /first `task_convert` with reason, completed results and remaining work/,
@@ -123,6 +124,7 @@ test('Task Skill is an operational responsibility model with ordered recovery bo
     /`task_start` atomically enters `in_progress`/, /`task_report` cannot start todo/,
     /Readiness never overrides a user pause/, /do not synchronize/,
     /all direct children must be `done` or `cancelled`/, /not parent success or automatic closure/,
+    /For done, satisfy prerequisites/,
     /new outcome and evidence-based retro/, /explicit `null`/,
     /`task_cancel` records an Agent cancellation request, not terminal status/,
     /task_cancel_finalize/, /Cancellation need not satisfy abandoned execution prerequisites/,
@@ -154,6 +156,36 @@ test('user decisions, exact condition evidence and failure recovery remain actio
     /Never poll progress, chase ACKs or wait for notices to be read/,
     /Subscribe only for a necessary follow-up/, /never auto-renew/,
   ]) assert.match(skill, pattern);
+});
+
+test('responsibility selection precedes session and workspace reuse across guidance surfaces', () => {
+  const tree = prose(read(treeDirectory, 'SKILL.md'));
+  for (const pattern of [
+    /not a permanent session identity/, /Continue unfinished work in its Task/,
+    /`task_create` for a new independent goal/, /`task_reopen` only for authorized/,
+    /same completed delivery, not a new feature\/result/,
+    /retained worktree does not justify reopen/,
+    /Done\/cancelled releases occupancy but preserves assignee, assignments and outcomes/,
+    /A former orchestrator can execute a new Task; reopen preserves mode/,
+    /Choose `execute` for one bounded result/, /steps do not themselves need intermediate Tasks/,
+    /Delegate sustained discussion, research and design promptly/,
+    /short questions need no Task/, /not unchanged pass-through delegation/,
+    /Zero children is valid; complex work may recurse/,
+    /Task completion does not prove native idle/, /A long-lived root may stay idle/,
+    /no later assignment or other unfinished Task/, /not same-goal judgment, success or consent/,
+  ]) assert.match(tree, pattern);
+  assert.ok(tree.indexOf('Read the agreement/prior delivery') < tree.indexOf('**R2 '));
+  const coding = prose(read(codingDirectory, 'SKILL.md'));
+  assert.match(coding, /Choose responsibility before environment/);
+  assert.match(coding, /Only after selecting authorized same-delivery rework and legally reopening/);
+  assert.match(coding, /Reusing a session for a new goal instead follows the new-work setup above/);
+  assert.match(toolDescriptions.task_create, /Without an unfinished Task, create an unbound ordinary root/);
+  assert.match(toolDescriptions.task_assign, /Prior done\/cancelled Tasks retain their assignee\/history/);
+  assert.match(toolDescriptions.task_assign, /does not prove native idle/);
+  assert.match(toolDescriptions.task_start, /A new Task does not inherit/);
+  assert.match(toolDescriptions.task_reopen, /new independent goal uses task_create/);
+  assert.match(toolDescriptions.task_reopen, /scope judgment is not title matching/);
+  assert.match(toolDescriptions.task_reopen, /preserving binding\/work_mode\/history, never resetting mode/);
 });
 
 test('documented responsibility entrypoints exist with the published strict schemas', () => {
@@ -230,7 +262,8 @@ test('coding guidance composes with responsibility mode, user scope and safe wor
     /Task done means the complete agreed result/,
     /default to reusing the retained worktree and branch/,
     /New checkouts do not inherit untracked or ignored local environment files/,
-    /Questions and idea exploration do not require an Issue, Task or worktree/,
+    /Short questions need no Issue, Task or worktree/,
+    /independent sustained discussion\/research may be a Task/,
     /investigation-only, patch-only or PR-only authorization stops at that boundary/,
     /reference project instructions, methods and prior evidence instead of copying them/,
     /not code merge alone, resource cleanup or an idle native session/,

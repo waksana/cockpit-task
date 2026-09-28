@@ -126,7 +126,9 @@ test('published tool descriptions explain filters, dispatch races and same-repor
     assert.match(readSchema.properties.include.description, /overview only.*48000.*RESULT_TOO_LARGE/);
     assert.match(descriptions.task_read, /overview\+include.*complete latest groups/);
     assert.match(descriptions.task_assign, /send one assigned pointer/);
-    assert.match(descriptions.task_assign, /ready, idle, unoccupied Node/);
+    assert.match(descriptions.task_assign, /ready, idle Node with no unfinished Task/);
+    assert.match(descriptions.task_assign, /Prior done\/cancelled Tasks retain their assignee\/history/);
+    assert.match(descriptions.task_assign, /terminal Task status does not prove native idle/);
     assert.match(descriptions.task_assign, /not atomic.*queued, accepted or unknown/);
     assert.match(descriptions.task_assign, /per-step receipts.*availability.*Never blindly resend/);
     assert.doesNotMatch(descriptions.task_assign, /Does not interrupt or queue instructions/);

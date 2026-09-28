@@ -101,6 +101,10 @@ data_version 是缓存相等令牌，不是业务 revision。
 
 ### task_create
 
+Use for a new independent responsibility; continue existing unfinished work in its Task.
+Authorized rework of the same completed result uses `task_reopen` if eligible. This is
+agreement/result judgment, not server-side title or keyword matching.
+
 输入 request_id,title,description，加 references?、metadata?、blocked_by?、
 automation?。Web user 可显式 parent_task_id；session 不可自行选 parent。
 有 active Agent Task 的 caller 自动在自己的有效 in_progress/orchestrate/current ACK/
@@ -121,6 +125,8 @@ current，无 assignee 参数。就绪 Node 只承接既有 unbound root，
 current + work_mode=execute|orchestrate。仅 own assignee，todo、精确 current ACK、
 ready、合法 active orchestrating 祖先、无取消意图。原子写 in_progress+mode。
 不设置 native interaction mode，不自动创建 child。report 不替代此入口。
+Mode belongs to this Task, not the session: a new Task may execute after the same
+session previously orchestrated. Reopen preserves the same Task's mode instead.
 
 ### task_convert
 
@@ -159,6 +165,10 @@ current + assignee + resume_request_id?。仅 current parent_assignee 或 Web us
 unbound todo Agent，Web user 也可派 root。父不能自派 child 或派祖先；无固定层数上限。
 检查业务容量、ready/祖先/取消意图及已有 Node 能力、原生空闲，再绑定、复查、发送一次 assigned。
 不补角色/资源或主动中断，check/send 不是原子：queued/unconfirmed 分别保留真实步骤。
+Occupancy checks consider only unfinished Tasks. Prior done/cancelled Tasks keep their
+assignee, assignment order, outcomes and cancellation history without preventing new
+assignment or resource preparation. No history clearing or second binding record is needed.
+Task termination does not establish native idle/readiness; those checks remain independent.
 
 <a id="assign-session-title"></a>
 默认/自动生成 native 名称可 best-effort 设为 Task title；用户命名保留，
@@ -213,6 +223,9 @@ finalize: current + summary≤8,000，需取消意图。绑定 Agent 仅 own ass
 记录最终处置并 cancelled。Automation cancel 仍走服务终态/进程组取消，不走此入口。
 
 ### task_reopen
+
+Only authorized rework of the same completed delivery belongs here. New goals use new
+Tasks, even when reusing a familiar session; retained workspaces do not establish eligibility.
 
 current + 完整 description + reason。own original assignee、current parent_assignee 或 Web user。
 只允许 done Agent；保留 assignee/mode，原指派有可靠序号、之后无任何新指派、
