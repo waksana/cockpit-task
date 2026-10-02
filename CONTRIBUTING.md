@@ -92,8 +92,9 @@ not backfill assignment records: all pre-upgrade assigned Tasks remain readable
 but cannot reopen, and installed 0.1.9 cannot open schema v5.
 
 Keep the documented UI source pairing
-`9fd5204bda99a8bd65b2c5ef152cc47ce87837d5` and `uiSurfaceVersion: 1` as the UI
-support baseline, separate from backend resource preparation. Explicit preparation
+`1d37f04335ce9328ce1e37b59e5a4a8564709a0b` and `uiSurfaceVersion: 1` as the UI
+support baseline, with `sessionListItemVersion: 1`, `menuVersion: 1` and
+`globalComponentVersion: 1`, separate from backend resource preparation. Explicit preparation
 requires `context.host.resourcePreparationVersion === 1` and the public
 `session/resources-prepare` contract from [Cockpit #98](https://github.com/waksana/cockpit/pull/98).
 Do not infer a deployed capability or minimum host release from a source merge.

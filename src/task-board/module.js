@@ -3,6 +3,7 @@ import { createHostAdapter } from './host.js';
 import { createMcpRoutes } from './mcp.js';
 import { TaskService } from './service.js';
 import { TaskStore } from './store.js';
+import { readSessionSummaries, sessionSummaryInput } from './session-summaries.js';
 
 export function activate(context) {
   if (context.apiVersion !== 1 || context.moduleId !== 'cockpit-task') {
@@ -48,6 +49,18 @@ export function activate(context) {
       return service.recoverNotifications({ signal });
     },
     routes: [
+      {
+        method: 'POST', path: '/session-summaries', body: 'json', bodyLimit: 32768,
+        handler(request) {
+          const parsed = sessionSummaryInput.safeParse(request.body);
+          if (!parsed.success) return { status: 400, body: {
+            result: null, error: { code: 'INVALID_INPUT', message: 'Provide 1-100 unique session_ids (1-200 characters each), with no extra fields.' },
+          } };
+          signal.throwIfAborted();
+          request.signal.throwIfAborted();
+          return { body: { result: readSessionSummaries(store.db, parsed.data), error: null } };
+        },
+      },
       { method: 'POST', path: '/read', body: 'json', bodyLimit: 262144, handler: request => json('task_read', request, true) },
       { method: 'POST', path: '/tools/:name', body: 'json', bodyLimit: 262144, handler: request => json(request.params.name, request) },
       {

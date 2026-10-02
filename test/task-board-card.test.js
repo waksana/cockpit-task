@@ -229,6 +229,8 @@ test('activation requires public compatibility and preserves native fallback on 
   }
   assert.throws(() => activate({ apiVersion: 2, uiVersion: 1, uiSurfaceVersion: 1 }), /createPortal/);
   const module = activate({
+    ...fixture().context,
+    sessionListItemVersion: 1, globalComponentVersion: 1, menuVersion: 1,
     apiVersion: 2, uiVersion: 1, uiSurfaceVersion: 1, createPortal() {},
     react: { createElement: (type, props) => ({ type, props }) },
   });
@@ -255,6 +257,8 @@ test('compact cards separate historical notification context from right-aligned 
   let snapshot = { phase: 'loading', data: null, error: null };
   const context = {
     apiVersion: 2, uiVersion: 1, uiSurfaceVersion: 1, createPortal() {},
+    ...fixture().context,
+    sessionListItemVersion: 1, globalComponentVersion: 1, menuVersion: 1,
     signal: new AbortController().signal,
     react: {
       Fragment: 'fragment',
@@ -936,7 +940,8 @@ function componentHarness(context) {
     useSyncExternalStore: (_subscribe, snapshot) => snapshot(),
     useId: () => hook(() => ({ value: `synthetic-id-${++nextId}` })).value,
   };
-  const renderer = activate({ ...context, apiVersion: 2, uiVersion: 1, uiSurfaceVersion: 1, react, createPortal: node => node }).markdown[0];
+  const renderer = activate({ ...context, apiVersion: 2, uiVersion: 1, uiSurfaceVersion: 1,
+    sessionListItemVersion: 1, globalComponentVersion: 1, menuVersion: 1, react, createPortal: node => node }).markdown[0];
   const resolve = (node, path) => {
     if (Array.isArray(node)) return node.map((child, index) => resolve(child, `${path}.${index}`));
     if (!node || typeof node !== 'object') return node;

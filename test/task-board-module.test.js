@@ -45,6 +45,9 @@ function fixture() {
     get meta() { return meta; },
     set capability(value) { capability = value; },
     get invalidations() { return invalidations; },
+    summaries(body) {
+      return module.routes.find(route => route.path === '/session-summaries').handler({ body, signal: controller.signal });
+    },
     async read(taskId, view = 'execution', fields = {}) {
       return module.routes.find(route => route.path === '/read').handler({
         body: { task_id: taskId, view, ...fields }, signal: controller.signal,
@@ -91,6 +94,23 @@ function fixture() {
     close() { module.dispose(); rmSync(root, { recursive: true, force: true }); },
   };
 }
+
+test('HTTP session summaries are bounded, passive and expose no full task or native reads', () => {
+  const f = fixture();
+  try {
+    const task = f.seedAssigned({ assignee: 'worker' });
+    const before = f.calls.length;
+    const result = f.summaries({ session_ids: ['worker', 'unassigned'] });
+    assert.equal(result.body.error, null);
+    assert.deepEqual(result.body.result.items, [
+      { session_id: 'worker', selection: 'current', task: { id: task.task_id, title: 'Seeded', status: 'todo', position: 'Root' } },
+      { session_id: 'unassigned', selection: 'none', task: null },
+    ]);
+    assert.equal(f.calls.length, before);
+    assert.equal(f.summaries({ session_ids: ['worker'], actor: 'user' }).status, 400);
+    f.context.signal.throwIfAborted();
+  } finally { f.close(); }
+});
 
 test('HTTP completion requires explicit valid retro with atomic effects and durable detail reads', async () => {
   const f = fixture();

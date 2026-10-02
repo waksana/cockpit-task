@@ -61,6 +61,11 @@ checks the actual backend/frontend version gates, and extracts required intents
 from the host adapter. Requirements use the host's published capability names.
 Resource preparation is declared because the shipped preparation operations need
 it, although legacy unselected session creation can work on older hosts.
+The session Task entry additionally declares `sessionListItem.v1`, `menu.v1` and
+`globalComponent.v1`. These are runtime capabilities, not an implicit dependency on
+an unpublished SDK package; this JavaScript module does not import the SDK. The
+paired host must provide them before this module can activate. This UI change
+retains schema 12 with no migration or assignment-history backfill.
 
 The database declaration is derived by initializing **synthetic** storage with the
 actual `TaskStore`, reading its schema version and every application table/column.

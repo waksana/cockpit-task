@@ -1,8 +1,11 @@
 {
   "repository": "waksana/cockpit",
-  "uiCommit": "9fd5204bda99a8bd65b2c5ef152cc47ce87837d5",
+  "uiCommit": "1d37f04335ce9328ce1e37b59e5a4a8564709a0b",
   "backendCommit": "d9952cb6060ef6d573431dd4778d6cd221311ece",
   "uiVersion": 1,
   "uiSurfaceVersion": 1,
+  "sessionListItemVersion": 1,
+  "menuVersion": 1,
+  "globalComponentVersion": 1,
   "resourcePreparationVersion": 1
 }

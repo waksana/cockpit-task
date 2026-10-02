@@ -1,6 +1,8 @@
 import { parseTaskTarget, TASK_EVENTS } from '../../src/task-board/reference.js';
 import { createReadCache } from './read-resource.js';
 import { ICONS } from './icons.js';
+import { createSessionSummaries } from './session-summaries.js';
+import { createTaskMenu, summaryIcon, summaryNotice } from './session-entry.js';
 
 const STATUS_LABELS = {
   todo: 'To do',
@@ -381,9 +383,40 @@ export function activate(context) {
   if (typeof context.createPortal !== 'function') {
     throw new Error('Task requires the host createPortal capability.');
   }
+  if (context.sessionListItemVersion !== 1 || context.globalComponentVersion !== 1 || context.menuVersion !== 1) {
+    throw new Error('Task requires sessionListItemVersion v1, globalComponentVersion v1 and menuVersion v1; upgrade the paired host first.');
+  }
   const React = context.react;
   const h = React.createElement;
-  const { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, useId } = React;
+  const { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, useId, useCallback } = React;
+  const summaries = createSessionSummaries(context);
+  const taskMenu = createTaskMenu(summaries, context.signal);
+
+  function useSessionSummary(sessionId) {
+    const subscribe = useCallback(listener => summaries.watch(sessionId, listener), [sessionId]);
+    const snapshot = useCallback(() => summaries.get(sessionId), [sessionId]);
+    return useSyncExternalStore(subscribe, snapshot, snapshot);
+  }
+
+  function SessionSummary({ state }) {
+    const task = state.data?.task;
+    const notice = summaryNotice(state);
+    if (!notice && !task) return null;
+    const label = [notice, task && `Task: ${statusLabel(task.status)}; ${task.position}; ${task.title}`,
+      task && notice && 'Last-read data; current state unconfirmed'].filter(Boolean).join(' · ');
+    return h('span', { className: 'tb-session-summary', title: label, 'aria-label': label,
+      'data-status': !notice ? task?.status : undefined },
+    h('span', { className: 'tb-session-state' }, h(Icon, {
+      name: notice ? state.phase === 'error' ? 'error' : 'unknown' : summaryIcon(task.status),
+    })),
+    task ? h('span', { className: 'ck-badge tb-session-position' }, task.position) : null,
+    h('span', { className: 'tb-session-title' }, notice ? `${notice}${task ? ` · ${task.title}` : ''}` : task.title));
+  }
+
+  function SessionTaskDialog() {
+    const opened = useSyncExternalStore(taskMenu.subscribe, taskMenu.getSnapshot, taskMenu.getSnapshot);
+    return opened ? h(Detail, { key: opened.taskId, taskId: opened.taskId, onClose: taskMenu.close }) : null;
+  }
 
   function useRead(input) {
     const key = JSON.stringify(input);
@@ -1007,6 +1040,15 @@ export function activate(context) {
 
   return {
     apiVersion: 2,
+    components: [{ id: 'session-task', boundary: 'sessionListItem', wrap: Base => function SessionTask(props) {
+      const state = useSessionSummary(props.sessionId);
+      return h(Base, { ...props, description: !summaryNotice(state) && !state.data?.task ? props.description
+        : h(React.Fragment, null, props.description, h(SessionSummary, { state })) });
+    } }],
+    globalComponents: [{ id: 'session-task-detail', component: SessionTaskDialog }],
+    menus: [{ id: 'session-task-menu', menu: 'session', getState: taskMenu.getState,
+      subscribe: summaries.subscribe, onSelect: taskMenu.onSelect }],
     markdown: [{ id: 'task-reference', matches: (node) => parseTaskReference(node) !== null, component: TaskReference }],
+    dispose() { taskMenu.dispose(); summaries.dispose(); readCaches.get(context)?.dispose(); },
   };
 }

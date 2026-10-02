@@ -12,6 +12,8 @@
     "assets": [
       "web/task-board/index.js",
       "web/task-board/read-resource.js",
+      "web/task-board/session-summaries.js",
+      "web/task-board/session-entry.js",
       "web/task-board/icons.js",
       "web/task-board/licenses/lucide.txt",
       "web/task-board/style.css",

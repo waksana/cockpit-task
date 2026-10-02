@@ -134,3 +134,23 @@
 @media (max-width: 400px) {
   .tb-sections .ck-button { font-size: var(--ck-text-meta); padding-inline: 6px; }
 }
+.tb-session-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: var(--ck-text-meta);
+  line-height: var(--ck-leading-ui);
+  color: var(--ck-color-muted);
+}
+.tb-session-state { display: inline-flex; flex: none; }
+.tb-session-position { flex: none; white-space: nowrap; }
+.tb-session-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ck-color-text);
+}
+.tb-session-summary[data-status="in_progress"] .tb-session-state { color: var(--ck-color-accent); }
+.tb-session-summary[data-status="done"] .tb-session-state { color: var(--ck-color-success); }
