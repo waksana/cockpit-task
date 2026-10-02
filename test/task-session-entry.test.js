@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TaskStore } from '../src/task-board/store.js';
 import { readSessionSummaries, sessionSummaryInput } from '../src/task-board/session-summaries.js';
 import { createSessionSummaries, readSessionSummaries as readRemote } from '../web/task-board/session-summaries.js';
-import { createTaskMenu, summaryNotice, summaryIcon } from '../web/task-board/session-entry.js';
+import { createTaskMenu, summaryNotice, summaryIcon, summaryBadgeNotice } from '../web/task-board/session-entry.js';
+import { ICONS } from '../web/task-board/icons.js';
 import { activate } from '../web/task-board/index.js';
 import { responsibilityContext, startResponsibility } from './helpers/service-responsibility-fixtures.js';
 
@@ -223,7 +224,9 @@ test('menu captures a fixed task/session until dialog close; target/module loss 
   const controller = new AbortController(), action = new AbortController();
   const summaries = { get: () => state, retry() { this.retried = true; } };
   const menu = createTaskMenu(summaries, controller.signal);
-  assert.equal(menu.getState({ sessionId: 's' }).label, 'Current Task');
+  assert.equal(menu.getState({ sessionId: 's' }).label, 'Current Task: A real Task');
+  state = { ...state, data: { ...item('s', { status: 'done' }), selection: 'recent' } };
+  assert.equal(menu.getState({ sessionId: 's' }).label, 'Recent Task: A real Task');
   const opened = menu.onSelect({ sessionId: 's' }, { signal: action.signal });
   state = { ...state, data: item('s', { id: '767a613f-9186-4d77-8463-d72956fe5272' }) };
   assert.deepEqual(menu.getSnapshot(), { sessionId: 's', taskId });
@@ -252,7 +255,11 @@ test('activation rejects unsupported boundaries and registers unique shared sess
   const ids = [...module.components, ...module.menus, ...module.markdown, ...module.globalComponents].map(value => value.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual(['todo', 'in_progress', 'done', 'cancelled'].map(summaryIcon),
-    ['sessionTodo', 'progress', 'done', 'sessionCancelled']);
+    ['todo', 'progress', 'done', 'cancelled']);
+  for (const status of ['todo', 'in_progress', 'done', 'cancelled']) {
+    assert.equal(ICONS[summaryIcon(status)][0][0], 'rect', 'lifecycle icons share the square family');
+  }
+  assert.ok(ICONS.unknown.every(([tag]) => tag !== 'circle'), 'unknown Task must not reuse CircleHelp');
   module.dispose();
 });
 
@@ -265,19 +272,56 @@ test('the actual row middleware preserves all native props and adds no row for c
     react: { createElement: h, Fragment: 'fragment', useCallback: fn => fn, useSyncExternalStore: () => snapshot } });
   const Base = () => {};
   const Wrapper = module.components[0].wrap(Base);
-  const original = { sessionId: 's', title: 'Session', description: 'Peer description', disabled: true,
+  const original = { sessionId: 's', title: 'Session', description: 'Peer description', details: h('span', null, 'Host/peer details'), disabled: true,
     onClick() {}, onContextMenu() {}, 'aria-label': 'Native row' };
   assert.deepEqual(Wrapper(original), h(Base, original));
   snapshot = { ...snapshot, data: item('s', { title: 'Long complete Task title' }) };
   const row = Wrapper(original);
   assert.equal(row.type, Base);
-  for (const key of Object.keys(original).filter(key => key !== 'description')) assert.equal(row.props[key], original[key]);
-  assert.equal(row.props.description.children[0], original.description);
-  const summaryElement = row.props.description.children[1];
+  for (const key of Object.keys(original).filter(key => key !== 'details')) assert.equal(row.props[key], original[key]);
+  assert.equal(row.props.details.children[1], original.details);
+  const summaryElement = row.props.details.children[0];
   const summary = summaryElement.type(summaryElement.props);
   assert.match(summary.props['aria-label'], /Task: In progress; Root; Long complete Task title/);
   assert.equal(summary.type, 'span');
+  assert.equal(summary.props.role, 'img', 'complete identity is accessible without hover or repeated visible title');
+  assert.equal(summary.props.className, 'ck-badge tb-session-summary');
   assert.equal(summary.children[1].children[0], 'Root');
-  assert.equal(summary.children[2].children[0], 'Long complete Task title');
+  assert.equal(summary.children[2], null, 'confirmed badge has only lifecycle icon and position');
+  for (const status of ['todo', 'in_progress', 'done', 'cancelled']) {
+    for (const [phase, refreshing, notice] of [['ready', false, null], ['ready', true, 'Updating'],
+      ['offline', false, 'Not synced'], ['error', false, 'Read failed']]) {
+      snapshot = { phase, refreshing, data: item('s', { status, position: 'Leaf' }) };
+      const element = Wrapper(original).props.details.children[0];
+      const badge = element.type(element.props);
+      assert.equal(summaryBadgeNotice(snapshot), notice);
+      assert.equal(badge.props['data-status'], status);
+      assert.equal(badge.children[0].children[0].props.name, summaryIcon(status));
+      assert.equal(badge.children[1].children[0], 'Leaf');
+      assert.equal(badge.children[2]?.children[0] ?? null, notice ? `· ${notice}` : null);
+      if (notice) assert.match(badge.props['aria-label'], /Last-read data; current state unconfirmed/);
+    }
+  }
+  for (const [phase, data, expected] of [
+    ['loading', null, 'Task loading'], ['error', null, 'Task read failed'], ['offline', null, 'Task offline'],
+    ['ready', { selection: 'unknown', task: null }, 'Task unconfirmed'],
+    ['error', { selection: 'none', task: null }, 'Task read failed'],
+  ]) {
+    snapshot = { phase, data };
+    const element = Wrapper(original).props.details.children[0];
+    const badge = element.type(element.props);
+    assert.equal(badge.children[0], null, 'read state does not impersonate a lifecycle or ask icon');
+    assert.equal(badge.children[1], null, 'unknown position is never invented');
+    assert.equal(badge.children[2].children[0], expected);
+  }
   module.dispose();
+});
+
+test('compact badges reserve their fixed content width alongside host roles and activity', () => {
+  const css = readFileSync(new URL('../web/task-board/style.css', import.meta.url), 'utf8');
+  const badge = css.match(/\.tb-session-summary\s*\{([^}]+)\}/)[1];
+  assert.match(badge, /flex: none;/, 'shrinking the badge lets the fixed icon/position overlap adjacent roles');
+  assert.match(badge, /white-space: nowrap;/);
+  assert.match(badge, /max-width: 100%;/);
+  assert.doesNotMatch(css, /\.tb-session-title/);
 });

@@ -20,11 +20,19 @@ See the [host contract](https://github.com/waksana/cockpit-task/blob/main/docs/t
 
 ## Session Task entry
 
-The session list adds a non-interactive line below the session name: a static
-16px lifecycle icon, a neutral `Root` / `Branch` / `Leaf` badge, and the Task title.
+The session list adds one non-interactive, neutral badge before the existing details
+on the directory/roles/activity line: a static 16px lifecycle icon and
+`Root` / `Branch` / `Leaf`. It adds neither another line nor a repeated Task title.
 Only the icon uses status color; Task progress is independent of native session
-activity. The title truncates on narrow screens without shrinking the icon or badge;
-its full text and state remain accessible. Clicking the row still selects the session.
+activity. The full Task title, lifecycle and position remain in the badge's
+accessible name and existing details; the menu entry includes the Task title.
+Clicking the row still selects the session and other modules' contributions remain intact.
+
+Lifecycle icons use Lucide `Square` (to do), `SquarePlay` (in progress),
+`SquareCheck` (done) and `SquareX` (cancelled), consistently across the session
+badge, Task card and details. Cancellation is neutral, not an error.
+Blocked prerequisites and cancellation intentions supplement the actual lifecycle
+rather than replacing it with a pause or terminal cancellation icon.
 
 Only actual assignee bindings count. An unfinished Task takes precedence; otherwise
 the latest recorded assignment stays visible after completion/cancellation. Creation
@@ -37,8 +45,13 @@ The session menu's **Current Task** or **Recent Task** opens the existing Task d
 The open dialog keeps its captured session/Task identity through navigation and newer
 bindings. Closing the menu does not close it; losing the module or target session does.
 Loading, disconnected and failed reads remain separate from the four Task lifecycle
-states. Retained snapshots are marked unconfirmed, and the menu offers an explicit
-read retry after failure. Confirmed sessions without a Task have no extra row or entry.
+states. Retained snapshots keep their lifecycle and position, with an explicit
+`Updating`, `Not synced` or `Read failed` notice and an unconfirmed accessible name.
+Without a snapshot, the badge shows text only (`Task loading`, `Task offline`,
+`Task read failed` or `Task unconfirmed`), never a question mark or invented position.
+Unknown Task cards use a neutral document icon, not the native session's ask icon.
+The menu offers an explicit read retry after failure. Confirmed sessions without a
+Task have no badge or entry.
 
 This feature requires `sessionListItemVersion: 1`, `menuVersion: 1` and
 `globalComponentVersion: 1` in addition to the existing UI contract. The module

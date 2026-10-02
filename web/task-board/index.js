@@ -2,7 +2,7 @@ import { parseTaskTarget, TASK_EVENTS } from '../../src/task-board/reference.js'
 import { createReadCache } from './read-resource.js';
 import { ICONS } from './icons.js';
 import { createSessionSummaries } from './session-summaries.js';
-import { createTaskMenu, summaryIcon, summaryNotice } from './session-entry.js';
+import { createTaskMenu, summaryIcon, summaryNotice, summaryBadgeNotice } from './session-entry.js';
 
 const STATUS_LABELS = {
   todo: 'To do',
@@ -355,9 +355,7 @@ export function createReadResource(context, input) {
 }
 
 export function taskStateIcon(state) {
-  if (state.data) return state.data.cancellation_request && !['done', 'cancelled'].includes(state.data.status) ? 'cancelled'
-    : state.data.ready === false && !['done', 'cancelled'].includes(state.data.status) ? 'blocked'
-    : ({ todo: 'todo', in_progress: 'progress', done: 'done', cancelled: 'cancelled' }[state.data.status] ?? 'unknown');
+  if (state.data) return summaryIcon(state.data.status);
   if (state.phase === 'offline') return 'offline';
   if (state.phase === 'error') return 'error';
   return state.phase === 'loading' ? 'refresh' : 'unknown';
@@ -400,17 +398,15 @@ export function activate(context) {
 
   function SessionSummary({ state }) {
     const task = state.data?.task;
-    const notice = summaryNotice(state);
+    const notice = summaryBadgeNotice(state);
     if (!notice && !task) return null;
     const label = [notice, task && `Task: ${statusLabel(task.status)}; ${task.position}; ${task.title}`,
       task && notice && 'Last-read data; current state unconfirmed'].filter(Boolean).join(' · ');
-    return h('span', { className: 'tb-session-summary', title: label, 'aria-label': label,
-      'data-status': !notice ? task?.status : undefined },
-    h('span', { className: 'tb-session-state' }, h(Icon, {
-      name: notice ? state.phase === 'error' ? 'error' : 'unknown' : summaryIcon(task.status),
-    })),
-    task ? h('span', { className: 'ck-badge tb-session-position' }, task.position) : null,
-    h('span', { className: 'tb-session-title' }, notice ? `${notice}${task ? ` · ${task.title}` : ''}` : task.title));
+    return h('span', { className: 'ck-badge tb-session-summary', role: 'img', title: label, 'aria-label': label,
+      'data-status': task?.status, 'data-unconfirmed': Boolean(notice) || undefined },
+    task ? h('span', { className: 'tb-session-state' }, h(Icon, { name: summaryIcon(task.status) })) : null,
+    task ? h('span', { className: 'tb-session-position' }, task.position) : null,
+    notice ? h('span', { className: 'tb-session-notice' }, `${task ? '· ' : ''}${notice}`) : null);
   }
 
   function SessionTaskDialog() {
@@ -1018,7 +1014,9 @@ export function activate(context) {
           h('span', { className: 'tb-card-title', title: task?.title ?? taskId }, task?.title ?? label),
           h('span', { className: 'tb-card-status', title: 'Current Task state' },
             h(Icon, { name: stateIcon }), task ? task.cancellation_request && !['done', 'cancelled'].includes(task.status)
-              ? `${statusLabel(task.status)} · Cancellation requested` : stateIcon === 'blocked' ? 'Blocked' : statusLabel(task.status) : 'Task')),
+              ? `${statusLabel(task.status)} · Cancellation requested`
+              : task.ready === false && !['done', 'cancelled'].includes(task.status)
+                ? `${statusLabel(task.status)} · Blocked` : statusLabel(task.status) : 'Task')),
         h('span', { className: 'tb-card-summary', title: summary }, summary),
         h('span', { className: 'tb-card-meta' },
           h('span', { className: 'tb-card-owner', title: owner },
@@ -1042,8 +1040,8 @@ export function activate(context) {
     apiVersion: 2,
     components: [{ id: 'session-task', boundary: 'sessionListItem', wrap: Base => function SessionTask(props) {
       const state = useSessionSummary(props.sessionId);
-      return h(Base, { ...props, description: !summaryNotice(state) && !state.data?.task ? props.description
-        : h(React.Fragment, null, props.description, h(SessionSummary, { state })) });
+      return h(Base, { ...props, details: !summaryNotice(state) && !state.data?.task ? props.details
+        : h(React.Fragment, null, h(SessionSummary, { state }), props.details) });
     } }],
     globalComponents: [{ id: 'session-task-detail', component: SessionTaskDialog }],
     menus: [{ id: 'session-task-menu', menu: 'session', getState: taskMenu.getState,
