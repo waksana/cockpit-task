@@ -1,7 +1,7 @@
 # Task 宿主接入契约
 
 当前 UI 的精确宿主支持基线为
-`9fd5204bda99a8bd65b2c5ef152cc47ce87837d5`（Cockpit 源码，未宣称已发行）。
+`1d37f04335ce9328ce1e37b59e5a4a8564709a0b`（Cockpit 源码，非部署声明）。
 卡片正文与行内刷新使用独立原生按钮，刷新复用 `ck-icon-button`；详情使用 `ck-button`、`ck-surface`、`ck-modal`、`ck-heading`、
 `ck-actions` 与公共字体 tokens。激活在注册贡献前检查
 `context.uiVersion === 1` 与独立的 `context.uiSurfaceVersion === 1`，
@@ -34,6 +34,7 @@ Task 是运行于 Cockpit 的模块，不启动独立 daemon 或监听端口。
 | 角色 | 模块角色声明、所选角色资源装配、持久记录、冷恢复及按需 readiness |
 | MCP | 模块 HTTP 配置、准确的声明 key `cockpit-task`、角色工具子集与版本绑定，并由宿主为每次 tool call 注入 `_meta["cockpit/invocation"]` |
 | 前端 | Web API v2、UI v1、shared-surfaces v1 (`uiSurfaceVersion: 1`)、Markdown link renderer、模块 request、事件和 portal |
+| 会话 Task 入口 | `sessionListItemVersion: 1`、`menuVersion: 1`、`globalComponentVersion: 1`，缺失在前端注册前明确拒绝 |
 | 运行时 | Node.js 24 或以上 |
 
 API-v1 或某个宿主发行版本标签本身不证明上述能力齐备。Task 在打开或迁移
@@ -43,6 +44,32 @@ SQLite **之前**检查模块身份、service-ready v1 及公共宿主桥接；v
 通用 service-ready 接口的兼容性说明见
 [Cockpit #74](https://github.com/waksana/cockpit/pull/74)。
 是否兼容取决于实际宿主能力，不以链接中的合并事实推定当前安装或部署。
+
+### Session-list summaries and detail entry
+
+Task wraps the public `sessionListItem` component and supplies only non-interactive
+phrasing content in `description`, preserving the host button, native handlers and
+other modules' descriptions. The public `session` menu uses a synchronous,
+side-effect-free state read. A global component owns the existing portal/native
+dialog independently of the menu lifetime. Its accepted action retains the captured
+session and Task until close; target/module loss aborts it.
+
+The module-scoped `POST /session-summaries` accepts exactly
+`{ "session_ids": ["session-id"] }`: 1–100 unique nonempty IDs, at most 200 characters
+each, and a 32 KiB body limit. It returns `{ result: { items }, error: null }` in input
+order. Each item has `session_id`, `selection` (`current`, `recent`, `none`, `unknown`)
+and `task` (null for none/unknown; otherwise `id`, `title`, `status`, `position`).
+`position` is `Root`, `Branch` or `Leaf`. This is a passive Web projection, not a new
+MCP tool, actor input, native-session read or Task execution API. Invalid input is
+HTTP 400 with `INVALID_INPUT`; cancellation and backend failures remain explicit.
+The query uses actual assignees and `task_assignments.seq`, never task creation order
+or update time. There is no schema change or historical assignment backfill.
+
+One activation-scoped cache batches row interests and the active header, cancels
+obsolete reads, preserves explicitly unconfirmed snapshots on failure/disconnection,
+and refreshes on Task events, reconnect and visibility return. Events for newly
+bound Task IDs cannot be filtered out merely because the prior cache lacked them.
+Stopped modules unsubscribe and reject late results. Details remain lazy.
 
 ## 2. 角色是能力装配单元
 

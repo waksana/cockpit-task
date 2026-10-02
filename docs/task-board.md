@@ -11,11 +11,40 @@ or replayed effects. Source changes do not deploy, restart or migrate an install
 Node.js 24+, Module API v1, Web API v2/UI v1 and shared-surfaces v1,
 module roles, public host.call, exact MCP server key and service-ready v1 are required.
 Activation checks host capabilities before opening storage. The documented UI source
-baseline remains `9fd5204bda99a8bd65b2c5ef152cc47ce87837d5`, not a deployment claim.
+baseline is `1d37f04335ce9328ce1e37b59e5a4a8564709a0b`, including
+sessionListItemVersion=1, menuVersion=1 and globalComponentVersion=1, not a deployment claim.
 MCP calls need host-injected `_meta["cockpit/invocation"].sessionId`.
 Explicit resource selections additionally need resourcePreparationVersion=1 and
 session/resources-prepare; omitted selections preserve ordinary session creation.
 See the [host contract](https://github.com/waksana/cockpit-task/blob/main/docs/task-host-contract.md); no private runtime/credential fallback.
+
+## Session Task entry
+
+The session list adds a non-interactive line below the session name: a static
+16px lifecycle icon, a neutral `Root` / `Branch` / `Leaf` badge, and the Task title.
+Only the icon uses status color; Task progress is independent of native session
+activity. The title truncates on narrow screens without shrinking the icon or badge;
+its full text and state remain accessible. Clicking the row still selects the session.
+
+Only actual assignee bindings count. An unfinished Task takes precedence; otherwise
+the latest recorded assignment stays visible after completion/cancellation. Creation
+order, creator and update timestamps never choose the Task. Untracked historical
+assignment order is explicitly unknown, not an invented latest Task. A parentless
+Task is `Root`, including a single-node tree; a child with children is `Branch`,
+otherwise `Leaf`. Terminal children still count.
+
+The session menu's **Current Task** or **Recent Task** opens the existing Task details.
+The open dialog keeps its captured session/Task identity through navigation and newer
+bindings. Closing the menu does not close it; losing the module or target session does.
+Loading, disconnected and failed reads remain separate from the four Task lifecycle
+states. Retained snapshots are marked unconfirmed, and the menu offers an explicit
+read retry after failure. Confirmed sessions without a Task have no extra row or entry.
+
+This feature requires `sessionListItemVersion: 1`, `menuVersion: 1` and
+`globalComponentVersion: 1` in addition to the existing UI contract. The module
+refuses unsupported hosts rather than using private Sidebar styles or DOM injection.
+Rows and the active header share event-driven batches of at most 100 session IDs;
+there is no per-row polling, native session inspection or eager Task detail read.
 
 ## Roles and records
 

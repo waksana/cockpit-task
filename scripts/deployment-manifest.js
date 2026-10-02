@@ -14,6 +14,8 @@ export function moduleProduct(root) {
     [backend, 'context.apiVersion !== 1'], [backend, 'context.serviceReadyVersion !== 1'],
     [frontend, 'context.apiVersion !== 2'], [frontend, 'context.uiVersion !== 1'],
     [frontend, 'context.uiSurfaceVersion !== 1'], [host, 'host.resourcePreparationVersion === 1'],
+    [frontend, 'context.sessionListItemVersion !== 1'], [frontend, 'context.globalComponentVersion !== 1'],
+    [frontend, 'context.menuVersion !== 1'],
   ]) assert.ok(source.includes(check), `Review changed compatibility gate: ${check}`);
   const directory = join(root, 'dist', `schema-contract-${process.pid}`);
   mkdirSync(directory, { recursive: true });
@@ -28,7 +30,8 @@ export function moduleProduct(root) {
     });
     return {
       kind: 'module', id: manifest.id, hostApi: { min: manifest.apiVersion, max: manifest.apiVersion },
-      requiresCapabilities: ['module-api.v1', 'serviceReady.v1', 'frontend-api.v2', 'ui.v1', 'uiSurface.v1', 'resourcePreparation.v1'],
+      requiresCapabilities: ['module-api.v1', 'serviceReady.v1', 'frontend-api.v2', 'ui.v1', 'uiSurface.v1', 'resourcePreparation.v1',
+        'sessionListItem.v1', 'globalComponent.v1', 'menu.v1'],
       requiredIntents: [...new Set([...host.matchAll(/host\.call\('([^']+)'/g)].map(match => match[1]))].sort(),
       databases: [{ path: 'task-board.sqlite', schema: SCHEMA_VERSION, preserve }],
       // Schema 12 has no automatic upgrade path. Schema 11 requires an offline reviewed plan.
