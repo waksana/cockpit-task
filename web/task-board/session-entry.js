@@ -1,5 +1,5 @@
 export const summaryIcon = status => ({
-  todo: 'sessionTodo', in_progress: 'progress', done: 'done', cancelled: 'sessionCancelled',
+  todo: 'todo', in_progress: 'progress', done: 'done', cancelled: 'cancelled',
 }[status] ?? 'unknown');
 
 export function summaryNotice(state) {
@@ -7,6 +7,14 @@ export function summaryNotice(state) {
   if (state.phase === 'error') return 'Unable to read Task';
   if (state.phase === 'loading' || state.refreshing) return state.data ? 'Task updating' : 'Loading Task';
   if (state.data?.selection === 'unknown') return 'Task assignment order unknown';
+  return null;
+}
+
+export function summaryBadgeNotice(state) {
+  if (state.phase === 'offline') return state.data?.task ? 'Not synced' : 'Task offline';
+  if (state.phase === 'error') return state.data?.task ? 'Read failed' : 'Task read failed';
+  if (state.phase === 'loading' || state.refreshing) return state.data?.task ? 'Updating' : 'Task loading';
+  if (state.data?.selection === 'unknown') return 'Task unconfirmed';
   return null;
 }
 
@@ -33,7 +41,8 @@ export function createTaskMenu(summaries, signal) {
       const notice = summaryNotice(state);
       if (notice) return { label: state.phase === 'error' ? 'Retry reading Task' : notice,
         disabled: state.phase !== 'error' };
-      return { label: state.data?.selection === 'recent' ? 'Recent Task' : 'Current Task',
+      const prefix = state.data?.selection === 'recent' ? 'Recent Task' : 'Current Task';
+      return { label: state.data?.task ? `${prefix}: ${state.data.task.title}` : prefix,
         visible: Boolean(state.data?.task) };
     },
     onSelect(target, { signal: actionSignal }) {

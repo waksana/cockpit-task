@@ -324,7 +324,7 @@ test('compact cards separate historical notification context from right-aligned 
     assert.equal(field(render('child_blocked'), 'tb-card-event').children[1].children[0], 'Subtask blocked');
   }
   for (const [status, ready, text, icon] of [
-    ['todo', false, 'Blocked', 'blocked'], ['in_progress', true, 'In progress', 'progress'],
+    ['todo', false, 'To do · Blocked', 'todo'], ['in_progress', true, 'In progress', 'progress'],
     ['done', false, 'Done', 'done'], ['cancelled', false, 'Cancelled', 'cancelled'],
   ]) {
     snapshot = { phase: 'ready', data: { ...task, status, ready } };
@@ -336,7 +336,11 @@ test('compact cards separate historical notification context from right-aligned 
     assert.equal(taskStateIcon({ data: { ...task, status } }), icon);
     assert.ok(ICONS[icon]);
   }
-  assert.equal(taskStateIcon({ data: { ...task, status: 'in_progress', ready: false } }), 'blocked');
+  assert.equal(taskStateIcon({ data: { ...task, status: 'in_progress', ready: false } }), 'progress');
+  for (const [status, icon] of [['todo', 'todo'], ['in_progress', 'progress']]) {
+    assert.equal(taskStateIcon({ data: { ...task, status, ready: false,
+      cancellation_request: { reason: 'Please stop' } } }), icon, 'cancellation intention is not terminal');
+  }
   for (const [phase, icon] of [['loading', 'refresh'], ['offline', 'offline'], ['error', 'error'], ['missing', 'unknown']]) {
     assert.equal(taskStateIcon({ phase, data: null }), icon);
   }
@@ -1002,7 +1006,7 @@ test('a mounted historical block notice survives refresh, completion, failure an
     f.requests[0].resolve(response({ ...result, ready: false, blocked_by: [{ condition: 'Synthetic prerequisite' }] }));
     await settle();
     let tree = render();
-    assert.equal(textContent(field(tree, 'tb-card-status')).trim(), 'Blocked');
+    assert.equal(textContent(field(tree, 'tb-card-status')).trim(), 'To do · Blocked');
     field(tree, 'ck-icon-button tb-refresh').props.onClick();
     tree = render();
     assert.equal(field(tree, 'ck-icon-button tb-refresh').props['aria-busy'], true);

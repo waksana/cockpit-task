@@ -135,22 +135,24 @@
   .tb-sections .ck-button { font-size: var(--ck-text-meta); padding-inline: 6px; }
 }
 .tb-session-summary {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 5px;
+  flex: none;
   min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
   font-size: var(--ck-text-meta);
   line-height: var(--ck-leading-ui);
   color: var(--ck-color-muted);
 }
 .tb-session-state { display: inline-flex; flex: none; }
 .tb-session-position { flex: none; white-space: nowrap; }
-.tb-session-title {
+.tb-session-notice {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--ck-color-text);
 }
 .tb-session-summary[data-status="in_progress"] .tb-session-state { color: var(--ck-color-accent); }
 .tb-session-summary[data-status="done"] .tb-session-state { color: var(--ck-color-success); }
