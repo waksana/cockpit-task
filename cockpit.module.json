@@ -61,6 +61,24 @@
           ]
         }
       }
+    },
+    {
+      "id": "advisor",
+      "name": "Task Advisor",
+      "description": "Read Task responsibility metadata and use general guidance to locate the right session or choose Node capability, without taking over work.",
+      "instructions": "roles/task-advisor.md",
+      "skillDirectories": [
+        "skills/cockpit-task-advisor"
+      ],
+      "mcpServers": {
+        "cockpit-task": {
+          "type": "http",
+          "path": "/mcp",
+          "tools": [
+            "task_read"
+          ]
+        }
+      }
     }
   ]
 }

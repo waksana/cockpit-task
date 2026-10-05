@@ -7,7 +7,9 @@ Task 保存本项工作特有的约定。行为见 [Skills](task-tools-skills.md
 
 ## 1. 身份、关系与共用输入
 
-唯一 `node` 角色暴露全部 Task 工具，但工具可见不等于操作权限。
+The `node` role exposes all Task tools; `advisor` contributes only `task_read`.
+Tool visibility is not operation authority, and composing roles unions capabilities
+rather than restricting tools contributed elsewhere.
 MCP 必须有宿主 `_meta["cockpit/invocation"].sessionId`，否则连读取也
 `INVOCATION_REQUIRED`；不接受参数 actor/invocation。helper 归因到 containing
 session。HTTP 固定内部 actor=user，不是可冒充的 session。

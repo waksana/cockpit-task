@@ -60,9 +60,11 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
   const nativeOrchestratorWorkflows = new Map();
   const nativeOrchestratorCalls = [];
   const nativePreparations = new Map();
+  let nativeAdvisorRead;
   const expectedDefinitions = new Map();
   const isolatedSessionIds = new Set();
   const reports = [];
+  const moduleEvents = [];
   const moduleRequests = [];
   let runtimeReady = false;
   let expectedStartupNotification;
@@ -141,6 +143,19 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
         const orchestratorNotice = latestUser && /\[Subscribed Task status changed\]\(task:([0-9a-f-]{36})\?event=status_changed\)/u.exec(contentText(latestUser.content));
         const orchestratorPreparation = latestUser && /Synthetic Orchestrator preparation for assignee:([0-9a-f-]{36})\./u.exec(contentText(latestUser.content));
         let toolCall;
+        if (latestUser && contentText(latestUser.content).includes('Synthetic advisor read-only discovery.')) {
+          const reply = message.messages.findLast(item =>
+            item.role === 'tool' && item.tool_call_id === 'synthetic-advisor-read');
+          if (reply) {
+            nativeAdvisorRead = JSON.parse(contentText(reply.content));
+          } else {
+            const tool = message.tools.find(tool => tool.type === 'function' && tool.function.name.endsWith('task_read'));
+            assert.ok(tool);
+            toolCall = { id: 'synthetic-advisor-read', type: 'function', function: {
+              name: tool.function.name, arguments: JSON.stringify({ view: 'list', status: 'all' }),
+            } };
+          }
+        }
         if (taskReference) {
           const taskId = taskReference[2];
           const event = taskReference[3];
@@ -358,6 +373,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       moduleHost = new ModuleHost({
         hostRoot: dirs.host, observer: engine, host: bridge,
         onInvalidate: () => { invalidations++; },
+        onEvent: (id, payload) => moduleEvents.push({ id, payload }),
         report: (id, error) => reports.push({ id, error }),
       });
       await moduleHost.register(app);
@@ -425,7 +441,8 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     const roles = new ModuleRoles(dirs.host, origin, () =>
       moduleHost.bootstrap().active.some(module => module.id === 'cockpit-task') ? [installed] : []);
     const node = { moduleId: 'cockpit-task', roleId: 'node' };
-    assert.deepEqual(roles.list().map(role => role.roleId), ['node']);
+    const advisor = { moduleId: 'cockpit-task', roleId: 'advisor' };
+    assert.deepEqual(roles.list().map(role => role.roleId).sort(), ['advisor', 'node']);
     engine.setRoleProvider(roles);
     unsubscribe = engine.onNativeEvent(({ sessionId, event }) => {
       if (event.type === 'user.message') nativeMessages.push({ sessionId, content: event.data.content });
@@ -437,8 +454,10 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     moduleHost.ready();
     const orchestratorId = await engine.newSession(dirs.work, [node]);
     isolatedSessionIds.add(orchestratorId);
-    const unionId = await engine.newSession(dirs.work, [node]);
+    const unionId = await engine.newSession(dirs.work, [node, advisor]);
     isolatedSessionIds.add(unionId);
+    const advisorId = await engine.newSession(dirs.work, [advisor]);
+    isolatedSessionIds.add(advisorId);
     assert.equal((await engine.roleReadiness(orchestratorId, [node])).ready, true);
     assert.equal((await engine.roleReadiness(unionId, [node])).ready, true);
     const orchestratorMeta = await engine.getMeta(orchestratorId);
@@ -450,7 +469,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     assert.equal(requests.length, 0, 'Role creation must not send a startup prompt');
 
     const verifyAssembly = async (sessionId, selected, expectedTools, expectedSkills) => {
-      const skillNames = [...expectedSkills, 'github-coding'].sort();
+      const skillNames = [...expectedSkills, ...(selected.some(role => role.roleId === 'node') ? ['github-coding'] : [])].sort();
       const assembly = await roles.assemble(sessionId, selected);
       assert.deepEqual(Object.keys(assembly.config.mcpServers), ['cockpit-task']);
       const server = assembly.config.mcpServers['cockpit-task'];
@@ -467,9 +486,10 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       const nativeSkills = await engine.getPanel(sessionId, 'skills');
       const taskSkills = nativeSkills.filter(skill => skill.label.startsWith('cockpit-task-') || skill.label === 'github-coding');
       assert.deepEqual(taskSkills.map(skill => skill.label).sort(), skillNames,
-        'The node role discovers the tree Skill and exactly one shared work Skill');
+        'Selected roles discover exactly their declared Skills');
       for (const skill of taskSkills) assert.equal(skill.enabled, true);
-      assert.ok(assembly.config.skillDirectories.includes(join(installed.root, 'skills/github-coding')));
+      assert.equal(assembly.config.skillDirectories.includes(join(installed.root, 'skills/github-coding')),
+        selected.some(role => role.roleId === 'node'));
       assert.equal(nativeSkills.some(skill => ['task-orchestrator', 'task-assignee', 'cockpit-task-orchestrator', 'cockpit-task-assignee', 'work-commander', 'work-commander-orchestrator', 'cockpit-task-commander'].includes(skill.label)), false);
       const nativeMcp = await engine.getPanel(sessionId, 'mcpServers');
       assert.equal(nativeMcp.filter(server => server.label === 'cockpit-task').length, 1,
@@ -479,14 +499,20 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
       return assembly;
     };
     await verifyAssembly(orchestratorId, [node], allTools, ['cockpit-task-tree']);
-    await verifyAssembly(unionId, [node], allTools, ['cockpit-task-tree']);
+    await verifyAssembly(unionId, [node, advisor], allTools, ['cockpit-task-advisor', 'cockpit-task-tree']);
+    await verifyAssembly(advisorId, [advisor], ['task_read'], ['cockpit-task-advisor']);
+    assert.equal((await engine.roleReadiness(advisorId, [advisor])).ready, true);
+    const advisorRead = await tool('task_read', { actor: advisorId, view: 'list' });
+    assert.deepEqual(advisorRead.result.items, []);
     const verifyNativePrompts = async (sessionId, captured) => {
       const capturedJson = JSON.stringify(captured);
       assert.ok(capturedJson.includes(`Native session ID: ${sessionId}`));
-      const codingSource = await readFile(join(installed.root, 'skills/github-coding/github-coding/SKILL.md'), 'utf8');
-      const codingDescription = JSON.parse(/^description: (".*")$/m.exec(codingSource)[1]);
-      assert.ok(capturedJson.includes(JSON.stringify(codingDescription).slice(1, -1)),
-        'The native provider must see the shared work Skill metadata, not only a role hint');
+      const selectedRoles = await roles.read(sessionId);
+      const skillName = selectedRoles.some(role => role.roleId === 'node') ? 'github-coding' : 'cockpit-task-advisor';
+      const skillSource = await readFile(join(installed.root, `skills/${skillName}/${skillName}/SKILL.md`), 'utf8');
+      const description = JSON.parse(/^description: (".*")$/m.exec(skillSource)[1]);
+      assert.ok(capturedJson.includes(JSON.stringify(description).slice(1, -1)),
+        'The native provider must see declared Skill metadata, not only a role hint');
       for (const role of await roles.read(sessionId)) {
         assert.ok(capturedJson.includes(`Module cockpit-task / role ${role.roleId}`));
         const source = await readFile(join(installed.root, `roles/task-${role.roleId}.md`), 'utf8');
@@ -511,6 +537,11 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     };
     await promptAndInspect(orchestratorId, 'Synthetic Orchestrator capability check; acknowledge without tools.', allTools, []);
     await promptAndInspect(unionId, 'Synthetic node capability check; acknowledge without tools.', allTools, []);
+    await promptAndInspect(advisorId, 'Synthetic advisor read-only discovery.',
+      ['task_read'], allTools.filter(name => name !== 'task_read'));
+    assert.ok(nativeAdvisorRead, 'The synthetic native advisor must actually complete task_read');
+    assert.equal(nativeAdvisorRead.error, null);
+    assert.deepEqual(nativeAdvisorRead.result.items, []);
 
     stage = 'preparing a reused idle Assignee through an actual native Orchestrator tool call';
     await engine.toggleSessionSkill(unionId, 'github-coding', false);
@@ -909,6 +940,7 @@ test('packaged Task integrates with real isolated host roles, native SDK and HTT
     });
     assert.equal(persistedActivity.json().result.items[0].text, latest.activity.text);
     assert.ok(reports.every(({ error }) => error.code === 'MODULE_VERSION_MISMATCH'), reports.map(({ error }) => String(error)).join('\n'));
+    assert.ok(moduleEvents.length > 0, 'The isolated host must accept Task change publications');
     assert.deepEqual(providerErrors, []);
     t.diagnostic('Verified packaged Task, native node role/Skill assembly, MCP registration, Orchestrator-responsibility current-evidence reads on status notices without ACK or resubscription, Assignee read/ACK/report, service-ready recovery without inbound requests, and no accepted/unknown resend across a second cold startup. Synthetic provider proves wiring, not autonomous model judgment.');
   } catch (error) {

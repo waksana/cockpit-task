@@ -73,8 +73,9 @@ Stopped modules unsubscribe and reject late results. Details remain lazy.
 
 ## 2. 角色是能力装配单元
 
-模块声明唯一的 `node` 角色及其名称、说明、System Prompt、Skill 发现目录、
-HTTP MCP 配置和工具选择。Web 与 MCP 创建共用宿主角色选择流程：
+The module declares `node` and optional read-only `advisor` roles, with their names,
+descriptions, instructions, Skill roots and HTTP MCP tool selections. Web and MCP
+creation use the same host role-composition flow:
 
 ```text
 选择 {moduleId, roleId}
@@ -100,6 +101,13 @@ HTTP MCP 配置和工具选择。Web 与 MCP 创建共用宿主角色选择流�
 | 选择 | Skill | Task MCP 工具（省略 `task_` 前缀） |
 | --- | --- | --- |
 | node（Node） | `cockpit-task-tree`、`github-coding` | 全部 Task 工具，包括 claim/start/convert/attach/resolve_condition/cancel_finalize；完整清单以 tool-names.js 为准 |
+| advisor (Task Advisor) | `cockpit-task-advisor` | `read` only; no writes, session creation or messaging |
+
+The advisor guide is Task-owned and usable by people or any composed agent. It
+uses responsibility metadata to assist session discovery, not replace native Chat.
+Composition does not add a Task dependency to another module. Selecting both roles
+unions their tools; advisor is not a restriction on Node. See
+[roles and records](task-board.md#roles-and-records) for saved versus applied roles.
 
 原 `orchestrator`、`assignee` 角色已删除且无别名；宿主冷启动到 0.1.13 前，操作者须备份并迁移
 `$COCKPIT_HOME/session-roles/<sessionId>.json`，把 `cockpit-task/owner` 和

@@ -40,6 +40,8 @@ test('prompt quotas are fixed approved maxima and exclude github-coding', () => 
     ['roles/task-node.md', 2300, false],
     ['skills/cockpit-task-tree/cockpit-task-tree/SKILL.md', 9500, true],
     ['skills/cockpit-task-tree/cockpit-task-tree/references/automation.md', 3400, false],
+    ['roles/task-advisor.md', 900, false],
+    ['skills/cockpit-task-advisor/cockpit-task-advisor/SKILL.md', 8500, true],
   ]);
   assert.equal(MCP_DESCRIPTION_QUOTA, 1399, 'MCP descriptions must remain strictly below 1400');
   assert.ok(Object.isFrozen(MARKDOWN_QUOTAS));

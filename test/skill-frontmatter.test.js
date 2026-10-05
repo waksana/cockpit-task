@@ -22,6 +22,7 @@ function skillMetadata(source) {
 const root = fileURLToPath(new URL('../', import.meta.url));
 const treeDirectory = 'skills/cockpit-task-tree/cockpit-task-tree';
 const codingDirectory = 'skills/github-coding/github-coding';
+const advisorDirectory = 'skills/cockpit-task-advisor/cockpit-task-advisor';
 const treeFiles = ['SKILL.md', 'references/automation.md'].sort();
 const read = (...path) => readFileSync(join(root, ...path), 'utf8');
 const prose = source => markdownBody(source, true).replace(/\s+/g, ' ');
@@ -59,9 +60,10 @@ test('Skills have unique YAML-safe metadata and independent runtime closures', (
     assert.equal(metadata.name, basename(join(path, '..')));
     return metadata.name;
   });
-  assert.deepEqual(names.sort(), ['cockpit-task-tree', 'github-coding']);
+  assert.deepEqual(names.sort(), ['cockpit-task-advisor', 'cockpit-task-tree', 'github-coding']);
   assertSkillClosure(join(root, treeDirectory), treeFiles);
   assertSkillClosure(join(root, codingDirectory), ['SKILL.md']);
+  assertSkillClosure(join(root, advisorDirectory), ['SKILL.md']);
 });
 
 test('module entrypoints retain the Node role and both Skill discovery roots', () => {
@@ -78,8 +80,8 @@ test('module entrypoints retain the Node role and both Skill discovery roots', (
   assert.deepEqual(Object.keys(pkg.scripts).sort(), ['package:module', 'quotas', 'test']);
   assert.deepEqual(readdirSync(join(root, 'src')), ['task-board']);
   assert.deepEqual(readdirSync(join(root, 'web')), ['task-board']);
-  assert.deepEqual(readdirSync(join(root, 'roles')), ['task-node.md']);
-  assert.deepEqual(manifest.roles.map(role => role.id), ['node']);
+  assert.deepEqual(readdirSync(join(root, 'roles')).sort(), ['task-advisor.md', 'task-node.md']);
+  assert.deepEqual(manifest.roles.map(role => role.id), ['node', 'advisor']);
   assert.deepEqual(manifest.roles[0].skillDirectories.sort(), ['skills/cockpit-task-tree', 'skills/github-coding']);
   assert.deepEqual(readdirSync(join(root, 'scripts')).sort(), [
     'check-release.js', 'deployment-manifest.js', 'migrate-task-v10.js', 'migrate-task-v11.js',
@@ -92,7 +94,7 @@ test('module entrypoints retain the Node role and both Skill discovery roots', (
 
 test('fixed prompt quotas stay unchanged; coding guidance does not grow past its previous body', () => {
   const usages = readMarkdownQuotas(root);
-  assert.deepEqual(usages.map(({ limit }) => limit), [2300, 9500, 3400]);
+  assert.deepEqual(usages.map(({ limit }) => limit), [2300, 9500, 3400, 900, 8500]);
   assert.ok(usages.every(usage => !usage.exceeded), formatQuotaReport(usages));
   assert.ok(markdownBody(read(codingDirectory, 'SKILL.md'), true).length <= 10183);
   const role = prose(read('roles/task-node.md'));
@@ -101,6 +103,33 @@ test('fixed prompt quotas stay unchanged; coding guidance does not grow past its
     /creation history grants no control/i, /ACK its exact revision/, /task_start/,
     /all direct children must be terminal/, /Cancellation records intent first/,
     /Load `cockpit-task-tree` when first needed/]) assert.match(role, pattern);
+});
+
+test('advisor guidance is general, read-only and distinguishes context from business reasoning', () => {
+  const role = prose(read('roles/task-advisor.md'));
+  assert.match(role, /Load `cockpit-task-advisor` when first needed/);
+  assert.match(role, /only `task_read`/);
+  assert.match(role, /not Node instructions/);
+  const skill = prose(read(advisorDirectory, 'SKILL.md'));
+  for (const pattern of [
+    /Native session\/Chat is the only source of business conversation/,
+    /metadata.*assists discovery/, /cannot replace the actual session context/,
+    /not permission to analyze the business problem/,
+    /clarify only which topic/, /`status: "all"`/, /`parent_assignee`/,
+    /`depth` is structural/, /`created_by` is historical/,
+    /own assignee or its current direct parent's assignee/,
+    /No single running\/idle flag/, /unknown activity is not idle/,
+    /Waiting silently can be appropriate/, /service-managed automation have no agent assignee/,
+    /at most one unfinished Task/, /`task_create`.*`task_claim`/,
+    /A child instead belongs to its active orchestrating parent/,
+    /These are the responsible Node's actions/,
+    /per-Task modes of the same Node/, /reopened Task preserves its mode/,
+    /saved selection is not applied capability/,
+    /Formal nodes coordinate through Task facts and service notices/,
+    /rather than calling coordination a user relay/,
+    /Do not poll workers/, /not an intrinsic dependency in another module/,
+  ]) assert.match(skill, pattern);
+  assert.doesNotMatch(skill, /Assistant|assistant\/coordinator|task_session_create/);
 });
 
 test('Task Skill is an operational responsibility model with ordered recovery boundaries', () => {
@@ -325,7 +354,8 @@ test('module packaging carries runtime Skills and all explicit migration CLIs', 
   const version = process.env.ROLLING_SEQUENCE ? `0.0.0-rolling.${process.env.ROLLING_SEQUENCE}` : '0.0.0-dev';
   const archive = join(root, 'dist', `cockpit-task-${version}.tgz`);
   const entries = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n');
-  const expectedSkills = [...treeFiles.map(file => `./${treeDirectory}/${file}`), `./${codingDirectory}/SKILL.md`].sort();
+  const expectedSkills = [...treeFiles.map(file => `./${treeDirectory}/${file}`),
+    `./${codingDirectory}/SKILL.md`, `./${advisorDirectory}/SKILL.md`].sort();
   assert.deepEqual(entries.filter(entry => entry.startsWith('./skills/') && !entry.endsWith('/')).sort(), expectedSkills);
   assert.ok(entries.includes('./module-build.json'));
   assert.ok(!entries.some(entry => /^\.\/test\//.test(entry)));
@@ -350,8 +380,13 @@ test('module packaging carries runtime Skills and all explicit migration CLIs', 
     execFileSync('tar', ['-xOf', archive, `./src/task-board/${file}`], { encoding: 'utf8' }),
     read('src/task-board', file));
   const packagedManifest = JSON.parse(execFileSync('tar', ['-xOf', archive, './cockpit.module.json'], { encoding: 'utf8' }));
-  assert.deepEqual(packagedManifest.roles.map(role => role.id), ['node']);
+  assert.deepEqual(packagedManifest.roles.map(role => role.id), ['node', 'advisor']);
   assert.deepEqual(packagedManifest.roles[0].skillDirectories.sort(), ['skills/cockpit-task-tree', 'skills/github-coding']);
+  assert.deepEqual(packagedManifest.roles[1], JSON.parse(read('cockpit.module.json')).roles[1]);
+  assert.deepEqual(entries.filter(entry => entry.startsWith('./roles/') && !entry.endsWith('/')).sort(),
+    ['./roles/task-advisor.md', './roles/task-node.md']);
+  for (const role of packagedManifest.roles) assert.equal(
+    execFileSync('tar', ['-xOf', archive, `./${role.instructions}`], { encoding: 'utf8' }), read(role.instructions));
   const packagedReadme = execFileSync('tar', ['-xOf', archive, './README.md'], { encoding: 'utf8' });
   for (const link of localLinks(packagedReadme)) assert.ok(entries.includes(`./${link.split(/[?#]/)[0]}`),
     `Packaged README link must resolve: ${link}`);

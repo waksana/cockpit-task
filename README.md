@@ -7,7 +7,12 @@ Internal helpers are read-only: they may call `task_read` and `task_script_read`
 but return work results to the main agent for all Task maintenance, including activity.
 Independent child-Task main agents retain their own authority.
 上级负责人从当前 parent 的绑定派生，`created_by` 只是历史。root 只是无 parent 的普通
-Task，没有树外 owner、特殊角色或隐藏控制权。唯一模块角色为 `node`。
+Task，没有树外 owner、特殊角色或隐藏控制权。
+
+The `node` role carries responsibility. The optional `advisor` role contributes only
+`task_read` and the general [Task advisor guide](skills/cockpit-task-advisor/cockpit-task-advisor/SKILL.md)
+for people and agents choosing whom to consult or when to select Node capability.
+It does not take over work or introduce a dependency in another module.
 
 Task 记录本项工作特有的目标、决定、边界、进展和证据，正式节点之间只通过 Task 与
 服务通知协作，不私聊或通过 helper 传话。任意节点都直接问用户所需决定，避免重复问题，

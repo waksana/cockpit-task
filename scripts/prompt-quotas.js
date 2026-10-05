@@ -6,6 +6,8 @@ export const MARKDOWN_QUOTAS = Object.freeze([
   Object.freeze({ path: 'roles/task-node.md', limit: 2300, frontmatter: false }),
   Object.freeze({ path: 'skills/cockpit-task-tree/cockpit-task-tree/SKILL.md', limit: 9500, frontmatter: true }),
   Object.freeze({ path: 'skills/cockpit-task-tree/cockpit-task-tree/references/automation.md', limit: 3400, frontmatter: false }),
+  Object.freeze({ path: 'roles/task-advisor.md', limit: 900, frontmatter: false }),
+  Object.freeze({ path: 'skills/cockpit-task-advisor/cockpit-task-advisor/SKILL.md', limit: 8500, frontmatter: true }),
 ]);
 export const MCP_DESCRIPTION_QUOTA = 1399;
 export const QUOTA_UNIT = 'UTF-16 code units';

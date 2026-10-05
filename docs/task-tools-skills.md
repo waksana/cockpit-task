@@ -1,10 +1,19 @@
 # Task MCP 与角色 Skills
 
-唯一角色 `node` 注入 [Node](../roles/task-node.md)、Task 工具及两个原生 Skill
-发现目录：[cockpit-task-tree](../skills/cockpit-task-tree/cockpit-task-tree/SKILL.md)
-和 [github-coding](../skills/github-coding/github-coding/SKILL.md)。
+The `node` role contributes [Node](../roles/task-node.md), Task tools and two Skill
+discovery roots: [cockpit-task-tree](../skills/cockpit-task-tree/cockpit-task-tree/SKILL.md)
+and [github-coding](../skills/github-coding/github-coding/SKILL.md).
 Node 是短责任模型和加载入口；Task Skill 指导判断；工具 schema 定义字段、权限、
 限额和恢复。工作方法不另造角色、Task 类型或授权。
+
+The optional [advisor](../roles/task-advisor.md) role contributes only `task_read`
+and [cockpit-task-advisor](../skills/cockpit-task-advisor/cockpit-task-advisor/SKILL.md).
+That self-contained guide is for people and arbitrary agents choosing a conversation
+recipient or deciding whether continuing work needs Node capability. It does not inject
+the Node execution protocol or coding Skill into a read-only reader. See
+[role composition](task-board.md#roles-and-records) for application and readiness.
+The operational sections below apply when fulfilling a Node responsibility, not merely
+reading as an advisor: readers do not ACK, start, report or acquire write authority.
 
 ## 1. 关系定位与初始化
 
