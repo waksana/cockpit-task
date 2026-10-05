@@ -61,11 +61,28 @@ there is no per-row polling, native session inspection or eager Task detail read
 
 ## Roles and records
 
-The single `node` role provides the short responsibility model and Task tools, plus
+The `node` role provides the short responsibility model and Task tools, plus
 independent `cockpit-task-tree` and `github-coding` Skill discovery roots. Load bodies
 when needed; enabled is not read, and children do not inherit the parent's loaded context.
 Legacy owner/executor roles have no aliases. Role migration is an operator concern,
 not a tool permission to edit native settings or an automatic Task assignment.
+
+The optional `advisor` role contributes only `task_read` and the independent
+[cockpit-task-advisor guide](../skills/cockpit-task-advisor/cockpit-task-advisor/SKILL.md).
+People and agents can use it to locate a responsible session, choose Node capability
+for continuing work and understand Task modes without becoming an assignee.
+Task metadata assists discovery; actual native session/Chat remains the business
+conversation source. There is no new module or built-in dependency in a conversation
+entry point.
+
+Select `{moduleId: "cockpit-task", roleId: "advisor"}` through ordinary host role
+composition, alongside existing roles. Its read-only contribution is not a sandbox:
+other selected roles retain their tools, and combining `node` and `advisor` unions
+their same-endpoint tool sets. No roles are automatically added to existing sessions.
+Saved role additions need an explicitly authorized reload/cold load; they are not
+applied or ready merely because saving succeeded. Check actual tools and Skills
+before use, never force a busy session to reload. The advisor contributes no session
+creation or messaging tools; those come from separately available capabilities.
 
 Task is a continuing work-specific agreement. The Agent's own assignee is its only
 binding; parent_assignee derives from the current parent. Creation provenance gives
