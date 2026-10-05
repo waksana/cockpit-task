@@ -9,8 +9,12 @@ Node 是短责任模型和加载入口；Task Skill 指导判断；工具 schema
 The optional [advisor](../roles/task-advisor.md) role contributes only `task_read`
 and [cockpit-task-advisor](../skills/cockpit-task-advisor/cockpit-task-advisor/SKILL.md).
 That self-contained guide is for people and arbitrary agents choosing a conversation
-recipient or deciding whether continuing work needs Node capability. It does not inject
-the Node execution protocol or coding Skill into a read-only reader. See
+recipient or deciding whether continuing work needs Node capability. Its flow identifies
+current intent, uses bounded Task evidence to distinguish integration from partial
+execution, confirms native Chat and current suitability, then continues the conversation.
+Scope corrections reconsider relevant candidates; a first assignee match is not enough
+to establish overall responsibility. Existing sufficient evidence needs no ritual reread.
+The guide does not inject the Node execution protocol or coding Skill into a reader. See
 [role composition](task-board.md#roles-and-records) for application and readiness.
 The operational sections below apply when fulfilling a Node responsibility, not merely
 reading as an advisor: readers do not ACK, start, report or acquire write authority.

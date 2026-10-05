@@ -71,6 +71,10 @@ The optional `advisor` role contributes only `task_read` and the independent
 [cockpit-task-advisor guide](../skills/cockpit-task-advisor/cockpit-task-advisor/SKILL.md).
 People and agents can use it to locate a responsible session, choose Node capability
 for continuing work and understand Task modes without becoming an assignee.
+Use it during recipient selection or reconsideration: cross-check spanning or unclear
+scope and competing candidates with bounded full-definition reads and native Chat.
+Reuse sufficient current evidence. Recent subtask summaries and quiet periods do not
+shrink a long-lived agreement; a partial executor is not automatically its integrator.
 Task metadata assists discovery; actual native session/Chat remains the business
 conversation source. There is no new module or built-in dependency in a conversation
 entry point.

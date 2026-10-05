@@ -1,130 +1,136 @@
 ---
 name: cockpit-task-advisor
-description: "General Task guidance for people and agents: use read-only responsibility metadata to find the right session, decide when new work needs Node capability, and understand execute/orchestrate without taking over or expanding authorization."
+description: "General read-only Task guidance for people and agents choosing or reconsidering a recipient: cross-check actual responsibility, scope and continuity, and choose Node capability without taking over or expanding authorization."
 ---
 
 # Task advisor
 
 ## Scope and evidence
 
-Use this guide when choosing whom to consult or whether work needs Task tracking.
-It is not an instruction to become an assignee. The advisor role contributes only
-`task_read`; session discovery, Chat reads, role selection and message delivery need
-separately available, authorized host capabilities. Do not invent missing tools.
+Use this guide to choose/reconsider recipients or Task tracking, not to justify a
+previous choice. The advisor supplies only `task_read`, not an assignee role.
+Session discovery, Chat reads, role selection and messaging require separately
+available, authorized host capabilities. Do not invent missing tools.
 
-Native session/Chat is the only source of business conversation. Task data, like
-other metadata, assists discovery; it cannot replace the actual session context.
-Task is authoritative for its recorded bindings and lifecycle, not proof of business
-success. Read the relevant conversation before continuing a topic or presenting an
-answer. An absent Task is not an absent topic. A failed/unavailable read is unknown,
-not proof that no suitable session exists.
+Native session/Chat is the only source of business conversation. Task metadata
+assists discovery; it cannot replace the actual session context. Task is authoritative
+for recorded bindings and lifecycle, not business success. Read relevant Chat before
+continuing a topic or presenting an answer. An absent Task is not an absent topic;
+a failed/unavailable read is unknown, not evidence that no suitable session exists.
 
-Understand enough context to identify the topic, resolve references, choose a recipient
-and preserve the user's meaning. This is not permission to analyze the business problem
-or invent a solution. A conversation entry point that delegates business thinking keeps
-that boundary: the responsible session supplies analysis, proposals and business
-clarifications. If topic identity is ambiguous, clarify only which topic the user means.
+Understand the current goal, references and intent to locate responsibility. This is
+not permission to analyze the business problem or invent a solution. An entry point
+that delegates business thinking clarifies only topic, request scope or
+discussion-versus-execution intent; the responsible session supplies business
+analysis, proposals and decisions.
 
-## Find the topic, then its responsible session
+## Discover responsibility before choosing
 
-Start with recent conversation and ordinary session discovery. Use `task_read` as an
-additional, bounded index, not an exhaustive replacement directory:
+Start with conversation and ordinary session discovery. Cross-check with `task_read`
+when a goal spans responsibilities, plausible candidates compete, recent snippets
+leave scope unclear, or the user corrects the overall scope. Reuse sufficient evidence
+already read and still current; do not reload stable guidance or query on every turn.
+This is a bounded additional index, not an exhaustive replacement directory:
 
 1. Use `view: "list"` with a title `query` or candidate `assignee`. Lists default to
    unfinished work; use `status: "all"` when investigating prior discussions/deliveries.
-   Follow cursors only as needed. Title matches are candidates, not routing decisions.
-2. For a candidate Task, use `view: "overview"` with `include` selecting complete
-   `definition`, `activity` or `outcome` groups (context is always returned). Defaults
-   may be excerpts. Use `execution` for the full current agreement when needed.
+   A match for one assignee proves neither overall fit nor absence of a better candidate.
+   Check clearly relevant alternatives, not every session; follow cursors only as needed.
+2. For candidate scope, use `view: "overview"` with `include: ["definition"]` for the
+   complete agreement, not its default excerpt. Add full `activity` or `outcome` only
+   as needed; context is always returned. Use `execution` for current execution detail.
 3. Check `assignee`, `parent_task_id`, `parent_assignee`, `work_mode`, current scope,
-   cancellation intent and prerequisites. Use bounded `ancestors` or a direct-child
-   list only when the relationship matters; do not recursively fetch the whole tree.
-4. Return to the candidate's actual session/Chat to confirm topic continuity and the
-   meaning of recent work. Retrieve more detail only where needed for this exchange.
+   cancellation intent and prerequisites. Use bounded `ancestors` or direct children
+   only for a relevant relationship; never recursively fetch the whole tree.
+4. Return to native Chat to confirm continuity and what recent work means. Stop when
+   evidence supports the needed responsibility and material candidate conflicts are
+   resolved, not at the first matching title or assignee.
 
-`depth` is structural (a root is depth 1), not expertise, authority over every topic,
-or a reason to always go to the highest ancestor. `created_by` is historical, not
-the current manager. `actor_role` describes the caller's relation, not a role to assume.
-Readiness, status, native activity and responsibility mode are separate facts.
+After a scope correction, reconsider relevant candidates rather than only checking
+the first recipient's unfinished work or extending its responsibility. A read does
+not authorize reassignment, cancellation or another send.
 
-## Prefer the assignee or direct parent
+A long-lived agreement may stay idle. Judge scope from its current full definition,
+binding and native Chat, not just the latest subtask.
+Quiet periods and narrow recent activity do not end or shrink that agreement.
+Past `orchestrate` work does not confer permanent responsibility for related topics.
+`depth` is structural, not expertise or authority; `created_by` is historical, not
+the current manager. `actor_role` describes a relation, not a role to assume.
 
-For one Task, normally keep the conversation with its own assignee or its current
-direct parent's assignee. Choose by the user's topic and actual responsibility:
+## Choose by responsibility, then current suitability
+
+For one Task, prefer its own assignee or its current direct parent's assignee by
+actual scope, not hierarchy:
 
 | Conversation need | Preferred recipient |
 | --- | --- |
-| Continue concrete work, reasoning or a decision already discussed there | The assignee with that context |
-| Coordinate scope, dependencies, priorities or integration across children | The direct parent responsible for that coordination |
-| Avoid interrupting a heavily engaged worker, and the parent can cover the topic | The direct parent, without pretending to have the worker's answer |
-| No parent, no binding, conflicting candidates or insufficient context | Inspect relevant sessions; clarify topic identity if still ambiguous |
+| Concrete work, reasoning or a decision | The assignee with that context |
+| Execution corrections, constraints, materials or answers | The executing assignee, even when busy; use its current native ask when applicable |
+| Cross-child scope, dependencies, priorities or integration | The parent whose agreement covers it, retaining child assignees |
+| Independent discussion during heavy work | A matching discussion session, or its direct parent only if that parent can cover the question |
+| Missing binding or conflicting scope | Inspect relevant sessions; clarify request ambiguity, not readable facts |
 
-"Busy" is a contextual judgment from recent work, workload, active continuations,
-queued messages, pending questions and the nature of the current responsibility.
-No single running/idle flag establishes it; unknown activity is not idle. Busy does
-not transfer ownership, authorize cancellation or justify automatically escalating.
-Do not broadcast to both people, recursively climb the tree, or force a new session
-just because the preferred recipient is working. Waiting silently can be appropriate.
-This is a preference, not a ban on consulting another session whose actual topic
-responsibility is clearer; preserve continuity rather than treating hierarchy as routing.
+An established integration assignee receives the overall goal and owns its business
+decomposition and formal child coordination. Do not bypass it with a parallel work
+split or promote a partial executor merely because it received the first question.
+Separately owned deliveries need not acquire a new parent just to share an outcome.
 
-Terminal Tasks retain historical assignees and context. They do not show that the
-session is idle, still available or eligible for new work. Check current relationships
-and unfinished work before proposing reuse. Unbound Tasks and service-managed automation
-have no agent assignee to message; do not guess an owner from their creator. For automation,
-inspect its current parent for coordination and its outcome separately from status.
+"Busy" is judged from recent work, workload, active continuations,
+queues and pending questions. No single running/idle flag establishes it; unknown
+activity is not idle. Readiness, status, activity and responsibility mode are separate.
+Busy does not transfer ownership or authorize cancellation. Do not automatically
+escalate, broadcast to worker and parent, climb the tree or create a session because
+someone is working. Waiting silently can be appropriate. A different session may
+have clearer responsibility; do not pretend a parent has the worker's answer.
+
+Terminal Tasks retain historical assignees, not native idle or eligibility.
+Check current relationships and unfinished work before reuse. Unbound Tasks and
+service-managed automation have no agent assignee to message; do not guess from their
+creator. For automation, inspect its parent for coordination and outcome for results.
 
 ## Choose Node capability for the work, not for every conversation
 
-Task suits an authorized, continuing result that needs an explicit agreement, recovery,
-progress/evidence or coordination. Complex work is a strong reason to select Node
-when creating its responsible session. Sustained research, design or discussion can
-also be a Task without authorizing implementation. A short question or casual topic
-does not automatically need a Task or a new session.
+Task suits authorized continuing work needing an agreement, recovery, evidence or
+coordination. Complex work favors Node for a new session; sustained research or
+discussion can qualify without authorizing implementation. Short questions need
+not create Tasks or sessions.
 
-Prefer a suitable existing session with the actual context. Continue unfinished work
-in its existing Task; use a new Task for an independent result, and reopen only authorized
-rework of the same completed delivery. Never reopen merely to reuse a familiar session.
-A session may carry at most one unfinished Task; do not hide a second goal in its first
-Task or redirect assigned work to bypass that constraint.
+Prefer suitable existing context. Continue unfinished work in its Task; use a new
+Task for an independent result, reopen only authorized rework of the same completed
+delivery, never merely to reuse a session. A session has at most one unfinished Task;
+do not hide a second goal in it or redirect assigned work to bypass that constraint.
 
-If a new responsible session is justified and creation is authorized, use the host's
-ordinary role composition with `{moduleId: "cockpit-task", roleId: "node"}` alongside
-other needed roles. The advisor role does not itself supply session-creation tools.
-Check actual role/tool/Skill readiness; saved selection is not applied capability,
-and enabled Skill is not a loaded body. Adding a role to an existing session only
-saves it until an authorized reload/cold load applies it; never interrupt active work.
+For a justified, authorized new session, compose `{moduleId: "cockpit-task", roleId: "node"}`
+with other needed roles through the host. Check actual role/tool/Skill readiness:
+saved selection is not applied capability; enabled Skill is not a loaded body.
+Role additions need authorized reload/cold load; never interrupt active work.
 
-The ready Node can establish its own authorized ordinary root: `task_create` creates
-unbound todo/undecided work, then `task_claim` binds it, full execution read and exact
-ACK precede `task_start`. Creation, binding and ACK alone do not start work. A child
-instead belongs to its active orchestrating parent and follows parent dispatch;
-do not ask a new Node to self-create an unrelated root as a substitute for that child.
-These are the responsible Node's actions under `cockpit-task-tree`, not instructions
-for an advisor to call write tools or create/claim on someone else's behalf.
+A ready Node may establish its authorized root: `task_create` unbound todo/undecided
+work, then `task_claim`, full execution read and exact ACK before `task_start`.
+Creation, binding and ACK do not start work. A child instead belongs to its active
+orchestrating parent and follows parent dispatch, not a substitute self-created root.
+These are the responsible Node's actions under `cockpit-task-tree`, not advisor writes
+or permission to create/claim for someone else.
 
-`execute` and `orchestrate` are per-Task modes of the same Node, not permanent executor
-and orchestrator session roles. Execute delivers one bounded result, with helpers if
-useful. Orchestrate owns coordination and integration of narrower independent continuing
-responsibilities; it is not a pass-through stage. Complexity or helper use alone does
-not require orchestration. A new Task chooses its own mode; an execute Task explicitly
-converts before splitting, and a reopened Task preserves its mode.
+`execute` and `orchestrate` are per-Task modes of the same Node, not permanent roles.
+Execute delivers a bounded result; orchestrate integrates narrower independent
+continuing responsibilities, not pass-through delegation. Both may use helpers;
+complexity alone does not require orchestration. Each new Task chooses its mode;
+an execute Task explicitly converts before splitting; a reopened Task preserves its mode.
 
 ## Keep user conversation distinct from formal coordination
 
-A separately authorized conversation entry point may relay the user's conversation
-using its existing messaging capabilities. Preserve intent, references, context and
-authorization so the recipient can continue naturally; do not turn it into a work order,
-add business assumptions, demand acknowledgements, or repeatedly narrate internal handoffs.
-Integrate the responsible session's reply naturally without inventing conclusions or
-representing accepted delivery, a Task label or pending work as a finished answer.
+A separately authorized entry point may relay the user's conversation with its
+messaging capabilities. Preserve wording, intent and authorization, adding only
+necessary missing context. Do not turn questions into work orders, add analysis
+requirements, demand ACKs or narrate internal handoffs. Integrate actual replies
+without invented conclusions; accepted delivery, labels and pending work are not results.
 
-This is not a channel for one formal Task node to direct another. Formal nodes coordinate
-through Task facts and service notices, never private messages or helpers carrying orders.
-When acting as a formal node, use that protocol rather than calling coordination a user
-relay. An advisor read creates no assignment, change of scope, ACK or execution authority.
+Formal nodes coordinate through Task facts and service notices, never private messages
+or helpers carrying orders. Use that protocol rather than calling coordination a user
+relay. An advisor read creates no assignment, scope change, ACK or execution authority.
 The responsible node asks business decisions directly and records authorized agreement
-changes; the entry point does not pre-solve or repeatedly re-ask those decisions.
+changes; the entry point neither pre-solves nor repeatedly re-asks those decisions.
 
 Do not poll workers, chase ACKs, duplicate dispatches or silently retry uncertain sends.
 Composition adds Task-owned guidance, not an intrinsic dependency in another module.

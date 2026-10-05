@@ -108,6 +108,8 @@ test('fixed prompt quotas stay unchanged; coding guidance does not grow past its
 test('advisor guidance is general, read-only and distinguishes context from business reasoning', () => {
   const role = prose(read('roles/task-advisor.md'));
   assert.match(role, /Load `cockpit-task-advisor` when first needed/);
+  assert.match(role, /while choosing or reconsidering responsibility/);
+  assert.match(role, /Cross-check uncertain scope or competing candidates with bounded reads, not on every turn/);
   assert.match(role, /only `task_read`/);
   assert.match(role, /not Node instructions/);
   const skill = prose(read(advisorDirectory, 'SKILL.md'));
@@ -115,7 +117,8 @@ test('advisor guidance is general, read-only and distinguishes context from busi
     /Native session\/Chat is the only source of business conversation/,
     /metadata.*assists discovery/, /cannot replace the actual session context/,
     /not permission to analyze the business problem/,
-    /clarify only which topic/, /`status: "all"`/, /`parent_assignee`/,
+    /clarifies only topic, request scope or discussion-versus-execution intent/,
+    /`status: "all"`/, /`parent_assignee`/,
     /`depth` is structural/, /`created_by` is historical/,
     /own assignee or its current direct parent's assignee/,
     /No single running\/idle flag/, /unknown activity is not idle/,
@@ -130,6 +133,34 @@ test('advisor guidance is general, read-only and distinguishes context from busi
     /Do not poll workers/, /not an intrinsic dependency in another module/,
   ]) assert.match(skill, pattern);
   assert.doesNotMatch(skill, /Assistant|assistant\/coordinator|task_session_create/);
+});
+
+test('advisor discovery distinguishes integration, partial work and current activity before handoff', () => {
+  const skill = prose(read(advisorDirectory, 'SKILL.md'));
+  for (const pattern of [
+    /Cross-check with `task_read` when a goal spans responsibilities, plausible candidates compete, recent snippets leave scope unclear, or the user corrects the overall scope/,
+    /Reuse sufficient evidence already read and still current/,
+    /do not reload stable guidance or query on every turn/,
+    /A match for one assignee proves neither overall fit nor absence of a better candidate/,
+    /Check clearly relevant alternatives, not every session/,
+    /include: \["definition"\]` for the complete agreement, not its default excerpt/,
+    /never recursively fetch the whole tree/,
+    /Return to native Chat to confirm continuity/,
+    /material candidate conflicts are resolved, not at the first matching title or assignee/,
+    /After a scope correction, reconsider relevant candidates rather than only checking the first recipient's unfinished work/,
+    /does not authorize reassignment, cancellation or another send/,
+    /A long-lived agreement may stay idle/,
+    /Quiet periods and narrow recent activity do not end or shrink that agreement/,
+    /Past `orchestrate` work does not confer permanent responsibility/,
+    /The executing assignee, even when busy; use its current native ask/,
+    /A matching discussion session, or its direct parent only if that parent can cover the question/,
+    /An established integration assignee receives the overall goal/,
+    /Do not bypass it with a parallel work split or promote a partial executor/,
+    /Separately owned deliveries need not acquire a new parent/,
+    /adding only necessary missing context/,
+    /Do not turn questions into work orders, add analysis requirements/,
+  ]) assert.match(skill, pattern);
+  assert.doesNotMatch(skill, /clarify only which topic the user means/);
 });
 
 test('Task Skill is an operational responsibility model with ordered recovery boundaries', () => {
