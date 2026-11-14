@@ -30,28 +30,28 @@ Start with conversation and ordinary session discovery. Cross-check with `task_r
 when a goal spans responsibilities, plausible candidates compete, recent snippets
 leave scope unclear, or the user corrects the overall scope. Reuse sufficient evidence
 already read and still current; do not reload stable guidance or query on every turn.
-This is a bounded additional index, not an exhaustive replacement directory:
 
 1. Use `view: "list"` with a title `query` or candidate `assignee`. Lists default to
    unfinished work; use `status: "all"` when investigating prior discussions/deliveries.
    A match for one assignee proves neither overall fit nor absence of a better candidate.
-   Check clearly relevant alternatives, not every session; follow cursors only as needed.
+   Check clearly relevant alternatives, not every session.
 2. For candidate scope, use `view: "overview"` with `include: ["definition"]` for the
-   complete agreement, not its default excerpt. Add full `activity` or `outcome` only
-   as needed; context is always returned. Use `execution` for current execution detail.
+   complete agreement, not its default excerpt. Add `activity`/`outcome` as needed.
 3. Check `assignee`, `parent_task_id`, `parent_assignee`, `work_mode`, current scope,
-   cancellation intent and prerequisites. Use bounded `ancestors` or direct children
-   only for a relevant relationship; never recursively fetch the whole tree.
-4. Return to native Chat to confirm continuity and what recent work means. Stop when
-   evidence supports the needed responsibility and material candidate conflicts are
-   resolved, not at the first matching title or assignee.
+   cancellation and prerequisites; read relevant `ancestors`/children only;
+   never recursively fetch the whole tree.
+4. Return to native Chat to confirm continuity. Choose when scope is supported and
+   material candidate conflicts are resolved, not at the first matching title or assignee.
+
+A historical title/truncated outcome is a candidate, not confirmed continuation.
+If it is the only link, read the full definition and relevant original Chat;
+even a full outcome cannot replace Chat. No complete-history read is required.
 
 After a scope correction, reconsider relevant candidates rather than only checking
 the first recipient's unfinished work or extending its responsibility. A read does
 not authorize reassignment, cancellation or another send.
 
-A long-lived agreement may stay idle. Judge scope from its current full definition,
-binding and native Chat, not just the latest subtask.
+A long-lived agreement may stay idle. Judge scope from full definition, binding and Chat.
 Quiet periods and narrow recent activity do not end or shrink that agreement.
 Past `orchestrate` work does not confer permanent responsibility for related topics.
 `depth` is structural, not expertise or authority; `created_by` is historical, not
@@ -75,13 +75,15 @@ decomposition and formal child coordination. Do not bypass it with a parallel wo
 split or promote a partial executor merely because it received the first question.
 Separately owned deliveries need not acquire a new parent just to share an outcome.
 
-"Busy" is judged from recent work, workload, active continuations,
-queues and pending questions. No single running/idle flag establishes it; unknown
-activity is not idle. Readiness, status, activity and responsibility mode are separate.
-Busy does not transfer ownership or authorize cancellation. Do not automatically
-escalate, broadcast to worker and parent, climb the tree or create a session because
-someone is working. Waiting silently can be appropriate. A different session may
-have clearer responsibility; do not pretend a parent has the worker's answer.
+"Busy" depends on actual work, continuations, queues and questions. No single running/idle flag
+establishes it; unknown activity is not idle. Readiness, status, activity and mode differ.
+Idle, empty queues or no direct subagents/shells do not negate ongoing coordination.
+Use the current agreement and Chat to interpret open children, pending evidence and
+integration between turns. Mode/status/child counts alone neither prove heavy work
+nor forbid reuse. Assess receiving suitability separately from historical continuity.
+Busy grants no transfer/cancellation authority. Do not automatically escalate,
+broadcast, climb the tree or create a session. Waiting silently can be appropriate;
+do not pretend a parent has the worker's answer.
 
 Terminal Tasks retain historical assignees, not native idle or eligibility.
 Check current relationships and unfinished work before reuse. Unbound Tasks and
